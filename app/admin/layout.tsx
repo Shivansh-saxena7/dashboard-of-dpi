@@ -1,0 +1,388 @@
+"use client";
+
+import Link from "next/link";
+import Image from "next/image";
+import { useEffect,useState } from "react";
+import { supabase } from "@/lib/supabase";
+import { Menu,X } from "lucide-react";
+import { useRouter } from "next/navigation";
+
+export default function AdminLayout({
+children,
+}:{
+children:React.ReactNode
+}){
+
+const [adminName,setAdminName]=useState("Admin");
+const [menuOpen,setMenuOpen]=useState(false);
+const router=useRouter();
+
+
+
+useEffect(()=>{
+loadAdmin();
+},[]);
+
+const loadAdmin=async()=>{
+
+const {data:{session}}
+=
+await supabase.auth.getSession();
+
+if(!session) return;
+
+const {data}
+=
+await supabase
+.from("employees")
+.select("name")
+.eq(
+"auth_user_id",
+session.user.id
+)
+.single();
+
+if(data){
+setAdminName(data.name);
+}
+
+};
+
+const menu=[
+
+{
+name:"Dashboard",
+href:"/admin",
+icon:"📊"
+},
+
+{
+name:"Employees",
+href:"/admin/employees",
+icon:"👥"
+},
+
+{
+name:"Posts",
+href:"/admin/posts",
+icon:"📝"
+},
+
+{
+name:"Analytics",
+href:"/admin/analytics",
+icon:"📈"
+},
+
+{
+name:"Notifications",
+href:"/admin/notifications",
+icon:"🔔"
+},
+{
+  name: "Notification Templates",
+  href: "/admin/notification-templates",
+  icon: "📝"
+},
+{
+name:"Settings",
+href:"/admin/settings",
+icon:"⚙️"
+}
+
+];
+const handleLogout=async()=>{
+
+await supabase.auth.signOut();
+
+router.push("/login");
+
+}
+
+return(
+
+<div className="min-h-screen bg-[#f4f8fc] flex">
+
+{/* Mobile Overlay */}
+
+{
+menuOpen &&
+<div
+onClick={()=>setMenuOpen(false)}
+className="
+fixed
+inset-0
+bg-black/40
+z-40
+lg:hidden
+"
+/>
+}
+
+{/* Sidebar */}
+
+<div
+className={`
+
+fixed
+top-0
+left-0
+z-50
+h-screen
+w-[230px]
+bg-white
+border-r
+border-slate-200
+transition-all
+duration-300
+shadow-xl
+
+${menuOpen
+? "translate-x-0"
+: "-translate-x-full"
+}
+
+lg:translate-x-0
+
+`}
+>
+
+<div className="p-3 lg:p-5">
+
+<div className="flex items-center gap-4">
+
+<div
+className="
+relative
+w-14
+h-14
+rounded-2xl
+bg-white
+shadow-lg
+overflow-hidden
+"
+>
+
+<Image
+src="/dpilogo.png"
+alt="logo"
+fill
+className="object-contain p-2"
+/>
+
+</div>
+
+<div>
+
+<h2
+className="
+font-bold
+text-slate-800
+"
+>
+
+{adminName}
+
+</h2>
+
+<p
+className="
+text-sm
+text-slate-500
+"
+>
+
+Admin Portal
+
+</p>
+
+</div>
+
+</div>
+
+</div>
+
+
+<div className="px-4 space-y-2">
+
+{
+menu.map((item)=>(
+
+<Link
+
+key={item.href}
+href={item.href}
+
+onClick={()=>setMenuOpen(false)}
+
+className="
+flex
+items-center
+gap-4
+px-4
+py-4
+rounded-2xl
+hover:bg-gradient-to-r
+hover:from-cyan-500
+hover:to-blue-600
+hover:text-white
+transition-all
+font-medium
+text-slate-700
+"
+
+>
+
+<span>
+
+{item.icon}
+
+</span>
+
+{item.name}
+
+</Link>
+
+))
+}
+<button
+onClick={handleLogout}
+className="
+mt-auto
+w-full
+rounded-xl
+bg-red-500
+text-white
+py-3
+font-medium
+hover:bg-red-600
+transition
+"
+>
+
+Logout
+
+</button>
+
+</div>
+
+</div>
+
+
+
+{/* Right Side */}
+
+<div
+className="
+flex-1
+lg:ml-[230px]
+w-full
+"
+>
+
+{/* Top */}
+
+<div
+className="
+sticky
+top-0
+z-30
+bg-white/90
+backdrop-blur-xl
+border-b
+border-slate-200
+px-5
+h-[60px]
+flex
+items-center
+justify-between
+"
+>
+
+<div className="flex items-center gap-4">
+
+<button
+onClick={()=>setMenuOpen(true)}
+className="lg:hidden"
+>
+
+<Menu size={30}/>
+
+</button>
+
+<div>
+
+<h1
+className="
+font-bold
+text-xl lg:text-xl
+text-slate-800
+"
+>
+
+Admin Dashboard
+
+</h1>
+
+<p
+className="
+text-slate-500
+text-xs
+"
+>
+
+Welcome back,
+{" "}
+{adminName}
+
+</p>
+
+</div>
+
+</div>
+
+
+<div
+className="
+h-10
+w-10
+rounded-full
+bg-gradient-to-r
+from-cyan-500
+to-blue-600
+flex
+items-center
+justify-center
+text-white
+font-bold
+shadow-lg
+"
+>
+
+{adminName.charAt(0)}
+
+</div>
+
+</div>
+
+
+{/* Page Content */}
+
+<div
+className="
+p-3
+lg:p-5
+"
+>
+
+{children}
+
+</div>
+
+</div>
+
+</div>
+
+)
+
+}
