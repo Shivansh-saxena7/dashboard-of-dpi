@@ -41,17 +41,17 @@ if (error) {
 }
 
   const formatted = data.map((row: any) => ({
-    
-    id: row.id,
-    employee_id: row.employee_id,
-    Date: row.date,
-    "Post ID": `M${new Date(row.date).getDate()}-P${row.posts.post_number}`,
-    "IG Link": row.posts.ig_link,
-    "FB Link": row.posts.fb_link,
-    Employee: row.employees.name,
-    "IG Like": row.ig_done ? "YES" : "NO",
-    "FB Like": row.fb_done ? "YES" : "NO",
-  }));
-
+  id: row.id,
+  employee_id: row.employee_id,
+  Date: row.date,
+  "Post ID": `${row.date}-P${row.posts.post_number}`,
+  "IG Link": row.posts.ig_link,
+  "FB Link": row.posts.fb_link,
+  Employee: row.employees.name,
+  "IG Like": row.ig_done ? "YES" : "NO",
+  "FB Like": row.fb_done ? "YES" : "NO",
+}));
+console.log("TRACKING API RESPONSE");
+console.table(formatted);
   return NextResponse.json(formatted);
 }

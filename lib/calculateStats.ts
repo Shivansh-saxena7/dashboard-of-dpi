@@ -1,49 +1,66 @@
 import { getUniquePosts } from "./getUniquePosts";
 import { calculatePerformance } from "./calculatePerformance";
-import { calculateMissed } from "./calculateMissed";
+import { calculateStatus } from "@/components/calculateStatus";
 
-export function calculateStats(data:any[]){
+export function calculateStats(data: any[]) {
 
-const uniquePosts =
-getUniquePosts(data);
+  const uniquePosts = getUniquePosts(data);
 
-const totalAssigned =
-uniquePosts.length;
+  let completed = 0;
+  let pending = 0;
+  let permanent = 0;
+  let missed = 0;
 
-const completed =
-uniquePosts.filter((post:any)=>
+  uniquePosts.forEach((post: any) => {
 
-String(post["IG Like"]).toUpperCase()==="YES"
+    const status = calculateStatus(post);
 
-&&
+    switch (status) {
 
-String(post["FB Like"]).toUpperCase()==="YES"
+      case "COMPLETED":
+        completed++;
+        break;
 
-).length;
+      case "PERMANENT":
+        permanent++;
+        pending++;
+        break;
 
-const pending =
-calculateMissed(uniquePosts);
+      case "MISSED":
+        missed++;
+        pending++;
+        break;
 
-const permanent =
-uniquePosts.filter(
-(post:any)=>
-post.permanent_missed===true
-).length;
+      case "ASSIGNED":
+      default:
+        pending++;
+        break;
 
-const performance =
-calculatePerformance(
-completed,
-totalAssigned
-);
+    }
 
-return{
+  });
 
-totalAssigned,
-completed,
-pending,
-permanent,
-performance
+  const totalAssigned = uniquePosts.length;
 
-};
+  const performance = calculatePerformance(
+    completed,
+    totalAssigned
+  );
+
+  return {
+
+    totalAssigned,
+
+    completed,
+
+    pending,
+
+    missed,
+
+    permanent,
+
+    performance
+
+  };
 
 }

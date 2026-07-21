@@ -143,6 +143,8 @@ json.data || [];
 
 
 setData(records);
+console.log("===== API DATA =====");
+console.table(records);
 
 
 // ✅ ALL DATA
@@ -482,17 +484,12 @@ No records found for selected date
 (
 
 <EmployeePanel
-
-data={filteredData}
-
-allData={allData}
-
-employee={employee}
-
-selectedEmployee={selectedEmployee}
-
-setSelectedEmployee={setSelectedEmployee}
-
+  data={filteredData}
+  allData={allData}
+  employee={employee}
+  selectedEmployee={selectedEmployee}
+  setSelectedEmployee={setSelectedEmployee}
+  selectedDate={selectedDate}
 />
 
 )

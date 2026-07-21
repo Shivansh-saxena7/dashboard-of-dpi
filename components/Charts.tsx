@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { getUniquePosts } from "@/lib/getUniquePosts";
+import { calculateStatus } from "./calculateStatus";
 
 type DataType = {
   Employee: string;
@@ -14,82 +16,55 @@ export default function Charts({ data }: { data: DataType[] }) {
   const [showAll, setShowAll] = useState(false);
 
   // ✅ REAL PERFORMANCE CALCULATION
-  const uniqueData = Array.from(
-
-new Map(
-
-data.map(
-(d:any)=>[
-`${d.employee_id}-${d["Post ID"]}`,
-d
-]
-)
-
-).values()
-
-);
+ const uniqueData = getUniquePosts(data);
 
 const scores: Record<
-string,
-{
-totalPosts:number;
-totalLikes:number;
-}
+  string,
+  {
+    totalPosts: number;
+    completed: number;
+  }
 > = {};
 
-uniqueData.forEach((d:any)=>{
+uniqueData.forEach((post: any) => {
 
-const name=d.Employee;
+  const name = post.Employee;
 
-if(!scores[name]){
+  if (!scores[name]) {
 
-scores[name]={
-totalPosts:0,
-totalLikes:0
-};
+    scores[name] = {
+      totalPosts: 0,
+      completed: 0
+    };
 
-}
+  }
 
-scores[name].totalPosts+=1;
+  scores[name].totalPosts++;
 
-const ig=
+  if (calculateStatus(post) === "COMPLETED") {
 
-String(
-d["IG Like"]||""
-)
-.trim()
-.toUpperCase();
+    scores[name].completed++;
 
-const fb=
-
-String(
-d["FB Like"]||""
-)
-.trim()
-.toUpperCase();
-
-if(ig==="YES"){
-
-scores[name].totalLikes+=1;
-
-}
-
-if(fb==="YES"){
-
-scores[name].totalLikes+=1;
-
-}
+  }
 
 });
   // ✅ PERCENT CALCULATION
-  const chartData = Object.entries(scores)
-    .map(([name, val]) => {
-      const maxPossible = val.totalPosts * 2; // IG + FB
-      const percent = Math.round((val.totalLikes / maxPossible) * 100);
+ const chartData = Object.entries(scores)
+  .map(([name, val]) => {
 
-      return { name, percent };
-    })
-    .sort((a, b) => b.percent - a.percent);
+    const percent =
+      val.totalPosts > 0
+        ? Math.round((val.completed / val.totalPosts) * 100)
+        : 0;
+
+    return {
+      name,
+      percent
+    };
+
+  })
+  .sort((a, b) => b.percent - a.percent);
+   
 
   // ✅ MOBILE OPTIMIZATION (TOP 4)
   const visibleData = showAll ? chartData : chartData.slice(0, 4);

@@ -3,6 +3,8 @@
 import EmployeeDetails from "./EmployeeDetails";
 import TopPerformers from "./TopPerformers";
 import LowPerformer from "./LowPerformer";
+import { calculateStats } from "@/lib/calculateStats";
+import { getUniquePosts } from "@/lib/getUniquePosts";
 import Charts from "./Charts";
 
 type DataType = {
@@ -24,6 +26,7 @@ allData: any[];
 employee: any;
 selectedEmployee: string;
 setSelectedEmployee: any;
+selectedDate: string;
 };
 
 export default function EmployeePanel({
@@ -31,6 +34,7 @@ data,
 employee,
 allData,
 selectedEmployee,
+selectedDate,
 }: Props) {
 
 const employeeData = data.find(
@@ -45,41 +49,13 @@ employeeData?.Employee || "Employee";
 
 // FIXED LOGIC
 
-const todayDate =
-new Date()
-.toISOString()
-.split("T")[0];
+const stats = calculateStats(data);const totalPosts = stats.totalAssigned;
 
-const todayData =
-data.filter(
-(d:any)=>
-d.Date===todayDate
-);
+const completed = stats.completed;
 
-const totalPosts =
-todayData.length;
+const pending = stats.pending;
 
-const completed =
-todayData.filter(
-(d:any)=>
-d.done===true
-).length;
-
-const pending =
-Math.max(
-totalPosts-completed,
-0
-);
-
-const performance =
-totalPosts>0
-?
-Math.round(
-(completed/totalPosts)*100
-)
-:
-0;
-
+const performance = stats.performance;
 
 // employee ranking
 
@@ -120,12 +96,12 @@ Math.max(
 
 const today = new Date();
 
-const selectedDate =
+const postDate =
 new Date(data?.[0]?.Date);
 
 const isHistory =
 today.toDateString() !==
-selectedDate.toDateString();
+postDate.toDateString();
 
 const currentHour =
 new Date().getHours();
@@ -354,6 +330,7 @@ width:`${performance}%`
 <EmployeeDetails
 data={data}
 selected={selectedEmployee}
+selectedDate={selectedDate}
 />
 
 <LowPerformer data={allData}/>

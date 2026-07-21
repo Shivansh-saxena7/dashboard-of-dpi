@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import TopPerformers from "@/components/TopPerformers";
 import LowPerformer from "@/components/LowPerformer";
 import Charts from "@/components/Charts";
-
+import { calculateStats } from "@/lib/calculateStats";
+import { getUniquePosts } from "@/lib/getUniquePosts";
 export default function AdminDashboard() {
 
 const [allData,setAllData]=useState<any[]>([]);
@@ -121,137 +122,25 @@ allData;
 
 
 // ✅ UNIQUE POSTS
-const uniquePosts = Array.from(
-
-new Map(
-
-filteredData.map(
-(d:any)=>[
-d["Post ID"],
-d
-]
-)
-
-).values()
-
-);
-
+const uniquePosts = getUniquePosts(filteredData);
 
 
 
 // ✅ STATS
-const totalEmployees=
+const stats = calculateStats(filteredData);
+const totalEmployees =
+  new Set(
+    filteredData.map((d: any) => d.employee_id)
+  ).size;
+const totalPosts = stats.totalAssigned;
 
-new Set(
+const completed = stats.completed;
 
-filteredData.map(
-(d:any)=>d.employee_id
-)
+const pending = stats.pending;
 
-).size;
+const permanentMissed = stats.permanent;
 
-
-
-const totalPosts=
-
-uniquePosts.length;
-
-
-
-const completed=
-
-uniquePosts.filter(
-(d:any)=>
-
-String(
-d["IG Like"] || ""
-)
-.trim()
-.toUpperCase()
-
-===
-
-"YES"
-
-&&
-
-String(
-d["FB Like"] || ""
-)
-.trim()
-.toUpperCase()
-
-===
-
-"YES"
-
-).length;
-
-
-
-const pending=
-
-uniquePosts.filter(
-(d:any)=>
-
-!(
-
-String(
-d["IG Like"] || ""
-)
-.trim()
-.toUpperCase()
-
-===
-
-"YES"
-
-&&
-
-String(
-d["FB Like"] || ""
-)
-.trim()
-.toUpperCase()
-
-===
-
-"YES"
-
-)
-
-).length;
-
-
-
-const permanentMissed=
-
-uniquePosts.filter(
-(d:any)=>
-d.permanent_missed===true
-).length;
-
-
-
-const performance=
-
-uniquePosts.length>0
-
-?
-
-Math.round(
-
-(completed/
-uniquePosts.length)
-
-*100
-
-)
-
-:
-
-0;
-
+const performance = stats.performance;
 
 
 

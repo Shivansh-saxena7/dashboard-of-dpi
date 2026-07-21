@@ -6,6 +6,7 @@ import { useEffect,useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Menu,X } from "lucide-react";
 import { useRouter } from "next/navigation";
+import SessionGuard from "@/components/SessionGuard";
 
 export default function AdminLayout({
 children,
@@ -100,7 +101,7 @@ router.push("/login");
 }
 
 return(
-
+<SessionGuard>
 <div className="min-h-screen bg-[#f4f8fc] flex">
 
 {/* Mobile Overlay */}
@@ -136,6 +137,8 @@ border-slate-200
 transition-all
 duration-300
 shadow-xl
+flex
+flex-col
 
 ${menuOpen
 ? "translate-x-0"
@@ -154,8 +157,8 @@ lg:translate-x-0
 <div
 className="
 relative
-w-14
-h-14
+w-16
+h-16
 rounded-2xl
 bg-white
 shadow-lg
@@ -167,7 +170,7 @@ overflow-hidden
 src="/dpilogo.png"
 alt="logo"
 fill
-className="object-contain p-2"
+className="object-contain scale-150"
 />
 
 </div>
@@ -203,7 +206,7 @@ Admin Portal
 </div>
 
 
-<div className="px-4 space-y-2">
+<div className="flex-1 overflow-y-auto px-4 space-y-2">
 
 {
 menu.map((item)=>(
@@ -245,10 +248,11 @@ text-slate-700
 
 ))
 }
+<div className="p-4 border-t border-slate-200">
+
 <button
 onClick={handleLogout}
 className="
-mt-auto
 w-full
 rounded-xl
 bg-red-500
@@ -263,6 +267,8 @@ transition
 Logout
 
 </button>
+
+</div>
 
 </div>
 
@@ -382,6 +388,7 @@ lg:p-5
 </div>
 
 </div>
+</SessionGuard>
 
 )
 

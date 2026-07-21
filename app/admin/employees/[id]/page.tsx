@@ -187,76 +187,14 @@ permanent;
 
 
 // ALL TIME STATS
-const totalAssigned=
-
-Array.from(
-
-new Map(
-
-allData.map(
-(d:any)=>[
-d["Post ID"],
-d
-]
-)
-
-).values()
-
-).length;
+const totalAssigned = totalPosts;
 
 
 
-const totalPermanentMissed=
+const totalPermanentMissed = permanent;
 
-Array.from(
 
-new Map(
-
-allData.map(
-(d:any)=>[
-d["Post ID"],
-d
-]
-)
-
-).values()
-
-)
-
-.filter(
-(post:any)=>
-
-calculateStatus(post)
-===
-"PERMANENT"
-
-).length;
-const totalCompleted=
-
-Array.from(
-
-new Map(
-
-allData.map(
-(d:any)=>[
-d["Post ID"],
-d
-]
-)
-
-).values()
-
-)
-
-.filter(
-(post:any)=>
-
-calculateStatus(post)
-===
-"COMPLETED"
-
-).length;
-
+const totalCompleted = completed;
 
 const overallPerformance=
 
