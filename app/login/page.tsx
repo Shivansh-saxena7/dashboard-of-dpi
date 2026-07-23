@@ -190,13 +190,17 @@ export default function LoginPage() {
               DPI Dashboard
             </h1>
 
-            <div className="flex items-center justify-center gap-2 mt-2.5">
-              <span className="h-px w-5 bg-yellow-400/40" />
-              <p className="text-yellow-300/80 text-[10px] tracking-[0.2em] font-medium">
-                DIVYA PADMA INFOSYSTEM LLP
-              </p>
-              <span className="h-px w-5 bg-yellow-400/40" />
-            </div>
+ <div className="mt-2.5 text-center">
+  <p className="text-[10px] text-gray-500 tracking-[0.15em] uppercase mb-1">
+    Founders
+  </p>
+  <p className="text-[11px] tracking-wide">
+    <span className="text-yellow-400/85 font-medium">Mr. Ashwani Srivastava</span>
+    <span className="text-gray-600 mx-1.5">&amp;</span>
+    <span className="text-yellow-400/85 font-medium">Mrs. Anamika Sinha</span>
+  </p>
+</div>
+
           </div>
 
           {/* Inputs */}

@@ -45,16 +45,16 @@ export default function Header() {
 
     loadUnreadCount();
   }, []);
-
-  useEffect(() => {
+useEffect(() => {
     let channel: any;
+    let cancelled = false;
 
     const setupRealtime = async () => {
       const {
         data: { user }
       } = await supabase.auth.getUser();
 
-      if (!user) return;
+      if (!user || cancelled) return;
 
       const { data: employee } = await supabase
         .from("employees")
@@ -62,7 +62,15 @@ export default function Header() {
         .eq("auth_user_id", user.id)
         .single();
 
-      if (!employee) return;
+      if (!employee || cancelled) return;
+
+      const existing = supabase.getChannels().find((ch) => ch.topic === `realtime:employee-${employee.id}`);
+
+      if (existing) {
+        await supabase.removeChannel(existing);
+      }
+
+      if (cancelled) return;
 
       channel = supabase
         .channel(`employee-${employee.id}`)
@@ -86,6 +94,7 @@ export default function Header() {
     setupRealtime();
 
     return () => {
+      cancelled = true;
       if (channel) supabase.removeChannel(channel);
     };
   }, []);

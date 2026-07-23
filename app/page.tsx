@@ -69,6 +69,14 @@ if (!data.is_active) {
 
 }
 
+if (data.role === "admin") {
+
+  router.replace("/admin");
+
+  return;
+
+}
+
 setEmployee(data);
 
 setSelectedEmployee(data.id);

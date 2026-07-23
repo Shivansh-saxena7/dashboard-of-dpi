@@ -30,25 +30,41 @@ const {data:{session}}
 =
 await supabase.auth.getSession();
 
-if(!session) return;
+if(!session) {
+  router.replace("/login");
+  return;
+}
 
 const {data}
 =
 await supabase
 .from("employees")
-.select("name")
+.select("name, role, is_active")
 .eq(
 "auth_user_id",
 session.user.id
 )
 .single();
 
-if(data){
-setAdminName(data.name);
+if(!data){
+  router.replace("/login");
+  return;
 }
 
-};
+if(!data.is_active){
+  await supabase.auth.signOut();
+  router.replace("/login");
+  return;
+}
 
+if(data.role !== "admin"){
+  router.replace("/");
+  return;
+}
+
+setAdminName(data.name);
+
+};
 const menu=[
 
 {
