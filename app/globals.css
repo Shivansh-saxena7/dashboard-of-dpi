@@ -19,13 +19,13 @@ body {
 }
 
 /* iOS Safari — remove native styling from form elements so Tailwind classes always win */
+/* iOS Safari — remove native styling from form elements so Tailwind classes always win */
 input,
 button,
 select,
 textarea {
   -webkit-appearance: none;
   appearance: none;
-  color: inherit;
 }
 
 input[type="date"],
