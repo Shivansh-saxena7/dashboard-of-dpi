@@ -14,6 +14,7 @@ export default function Page() {
 const router = useRouter();
 
 const [employee,setEmployee]=useState<any>(null);
+const [authChecked,setAuthChecked]=useState(false);
 
 const [selectedEmployee,setSelectedEmployee]=
 useState<string>("");
@@ -39,7 +40,7 @@ data:{user},
 
 if(!user){
 
-router.push("/login");
+router.replace("/login");
 return;
 
 }
@@ -81,6 +82,7 @@ if (data.role === "admin") {
 setEmployee(data);
 
 setSelectedEmployee(data.id);
+setAuthChecked(true);
 
 }
 
@@ -349,7 +351,11 @@ filteredData.filter(
 
 };
 
-
+if(!authChecked){
+  return (
+    <div className="min-h-screen bg-white" />
+  );
+}
 
 return(
 
