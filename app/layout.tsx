@@ -18,7 +18,7 @@ export const metadata: Metadata = {
   description: "The internal command center for Divya Padma Infosystem LLP — performance, leads, and growth in one place.",
 icons: {
     icon: "/dpi-icon.png",
-    shortcut: "/favicon.ico",
+   
   },
   other: {
     "color-scheme": "light",
