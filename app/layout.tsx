@@ -16,9 +16,10 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "DPI Dashboard | Divya Padma Infosystem",
   description: "The internal command center for Divya Padma Infosystem LLP — performance, leads, and growth in one place.",
-icons: {
+  manifest: "/manifest.json",
+  icons: {
     icon: "/dpi-icon.png",
-   
+    apple: "/icon-192.png",
   },
   other: {
     "color-scheme": "light",
