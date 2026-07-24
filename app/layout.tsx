@@ -16,9 +16,12 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "DPI Dashboard | Divya Padma Infosystem",
   description: "The internal command center for Divya Padma Infosystem LLP — performance, leads, and growth in one place.",
-  icons: {
+icons: {
     icon: "/dpi-icon.png",
     shortcut: "/favicon.ico",
+  },
+  other: {
+    "color-scheme": "light",
   },
 };
 
@@ -32,7 +35,7 @@ export default function RootLayout({
     lang="en"
     className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
   >
-    <body className="min-h-full flex flex-col">
+  <body className="min-h-full flex flex-col overflow-x-hidden" style={{ colorScheme: "light" }}>
 
       {children}
 

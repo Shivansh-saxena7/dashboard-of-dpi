@@ -313,12 +313,13 @@ export default function LoginPage() {
             </button>
           </div>
 
-          <div className="mt-5 text-center space-y-1">
-            <p className="text-[11px] text-gray-500">Protected by DPI Authentication</p>
-            <p className="text-[10px] text-gray-600 tracking-wide">
-              Designed &amp; Developed by <span className="text-yellow-500/70 font-semibold">Shivansh Saxena</span>
-            </p>
-          </div>
+         <div className="mt-5 text-center space-y-1">
+  <p className="text-[11px] text-gray-500">Protected by DPI Authentication</p>
+  <p className="text-[10px] text-gray-600 tracking-wide">
+    Designed &amp; Developed by <span className="text-yellow-500/70 font-semibold">Shivansh Saxena</span>
+  </p>
+  <p className="text-[9px] text-gray-700 tracking-wide">Version 1.0</p>
+</div>
         </div>
       </motion.div>
     </div>

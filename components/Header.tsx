@@ -128,9 +128,9 @@ useEffect(() => {
   }
 
   const socialLinks = [
-    { name: "Instagram", href: "https://www.instagram.com/divyapadmainfosystemllp__?igsh=MWk1YWJteXVsdGg1OQ==", icon: FaInstagram, color: "#D6336C", bg: "bg-pink-50" },
-    { name: "Facebook", href: "https://www.facebook.com/share/1L1kBS51ao/", icon: FaFacebookF, color: "#1877F2", bg: "bg-blue-50" },
-    { name: "YouTube", href: "https://youtube.com/@divyapadmainfosystemllp_1?si=UcbN_9DV1CJ2_ana", icon: FaYoutube, color: "#FF0000", bg: "bg-red-50" }
+    { name: "Instagram", href: "https://www.instagram.com/divyapadmainfosystemllp__/", icon: FaInstagram, color: "#D6336C", bg: "bg-pink-50" },
+    { name: "Facebook", href: "https://www.facebook.com/share/198io8761o/", icon: FaFacebookF, color: "#1877F2", bg: "bg-blue-50" },
+    { name: "YouTube", href: "https://youtube.com/@divyapadmainfosystemllp_1?si=QVF8glGIr_4bZrCo", icon: FaYoutube, color: "#FF0000", bg: "bg-red-50" }
   ];
 
   return (
@@ -369,8 +369,11 @@ useEffect(() => {
                 </div>
 
                 <p className="text-center text-[10.5px] text-slate-400 mt-6 tracking-wide">
-                  Designed &amp; Developed by <span className="text-[#9c7a1f] font-bold">Shivansh Saxena</span>
-                </p>
+  Designed &amp; Developed by <span className="text-[#9c7a1f] font-bold">Shivansh Saxena</span>
+</p>
+<p className="text-center text-[9px] text-slate-500 mt-1 tracking-wide">
+  Version 1.0
+</p>
               </div>
             </motion.div>
           </>

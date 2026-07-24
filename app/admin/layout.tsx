@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase";
 import { Menu,X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import SessionGuard from "@/components/SessionGuard";
+import Footer from "@/components/Footer";
 
 export default function AdminLayout({
 children,
@@ -398,6 +399,7 @@ lg:p-5
 >
 
 {children}
+<Footer />
 
 </div>
 

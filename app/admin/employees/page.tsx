@@ -443,6 +443,7 @@ space-y-4
 filteredEmployees.map(
 (employee)=>(
 
+
 <div
 
 key={employee.id}
@@ -461,8 +462,11 @@ border
 border-slate-100
 p-5
 flex
-justify-between
-items-center
+flex-col
+md:flex-row
+md:justify-between
+md:items-center
+gap-4
 cursor-pointer
 hover:scale-[1.02]
 hover:shadow-xl
@@ -470,7 +474,7 @@ transition-all
 duration-300
 "
 >
-<div className="
+  <div className="
 flex
 items-center
 gap-4
@@ -530,7 +534,8 @@ text-slate-500
 <div className="
 flex
 items-center
-gap-4
+flex-wrap
+gap-3
 ">
 
 <span className="

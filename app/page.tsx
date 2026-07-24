@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import Footer from "@/components/Footer";
 
 import Header from "@/components/Header";
 import StatsCard from "@/components/StatsCard";
@@ -503,7 +504,7 @@ No records found for selected date
 )
 
 }
-
+<Footer />
 </main>
 
 );
