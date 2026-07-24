@@ -39,8 +39,8 @@ const posts = getUniquePosts(allData);
     const list = allData.filter((d: any) => d["Post ID"] === post["Post ID"]);
 
     const me = list.find((d: any) => String(d.employee_id || "").trim() === String(selected || "").trim());
-    console.log("SELECTED:", selected);
-console.log("ME RECORD:", me);
+    //console.log("SELECTED:", selected);
+//console.log("ME RECORD:", me);
 
     if (!me) return false;
 

@@ -51,7 +51,7 @@ if (error) {
   "IG Like": row.ig_done ? "YES" : "NO",
   "FB Like": row.fb_done ? "YES" : "NO",
 }));
-console.log("TRACKING API RESPONSE");
-console.table(formatted);
+//console.log("TRACKING API RESPONSE");
+//console.table(formatted);
   return NextResponse.json(formatted);
 }

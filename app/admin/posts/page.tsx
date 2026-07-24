@@ -82,8 +82,8 @@ await supabase
 .from("notifications_templates")
 .select("*")
 .eq("is_active", true);
-console.log("TEMPLATE ERROR", templateError);
-console.log("TEMPLATES", templates);
+//console.log("TEMPLATE ERROR", templateError);
+//console.log("TEMPLATES", templates);
 
 
 if(templateError){
@@ -110,11 +110,11 @@ Math.random() * templates.length
 )
 ];
 
-console.log("TEMPLATES");
-console.log(templates);
+//console.log("TEMPLATES");
+//console.log(templates);
 
-console.log("RANDOM TEMPLATE");
-console.log(randomTemplate);
+//console.log("RANDOM TEMPLATE");
+//console.log(randomTemplate);
 
 
             if (employeeError) {
@@ -207,13 +207,10 @@ false
                 return;
 
             }
-            console.log("POST DATA");
-console.log(postData);
+            //console.log("POST DATA");
+//console.log(postData);
 
-console.log(
-"NOTIFICATION ROWS",
-notificationRows
-);
+
 
             const {
                 
@@ -260,7 +257,7 @@ return;
 
         } catch (err) {
 
-            console.log(err);
+            //console.log(err);
 
             alert(
                 "Something went wrong"

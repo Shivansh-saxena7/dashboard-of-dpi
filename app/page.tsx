@@ -151,8 +151,8 @@ json.data || [];
 
 
 setData(records);
-console.log("===== API DATA =====");
-console.table(records);
+//console.log("===== API DATA =====");
+//console.table(records);
 
 
 // ✅ ALL DATA

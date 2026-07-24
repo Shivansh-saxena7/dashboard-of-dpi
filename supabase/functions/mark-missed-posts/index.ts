@@ -32,7 +32,7 @@ serve(async () => {
 
     const today = now.toISOString().split("T")[0];
 
-    console.log("TODAY:", today);
+    //console.log("TODAY:", today);
 
     // sab rows lao
     const { data, error } = await supabase
@@ -53,12 +53,12 @@ serve(async () => {
       );
     }
 
-    console.log("TOTAL ROWS:", data?.length || 0);
+    //console.log("TOTAL ROWS:", data?.length || 0);
 
     let updatedCount = 0;
 
     for (const row of data || []) {
-      console.log("CHECKING ROW:", row);
+      //console.log("CHECKING ROW:", row);
 
       // agar done nahi hai
       if (
@@ -66,7 +66,7 @@ serve(async () => {
   row.done === null ||
   String(row.done).toLowerCase() === "false"
 ) {
-        console.log("MARKING MISSED:", row.id);
+        //console.log("MARKING MISSED:", row.id);
 
         const { error: updateError } = await supabase
           .from("tracking")

@@ -43,16 +43,14 @@ String(d.employee_id)
 ===
 String(employeeId)
 );
-console.log("29 JUNE RECORDS");
-console.log(
-employeeRecords.filter(
-(d:any)=>String(d.Date).trim()==="2026-06-29"
-)
-);
-console.log("EMPLOYEE ID =", employeeId);
-console.log("ALL RECORDS =", records.length);
-console.log("EMPLOYEE RECORDS =", employeeRecords);
-console.log("EMPLOYEE RECORDS COUNT =", employeeRecords.length);
+//console.log("29 JUNE RECORDS");
+//console.log(
+//employeeRecords.filter(
+
+//console.log("EMPLOYEE ID =", employeeId);
+//console.log("ALL RECORDS =", records.length);
+//console.log("EMPLOYEE RECORDS =", employeeRecords);
+//console.log("EMPLOYEE RECORDS COUNT =", employeeRecords.length);
 
 setAllData(employeeRecords);
 
@@ -107,8 +105,8 @@ selectedDate.toDateString()
 
 allData;
 
-console.log("SELECTED DATE =", selectedDate);
-console.log("FILTERED DATA =", filteredData);
+//console.log("SELECTED DATE =", selectedDate);
+//console.log("FILTERED DATA =", filteredData);
 
 const uniquePosts=
 
