@@ -138,22 +138,22 @@ useEffect(() => {
       {/* HEADER */}
       <div className="w-full sticky top-0 z-50 backdrop-blur-xl bg-gradient-to-r from-white/70 via-blue-100/60 to-white/70 border-b border-white/30 shadow-lg">
         <div className="w-full px-3 lg:px-5 h-16 flex justify-between items-center">
-          <div className="group flex items-center gap-3 cursor-pointer">
-            <Image
-              src="/dpilogo.png"
-              alt="Logo"
-              width={78}
-              height={78}
-              className="object-contain transition-transform duration-500 group-hover:scale-110"
-            />
+         <div className="group flex items-center gap-2 sm:gap-3 cursor-pointer min-w-0 flex-1">
+  <Image
+    src="/dpilogo.png"
+    alt="Logo"
+    width={78}
+    height={78}
+    className="object-contain w-10 h-10 sm:w-[78px] sm:h-[78px] shrink-0 transition-transform duration-500 group-hover:scale-110"
+  />
 
-            <div>
-              <h1 className="relative inline-block text-[15px] font-black tracking-[-0.02em] text-slate-700 transition-all duration-500 group-hover:text-cyan-600">
-                DIVYA PADMA INFOSYSTEM LLP
-                <span className="absolute left-0 -bottom-1 h-[3px] w-0 rounded-full bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 transition-all duration-500 group-hover:w-full" />
-              </h1>
-            </div>
-          </div>
+  <div className="min-w-0">
+    <h1 className="relative inline-block text-[11px] sm:text-[15px] font-black tracking-[-0.01em] sm:tracking-[-0.02em] text-slate-700 transition-all duration-500 group-hover:text-cyan-600 leading-tight">
+      DIVYA PADMA INFOSYSTEM LLP
+      <span className="absolute left-0 -bottom-1 h-[3px] w-0 rounded-full bg-gradient-to-r from-transparent via-yellow-400 to-transparent transition-all duration-500 group-hover:w-full" />
+    </h1>
+  </div>
+</div>
 
           <div className="flex items-center gap-3 relative">
             <button
