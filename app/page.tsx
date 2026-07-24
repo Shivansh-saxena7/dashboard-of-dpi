@@ -380,17 +380,20 @@ setSelectedDate(e.target.value)
 }
 className="
 w-full
+max-w-full
+box-border
 border
 px-3
 py-2
 rounded-md
-text-sm
+text-[16px]
+text-gray-800
 bg-white
 shadow
+appearance-none
 "
+style={{ minWidth: 0, WebkitAppearance: "none" }}
 />
-
-
 <button
 onClick={()=>{
 
@@ -408,11 +411,15 @@ setSelectedDate(today);
 className="
 w-full
 text-xs
+text-gray-700
+font-medium
 py-2
 bg-gray-100
 rounded-md
 hover:bg-gray-200
+appearance-none
 "
+style={{ WebkitAppearance: "none" }}
 >
 
 Today Data

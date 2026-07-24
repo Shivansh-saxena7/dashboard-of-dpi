@@ -12,15 +12,28 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* iOS Safari — remove native styling from form elements so Tailwind classes always win */
+input,
+button,
+select,
+textarea {
+  -webkit-appearance: none;
+  appearance: none;
+  color: inherit;
+}
+
+input[type="date"],
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="number"] {
+  -webkit-appearance: none;
+  appearance: none;
+  font-size: 16px;
 }
