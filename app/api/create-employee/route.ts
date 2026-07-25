@@ -81,6 +81,23 @@ status:400
 
 
 
+if(!userData || !userData.user || !userData.user.id){
+
+return NextResponse.json(
+
+{
+success:false,
+message:"Auth account creation failed unexpectedly - no user ID returned."
+},
+
+{
+status:500
+}
+
+);
+
+}
+
 const authUserId=
 userData.user.id;
 
