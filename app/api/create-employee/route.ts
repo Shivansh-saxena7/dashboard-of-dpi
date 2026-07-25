@@ -116,10 +116,10 @@ await supabaseAdmin
 name,
 email,
 role,
-auth_user_id:authUserId
+auth_user_id:authUserId,
+is_active:true
 
 }]);
-
 
 if(employeeError){
 
