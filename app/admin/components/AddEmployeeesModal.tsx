@@ -23,43 +23,19 @@ try{
 
 setLoading(true);
 
-const {data,error}=await supabase.auth.signUp({
-
-email,
-password
-
+const res = await fetch("/api/create-employee", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ name, email, password, role }),
 });
 
-if(error){
+const result = await res.json();
 
-alert(error.message);
+if(!result.success){
+
+alert(result.message);
 return;
 
-}
-
-const userId=data.user?.id;
-
-if(!userId){
-
-alert("User creation failed");
-return;
-}
-
-const {error:employeeError}=await supabase
-.from("employees")
-.insert([{
-
-name,
-email,
-role,
-auth_user_id:userId
-
-}]);
-
-if(employeeError){
-
-alert(employeeError.message);
-return;
 }
 
 refreshEmployees();
@@ -74,6 +50,7 @@ setRole("");
 }catch(err){
 
 console.log(err);
+alert("Something went wrong");
 
 }finally{
 
@@ -82,7 +59,6 @@ setLoading(false);
 }
 
 };
-
 if(!open) return null;
 
 return(
