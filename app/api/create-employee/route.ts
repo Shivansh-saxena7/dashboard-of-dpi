@@ -100,6 +100,8 @@ status:500
 
 const authUserId=
 userData.user.id;
+console.log("AUTH ERROR:", authError);
+console.log("USER DATA:", JSON.stringify(userData));
 
 
 
