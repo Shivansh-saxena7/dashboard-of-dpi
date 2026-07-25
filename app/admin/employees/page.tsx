@@ -66,20 +66,23 @@ const toggleEmployeeStatus = async (
 };
 const deleteEmployee=async()=>{
 
-await supabase
-.from("employees")
-.delete()
-.eq(
-"id",
-selectedId
-);
+const res = await fetch("/api/delete-employee", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ employeeId: selectedId }),
+});
+
+const result = await res.json();
+
+if(!result.success){
+  alert(result.message);
+}
 
 setDeleteOpen(false);
 
 fetchEmployees();
 
 };
-
 
 const filteredEmployees=
 employees.filter((employee)=>{
