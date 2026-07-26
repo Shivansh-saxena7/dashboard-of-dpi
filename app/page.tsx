@@ -8,6 +8,7 @@ import Footer from "@/components/Footer";
 import Header from "@/components/Header";
 import StatsCard from "@/components/StatsCard";
 import EmployeePanel from "@/components/EmployeePanel";
+import StartShiftCard from "@/components/StartShiftCard";
 
 export default function Page() {
 
@@ -368,6 +369,8 @@ to-blue-100
 ">
 
 <Header />
+
+{employee?.id && <StartShiftCard employeeId={employee.id} />}
 
 
 {/* ✅ DATE FILTER */}

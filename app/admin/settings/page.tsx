@@ -19,9 +19,99 @@ export default function SettingsPage() {
   const [selectedAdminEmployee, setSelectedAdminEmployee] = useState("");
   const [adminActionLoading, setAdminActionLoading] = useState<"make" | "remove" | null>(null);
 
+  // ✅ Geofence settings state (V2 — Attendance / Shift Gate)
+  const [geoLat, setGeoLat] = useState("");
+  const [geoLng, setGeoLng] = useState("");
+  const [geoRadius, setGeoRadius] = useState("");
+  const [geoLoading, setGeoLoading] = useState(false);
+  const [locating, setLocating] = useState(false);
+
   useEffect(() => {
     loadEmployees();
   }, []);
+
+  useEffect(() => {
+    loadGeofenceSettings();
+  }, []);
+
+  async function loadGeofenceSettings() {
+    const { data } = await supabase
+      .from("lead_engine_settings")
+      .select("office_lat, office_lng, geofence_radius_meters")
+      .eq("id", 1)
+      .single();
+
+    if (data) {
+      setGeoLat(data.office_lat !== null ? String(data.office_lat) : "");
+      setGeoLng(data.office_lng !== null ? String(data.office_lng) : "");
+      setGeoRadius(String(data.geofence_radius_meters ?? 35));
+    }
+  }
+
+  function useMyLocation() {
+    if (!navigator.geolocation) {
+      toast.error("Location isn't available on this device/browser.");
+      return;
+    }
+
+    setLocating(true);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setGeoLat(String(position.coords.latitude));
+        setGeoLng(String(position.coords.longitude));
+        toast.success("Current location captured — review and Save below.");
+        setLocating(false);
+      },
+      (err) => {
+        console.log(err);
+        toast.error("Couldn't get your location. Please allow location access and try again.");
+        setLocating(false);
+      },
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
+  }
+
+  async function saveGeofenceSettings() {
+    const lat = parseFloat(geoLat);
+    const lng = parseFloat(geoLng);
+    const radius = parseInt(geoRadius, 10);
+
+    if (Number.isNaN(lat) || Number.isNaN(lng) || Number.isNaN(radius)) {
+      toast.error("Enter a valid latitude, longitude, and radius.");
+      return;
+    }
+
+    setGeoLoading(true);
+
+    try {
+      const res = await fetch("/api/admin/update-lead-engine-settings", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          office_lat: lat,
+          office_lng: lng,
+          geofence_radius_meters: radius
+        })
+      });
+
+      const result = await res.json();
+
+      if (!res.ok) {
+        toast.error(result.error || "Failed to update geofence settings.");
+        return;
+      }
+
+      toast.success("Geofence settings updated successfully");
+    } catch (err) {
+      console.log(err);
+      toast.error("Something went wrong.");
+    } finally {
+      setGeoLoading(false);
+    }
+  }
 
   async function loadEmployees() {
     const { data } = await supabase.from("employees").select("id,name,email,role,auth_user_id").order("name");
@@ -415,6 +505,131 @@ disabled:opacity-50
               {adminActionLoading === "remove" ? "Updating..." : "Remove Admin"}
             </button>
           </div>
+        </div>
+      </motion.div>
+
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="
+bg-white
+rounded-[24px]
+border
+border-slate-100
+shadow-md
+p-6
+"
+      >
+        <h2
+          className="
+text-xl
+font-bold
+text-slate-800
+mb-5
+"
+        >
+          📍 Geofence Settings
+        </h2>
+
+        <p className="text-sm text-slate-500 mb-4">
+          Employees must be within this radius of the office to start their shift and unlock new lead assignment. This never affects social media post access.
+        </p>
+
+        <div className="space-y-4">
+          <button
+            onClick={useMyLocation}
+            disabled={locating}
+            className="
+w-full
+h-12
+rounded-xl
+font-semibold
+text-white
+bg-gradient-to-r
+from-blue-600
+to-cyan-500
+disabled:opacity-60
+"
+          >
+            {locating ? "Locating..." : "📍 Use My Current Location"}
+          </button>
+
+          <div className="grid grid-cols-2 gap-3">
+            <input
+              type="number"
+              step="any"
+              placeholder="Office Latitude"
+              value={geoLat}
+              onChange={(e) => setGeoLat(e.target.value)}
+              className="
+w-full
+h-12
+rounded-xl
+bg-slate-50
+border
+border-slate-200
+px-4
+outline-none
+"
+            />
+
+            <input
+              type="number"
+              step="any"
+              placeholder="Office Longitude"
+              value={geoLng}
+              onChange={(e) => setGeoLng(e.target.value)}
+              className="
+w-full
+h-12
+rounded-xl
+bg-slate-50
+border
+border-slate-200
+px-4
+outline-none
+"
+            />
+          </div>
+
+          <input
+            type="number"
+            placeholder="Geofence Radius (meters)"
+            value={geoRadius}
+            onChange={(e) => setGeoRadius(e.target.value)}
+            className="
+w-full
+h-12
+rounded-xl
+bg-slate-50
+border
+border-slate-200
+px-4
+outline-none
+"
+          />
+
+          <p className="text-xs text-slate-400">
+            Manual entry also works — the location button just fills these in for convenience.
+          </p>
+
+          <button
+            onClick={saveGeofenceSettings}
+            disabled={geoLoading}
+            className="
+w-full
+h-12
+rounded-xl
+font-semibold
+text-white
+bg-gradient-to-r
+from-blue-600
+to-cyan-500
+disabled:opacity-60
+"
+          >
+            {geoLoading ? "Saving..." : "Save Geofence Settings"}
+          </button>
         </div>
       </motion.div>
     </div>
