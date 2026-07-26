@@ -9,6 +9,7 @@ import Header from "@/components/Header";
 import StatsCard from "@/components/StatsCard";
 import EmployeePanel from "@/components/EmployeePanel";
 import StartShiftCard from "@/components/StartShiftCard";
+import EmployeeTabBar from "@/components/EmployeeTabBar";
 
 export default function Page() {
 
@@ -369,6 +370,8 @@ to-blue-100
 ">
 
 <Header />
+
+<EmployeeTabBar />
 
 {employee?.id && <StartShiftCard employeeId={employee.id} />}
 
