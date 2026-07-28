@@ -64,6 +64,29 @@ const toggleEmployeeStatus = async (
   }
 
 };
+
+// Round-robin lead assignment participation (V2 Lead Engine).
+// Defaults to false for everyone since the column was added in
+// Phase 1 — until an admin turns this on here, that employee is
+// never eligible for a new lead, no matter how the assignment
+// engine or attendance gate are configured.
+const toggleRREligible = async (
+  id: string,
+  currentStatus: boolean
+) => {
+
+  const { error } = await supabase
+    .from("employees")
+    .update({
+      rr_eligible: !currentStatus,
+    })
+    .eq("id", id);
+
+  if (!error) {
+    fetchEmployees();
+  }
+
+};
 const deleteEmployee=async()=>{
 
 const res = await fetch("/api/delete-employee", {
@@ -571,6 +594,26 @@ employee.is_active
 
 {employee.is_active ? "Active" : "Inactive"}
 
+</span>
+
+<span
+className={`
+px-4
+py-2
+rounded-full
+text-xs
+font-medium
+
+${
+employee.rr_eligible
+? "bg-amber-100 text-amber-700"
+: "bg-slate-100 text-slate-500"
+}
+`}
+>
+
+{employee.rr_eligible ? "RR: On" : "RR: Off"}
+
 </span><button
 onClick={async (e) => {
 
@@ -608,6 +651,48 @@ employee.is_active
 ? "Deactivate"
 
 : "Activate"
+
+}
+
+</button>
+
+<button
+onClick={async (e) => {
+
+e.stopPropagation();
+
+await toggleRREligible(
+employee.id,
+employee.rr_eligible
+);
+
+}}
+
+className={`
+px-4
+py-2
+rounded-xl
+text-xs
+font-semibold
+transition
+
+${
+employee.rr_eligible
+
+? "bg-slate-100 text-slate-600 hover:bg-slate-200"
+
+: "bg-amber-100 text-amber-700 hover:bg-amber-200"
+
+}
+
+`}
+>
+
+{employee.rr_eligible
+
+? "Remove from RR"
+
+: "Add to RR"
 
 }
 

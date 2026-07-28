@@ -7,6 +7,8 @@ import { supabase } from "@/lib/supabase";
 import toast from "react-hot-toast";
 import { getValidNextLeadStatuses, LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
+import { BoardStage } from "@/lib/leadBoardStageDisplay";
+import { LEAD_POINTS } from "@/lib/calculateLeadPoints";
 
 export interface LeadDetailLead {
   id: string;
@@ -16,6 +18,7 @@ export interface LeadDetailLead {
   project: string | null;
   status: LeadStatus;
   callCount: number;
+  boardStage: BoardStage;
 }
 
 interface LeadNote {
@@ -28,24 +31,31 @@ interface LeadDetailModalProps {
   lead: LeadDetailLead;
   onClose: () => void;
   onUpdated: (updates: { status?: LeadStatus; callCount: number }) => void;
+  onBoardStageChanged: (boardStage: BoardStage) => void;
 }
 
-// The write-side counterpart to LeadCard — status change, optional
-// note, and call-count all logged in one action via
-// log_lead_update_atomic (one RPC call = one transaction). Status
-// options come from getValidNextLeadStatuses, so this component
-// never re-implements the transition rules inline. Only ever shows
-// this employee's own notes (lead_notes RLS scopes that already —
-// see LeadList's "Always New" note), which is exactly what should
-// happen: this lead is theirs right now, its history before them
-// (if any) is invisible by design.
-export default function LeadDetailModal({ lead, onClose, onUpdated }: LeadDetailModalProps) {
+// The write-side counterpart to LeadCard. Two independent action
+// groups:
+//   1. Log Update — status change + optional note + call-count, via
+//      log_lead_update_atomic (unchanged from before the Lead Board).
+//   2. Move Lead — board_stage changes (Follow-up is a plain column
+//      update; Visit/Booking go through their own atomic RPCs since
+//      they have side effects — a site_visits row, and for Booking,
+//      status -> CONVERTED plus a company-wide notification).
+// status and board_stage are deliberately independent state, per the
+// approved design — Log Update never touches board_stage, and Move
+// Lead never touches status except the one explicit case (Booking).
+export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStageChanged }: LeadDetailModalProps) {
 
   const [notes, setNotes] = useState<LeadNote[]>([]);
   const [loadingNotes, setLoadingNotes] = useState(true);
   const [selectedStatus, setSelectedStatus] = useState<LeadStatus | null>(null);
   const [noteText, setNoteText] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  const [visitPromptOpen, setVisitPromptOpen] = useState(false);
+  const [bookingConfirmOpen, setBookingConfirmOpen] = useState(false);
+  const [moving, setMoving] = useState(false);
 
   useEffect(() => {
     loadNotes();
@@ -69,6 +79,10 @@ export default function LeadDetailModal({ lead, onClose, onUpdated }: LeadDetail
 
   const validNextStatuses = getValidNextLeadStatuses(lead.status);
   const isTerminal = validNextStatuses.length === 0;
+
+  // Board moves stop once a lead is Booked (terminal) or its status
+  // is otherwise terminal (JUNK) — same reasoning as Log Update.
+  const boardMovesDisabled = isTerminal || lead.boardStage === "BOOKING";
 
   async function submitUpdate() {
     setSubmitting(true);
@@ -103,6 +117,89 @@ export default function LeadDetailModal({ lead, onClose, onUpdated }: LeadDetail
       toast.error("Something went wrong logging this update.");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function moveToFollowUp() {
+    setMoving(true);
+
+    try {
+
+      const { error } = await supabase
+        .from("leads")
+        .update({ board_stage: "FOLLOW_UP" })
+        .eq("id", lead.id);
+
+      if (error) {
+        toast.error(error.message || "Could not move this lead.");
+        return;
+      }
+
+      toast.success("Moved to Follow-up.");
+      onBoardStageChanged("FOLLOW_UP");
+
+    } catch (err) {
+      console.log(err);
+      toast.error("Something went wrong.");
+    } finally {
+      setMoving(false);
+    }
+  }
+
+  async function moveToVisit(visitType: "VISIT" | "REVISIT") {
+    setMoving(true);
+
+    try {
+
+      const points = visitType === "VISIT" ? LEAD_POINTS.VISIT : LEAD_POINTS.REVISIT;
+
+      const { error } = await supabase.rpc("log_site_visit_atomic", {
+        p_lead_id: lead.id,
+        p_event_type: visitType,
+        p_points: points
+      });
+
+      if (error) {
+        toast.error(error.message || "Could not log this visit.");
+        return;
+      }
+
+      toast.success(visitType === "VISIT" ? "First visit logged." : "Revisit logged.");
+      setVisitPromptOpen(false);
+      onBoardStageChanged("VISIT");
+
+    } catch (err) {
+      console.log(err);
+      toast.error("Something went wrong.");
+    } finally {
+      setMoving(false);
+    }
+  }
+
+  async function confirmBooking() {
+    setMoving(true);
+
+    try {
+
+      const { error } = await supabase.rpc("log_booking_atomic", {
+        p_lead_id: lead.id,
+        p_points: LEAD_POINTS.BOOKED
+      });
+
+      if (error) {
+        toast.error(error.message || "Could not log this booking.");
+        return;
+      }
+
+      toast.success("🎉 Booking logged!");
+      setBookingConfirmOpen(false);
+      onBoardStageChanged("BOOKING");
+
+    } catch (err) {
+      console.log(err);
+      toast.error("Something went wrong.");
+    } finally {
+      setMoving(false);
     }
   }
 
@@ -153,6 +250,90 @@ export default function LeadDetailModal({ lead, onClose, onUpdated }: LeadDetail
         </div>
 
         <div className="px-6 py-6 space-y-6">
+
+          {!boardMovesDisabled && (
+            <div className="rounded-2xl bg-white border border-slate-100 shadow-md p-5">
+              <p className="text-sm font-bold text-slate-800 mb-3">Move Lead</p>
+
+              {visitPromptOpen ? (
+                <div>
+                  <p className="text-xs text-slate-500 mb-2">Pehli Visit hai ya Revisit?</p>
+                  <div className="flex gap-2">
+                    <button
+                      disabled={moving}
+                      onClick={() => moveToVisit("VISIT")}
+                      className="flex-1 h-10 rounded-xl text-sm font-semibold bg-slate-800 text-white disabled:opacity-60"
+                    >
+                      First Visit
+                    </button>
+                    <button
+                      disabled={moving}
+                      onClick={() => moveToVisit("REVISIT")}
+                      className="flex-1 h-10 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 disabled:opacity-60"
+                    >
+                      Revisit
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => setVisitPromptOpen(false)}
+                    className="text-xs text-slate-400 mt-2"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : bookingConfirmOpen ? (
+                <div>
+                  <p className="text-xs text-slate-500 mb-3">
+                    Confirm booking? This closes the lead and notifies the whole team.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      disabled={moving}
+                      onClick={confirmBooking}
+                      className="flex-1 h-10 rounded-xl text-sm font-semibold bg-green-600 text-white disabled:opacity-60"
+                    >
+                      {moving ? "Logging..." : "Confirm Booking"}
+                    </button>
+                    <button
+                      disabled={moving}
+                      onClick={() => setBookingConfirmOpen(false)}
+                      className="flex-1 h-10 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 disabled:opacity-60"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {lead.boardStage !== "FOLLOW_UP" && (
+                    <button
+                      disabled={moving}
+                      onClick={moveToFollowUp}
+                      className="text-xs font-semibold px-3 py-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-60"
+                    >
+                      📞 Move to Follow-up
+                    </button>
+                  )}
+                  {lead.boardStage !== "VISIT" && (
+                    <button
+                      disabled={moving}
+                      onClick={() => setVisitPromptOpen(true)}
+                      className="text-xs font-semibold px-3 py-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-60"
+                    >
+                      🏠 Move to Visit
+                    </button>
+                  )}
+                  <button
+                    disabled={moving}
+                    onClick={() => setBookingConfirmOpen(true)}
+                    className="text-xs font-semibold px-3 py-2 rounded-xl bg-gradient-to-r from-yellow-400 to-amber-500 text-slate-900 hover:opacity-90 disabled:opacity-60"
+                  >
+                    ✅ Move to Booking
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {isTerminal ? (
             <div className="rounded-2xl bg-slate-100 p-4 text-sm text-slate-500 text-center">

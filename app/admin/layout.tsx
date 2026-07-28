@@ -81,6 +81,12 @@ icon:"👥"
 },
 
 {
+name:"Leads",
+href:"/admin/leads",
+icon:"🎯"
+},
+
+{
 name:"Posts",
 href:"/admin/posts",
 icon:"📝"
