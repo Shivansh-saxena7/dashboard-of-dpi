@@ -87,6 +87,12 @@ icon:"🎯"
 },
 
 {
+name:"Teams",
+href:"/admin/teams",
+icon:"🧑‍🤝‍🧑"
+},
+
+{
 name:"Posts",
 href:"/admin/posts",
 icon:"📝"
