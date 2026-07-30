@@ -1,10 +1,13 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { History } from "lucide-react";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
+import AdminLeadHistoryModal from "./AdminLeadHistoryModal";
 
 interface AdminLeadCardLead {
   id: string;
@@ -36,8 +39,30 @@ interface AdminLeadCardProps {
 //
 // Styled in blue-cyan (the established Admin accent, Section 2.7) —
 // deliberately NOT gold, which is reserved for employee-facing
-// primary CTAs. This card has no CTAs at all.
+// primary CTAs. This card has no CTAs at all except "View History,"
+// which is read-only (opens AdminLeadHistoryModal) and only shown
+// once there's actually a recycle chain worth auditing.
+//
+// The history modal's open/close state lives HERE (self-contained),
+// not lifted to the parent page — unlike the employee-side
+// LeadList/LeadCard split, where the parent needs to own selection
+// state because LeadDetailModal writes data that must optimistically
+// patch the list. AdminLeadHistoryModal never writes anything, so
+// there's no cross-card state to coordinate.
+//
+// AnimatePresence wraps the modal here (not inside the modal itself)
+// because this is exactly where the mount/unmount decision happens —
+// {historyOpen && ...} is this component's own conditional. That's
+// what makes AnimatePresence actually functional here, unlike the
+// earlier LeadDetailModal bug where it sat one level too deep and
+// never saw its own removal coming. The modal itself is portaled to
+// document.body (see its own comment) so its fixed-position backdrop/
+// drawer resolve against the viewport, not this card's transformed
+// (animated) box — that was the cause of the drawer sometimes
+// rendering as if it were a small centered card.
 export default function AdminLeadCard({ lead, index = 0 }: AdminLeadCardProps) {
+
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const statusDisplay = LEAD_STATUS_DISPLAY[lead.status];
   const priorityDisplay = LEAD_PRIORITY_DISPLAY[lead.priority];
@@ -128,6 +153,27 @@ export default function AdminLeadCard({ lead, index = 0 }: AdminLeadCardProps) {
           </div>
         )}
       </div>
+
+      {lead.recycleCount > 0 && (
+        <button
+          onClick={() => setHistoryOpen(true)}
+          className="flex items-center gap-1.5 mt-3 text-[11px] font-bold text-blue-700 hover:text-blue-900 transition"
+        >
+          <History size={12} />
+          View History
+        </button>
+      )}
+
+      <AnimatePresence>
+        {historyOpen && (
+          <AdminLeadHistoryModal
+            key="history-modal"
+            leadId={lead.id}
+            leadName={lead.name}
+            onClose={() => setHistoryOpen(false)}
+          />
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

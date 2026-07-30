@@ -2,11 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Search, ChevronDown, Target } from "lucide-react";
+import { Search, ChevronDown, Target, FileSpreadsheet, FileText } from "lucide-react";
+import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
 import AdminLeadCard from "@/components/AdminLeadCard";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES } from "@/lib/leadBoardStageDisplay";
+import { exportLeadsToExcel, exportLeadsToPDF } from "@/lib/exportLeadsReport";
 
 type SortOption = "NEWEST" | "OLDEST" | "SLA_URGENCY";
 
@@ -60,6 +62,7 @@ export default function AdminLeadsPage() {
   const [boardStageFilter, setBoardStageFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("NEWEST");
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     loadLeads();
@@ -85,7 +88,7 @@ export default function AdminLeadsPage() {
         created_at,
         current_owner_id,
         employees ( name ),
-        lead_history ( assigned_at, is_active )
+        lead_history ( assigned_at, is_active, first_call_at )
       `
       )
       .eq("lead_history.is_active", true)
@@ -170,6 +173,66 @@ export default function AdminLeadsPage() {
 
   }, [leads, searchQuery, employeeFilter, projectFilter, sourceFilter, boardStageFilter, statusFilter, sortBy]);
 
+  // Report-header content — Employee gets its own labeled line (per
+  // spec), the other four filters bundle into one "Filters: ..."
+  // line. Built from the same filter state driving visibleLeads, so
+  // the report header can never drift out of sync with what's
+  // actually in the export.
+  const reportMeta = useMemo(() => {
+    const employeeLabel = employeeFilter
+      ? employeeOptions.find((e) => e.id === employeeFilter)?.name ?? null
+      : null;
+
+    const otherFilters: { label: string; value: string }[] = [];
+
+    if (projectFilter) {
+      otherFilters.push({ label: "Project", value: projectFilter });
+    }
+
+    if (sourceFilter) {
+      otherFilters.push({ label: "Source", value: sourceFilter });
+    }
+
+    if (boardStageFilter) {
+      otherFilters.push({
+        label: "Board Stage",
+        value: BOARD_STAGES.find((b) => b.stage === boardStageFilter)?.label || boardStageFilter
+      });
+    }
+
+    if (statusFilter) {
+      otherFilters.push({
+        label: "Status",
+        value: LEAD_STATUS_DISPLAY[statusFilter as keyof typeof LEAD_STATUS_DISPLAY]?.label || statusFilter
+      });
+    }
+
+    return { employeeLabel, otherFilters };
+  }, [employeeFilter, projectFilter, sourceFilter, boardStageFilter, statusFilter, employeeOptions]);
+
+  // Exports exactly visibleLeads (already filtered/searched/sorted
+  // above) — never the full leads array. Both exceljs and jspdf are
+  // dynamically imported inside lib/exportLeadsReport.ts, so their
+  // weight only loads once one of these is actually clicked, not on
+  // every Admin Leads page load.
+  async function handleExport(format: "excel" | "pdf") {
+    if (visibleLeads.length === 0 || exporting) return;
+
+    setExporting(true);
+    try {
+      if (format === "excel") {
+        await exportLeadsToExcel(visibleLeads, reportMeta);
+      } else {
+        await exportLeadsToPDF(visibleLeads, reportMeta);
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Export failed. Please try again.");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <motion.div
@@ -242,6 +305,26 @@ export default function AdminLeadsPage() {
             <option value="OLDEST">Oldest First</option>
             <option value="SLA_URGENCY">SLA Urgency</option>
           </FilterSelect>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleExport("excel")}
+              disabled={visibleLeads.length === 0 || exporting}
+              className="flex items-center gap-1.5 h-10 px-3 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-emerald-100 transition"
+            >
+              <FileSpreadsheet size={14} />
+              Excel
+            </button>
+
+            <button
+              onClick={() => handleExport("pdf")}
+              disabled={visibleLeads.length === 0 || exporting}
+              className="flex items-center gap-1.5 h-10 px-3 rounded-lg bg-red-50 text-red-700 text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-red-100 transition"
+            >
+              <FileText size={14} />
+              PDF
+            </button>
+          </div>
         </div>
       </motion.div>
 

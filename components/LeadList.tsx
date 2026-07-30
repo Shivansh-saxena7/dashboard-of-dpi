@@ -6,6 +6,7 @@ import { Search, ChevronDown } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import LeadCard from "./LeadCard";
 import LeadDetailModal from "./LeadDetailModal";
+import SLABreachHistoryCard from "./SLABreachHistoryCard";
 import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
 
@@ -13,6 +14,7 @@ interface LeadListProps {
   employeeId: string;
 }
 
+type ActiveTab = BoardStage | "SLA_BREACH_HISTORY";
 type SortOption = "NEWEST" | "OLDEST" | "SLA_URGENCY";
 type DateRangeOption = "ALL" | "THIS_WEEK" | "THIS_MONTH" | "CUSTOM";
 
@@ -59,10 +61,21 @@ function FilterSelect({
 // own authored rows). There is no "recycled" badge to accidentally
 // render because the query simply has no path to that data.
 //
-// Search/filter/sort apply uniformly across all 4 board tabs (the
+// The 5th tab (SLA Breach) is a different data source entirely —
+// employee_sla_breach_history (a security_invoker view over
+// lead_history) rather than `leads`. It's deliberately queried with NO
+// employee_id filter here: the view's own RLS passthrough is what
+// scopes it to "my rows only," not app code. Adding a redundant
+// .eq("employee_id", ...) here would blur that — the guarantee
+// lives entirely in the database, and the query is written to make
+// that visible rather than implying app code is doing the real work.
+//
+// Search/filter/sort apply uniformly across the 4 board tabs (the
 // Lead Board spec named Follow-up/Visit/Booking specifically, but
 // one reusable bar is simpler than three separate ones and strictly
-// more capable, never less, for the Leads tab too).
+// more capable, never less, for the Leads tab too) — they're hidden
+// entirely on the SLA Breach tab, since there's no project/source/
+// name on that data to filter or search by.
 //
 // Mobile-first throughout (~95% of real usage): tabs scroll
 // horizontally, filters collapse to a 2-column grid below `sm`
@@ -71,11 +84,12 @@ function FilterSelect({
 export default function LeadList({ employeeId }: LeadListProps) {
 
   const [leads, setLeads] = useState<any[]>([]);
+  const [slaBreachHistory, setSlaBreachHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(new Date());
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<BoardStage>("LEADS");
+  const [activeTab, setActiveTab] = useState<ActiveTab>("LEADS");
   const [searchQuery, setSearchQuery] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
   const [sourceFilter, setSourceFilter] = useState("");
@@ -86,6 +100,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
 
   useEffect(() => {
     loadLeads();
+    loadSlaBreachHistory();
   }, [employeeId]);
 
   // Single shared clock for all cards' SLA countdowns, rather than
@@ -117,7 +132,8 @@ export default function LeadList({ employeeId }: LeadListProps) {
           id,
           call_count,
           outcome_at,
-          assigned_at
+          assigned_at,
+          first_call_at
         )
       `
       )
@@ -131,6 +147,17 @@ export default function LeadList({ employeeId }: LeadListProps) {
     }
 
     setLoading(false);
+  }
+
+  async function loadSlaBreachHistory() {
+    const { data, error } = await supabase
+      .from("employee_sla_breach_history")
+      .select("lead_history_id, assigned_at, ended_reason, project, source")
+      .order("assigned_at", { ascending: false });
+
+    if (!error && data) {
+      setSlaBreachHistory(data);
+    }
   }
 
   // Optimistic local patch after a successful log_lead_update_atomic
@@ -198,6 +225,10 @@ export default function LeadList({ employeeId }: LeadListProps) {
   );
 
   const visibleLeads = useMemo(() => {
+
+    if (activeTab === "SLA_BREACH_HISTORY") {
+      return [];
+    }
 
     let result = leads.filter((lead) => (lead.board_stage || "LEADS") === activeTab);
 
@@ -277,6 +308,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
   }
 
   const selectedLead = leads.find((lead) => lead.id === selectedLeadId);
+  const onHistoryTab = activeTab === "SLA_BREACH_HISTORY";
 
   return (
     <>
@@ -311,78 +343,117 @@ export default function LeadList({ employeeId }: LeadListProps) {
             </button>
           );
         })}
-      </motion.div>
 
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.05 }}
-        className="mx-4 mt-3 relative"
-      >
-        <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-        <input
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search name, mobile, or project..."
-          className="w-full h-12 rounded-2xl bg-white border border-slate-200 pl-10 pr-3 text-sm outline-none shadow-[0_2px_10px_rgba(15,23,42,0.04)] focus:ring-2 focus:ring-amber-200 focus:border-amber-300 transition"
-        />
-      </motion.div>
-
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.1 }}
-        className="mx-4 mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap"
-      >
-        <FilterSelect value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
-          <option value="">All Projects</option>
-          {projectOptions.map((p) => (
-            <option key={p} value={p}>{p}</option>
-          ))}
-        </FilterSelect>
-
-        <FilterSelect value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
-          <option value="">All Sources</option>
-          {sourceOptions.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </FilterSelect>
-
-        <FilterSelect
-          value={dateRangeFilter}
-          onChange={(e) => setDateRangeFilter(e.target.value as DateRangeOption)}
+        <button
+          onClick={() => setActiveTab("SLA_BREACH_HISTORY")}
+          className={`flex items-center gap-1.5 shrink-0 px-3.5 py-2.5 sm:py-2 rounded-xl text-sm font-bold transition ${
+            onHistoryTab
+              ? "bg-gradient-to-r from-red-500 to-rose-500 text-white shadow-[0_4px_12px_rgba(225,29,72,0.3)]"
+              : "bg-white text-slate-600 border border-slate-200"
+          }`}
         >
-          <option value="ALL">Any Time</option>
-          <option value="THIS_WEEK">This Week</option>
-          <option value="THIS_MONTH">This Month</option>
-          <option value="CUSTOM">Custom</option>
-        </FilterSelect>
-
-        <FilterSelect value={sortBy} onChange={(e) => setSortBy(e.target.value as SortOption)} className="sm:ml-auto">
-          <option value="NEWEST">Newest First</option>
-          <option value="OLDEST">Oldest First</option>
-          <option value="SLA_URGENCY">SLA Urgency</option>
-        </FilterSelect>
-
-        {dateRangeFilter === "CUSTOM" && (
-          <div className="col-span-2 flex gap-2">
-            <input
-              type="date"
-              value={customStart}
-              onChange={(e) => setCustomStart(e.target.value)}
-              className="flex-1 h-11 sm:h-10 rounded-xl bg-white border border-slate-200 px-3 text-xs text-slate-600 outline-none appearance-none"
-            />
-            <input
-              type="date"
-              value={customEnd}
-              onChange={(e) => setCustomEnd(e.target.value)}
-              className="flex-1 h-11 sm:h-10 rounded-xl bg-white border border-slate-200 px-3 text-xs text-slate-600 outline-none appearance-none"
-            />
-          </div>
-        )}
+          <span>⚠️</span>
+          SLA Breach
+          <span
+            className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full ${
+              onHistoryTab ? "bg-white/20" : "bg-slate-100 text-slate-500"
+            }`}
+          >
+            {slaBreachHistory.length}
+          </span>
+        </button>
       </motion.div>
 
-      {visibleLeads.length === 0 ? (
+      {!onHistoryTab && (
+        <>
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.05 }}
+            className="mx-4 mt-3 relative"
+          >
+            <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search name, mobile, or project..."
+              className="w-full h-12 rounded-2xl bg-white border border-slate-200 pl-10 pr-3 text-sm outline-none shadow-[0_2px_10px_rgba(15,23,42,0.04)] focus:ring-2 focus:ring-amber-200 focus:border-amber-300 transition"
+            />
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.1 }}
+            className="mx-4 mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap"
+          >
+            <FilterSelect value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
+              <option value="">All Projects</option>
+              {projectOptions.map((p) => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </FilterSelect>
+
+            <FilterSelect value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
+              <option value="">All Sources</option>
+              {sourceOptions.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </FilterSelect>
+
+            <FilterSelect
+              value={dateRangeFilter}
+              onChange={(e) => setDateRangeFilter(e.target.value as DateRangeOption)}
+            >
+              <option value="ALL">Any Time</option>
+              <option value="THIS_WEEK">This Week</option>
+              <option value="THIS_MONTH">This Month</option>
+              <option value="CUSTOM">Custom</option>
+            </FilterSelect>
+
+            <FilterSelect value={sortBy} onChange={(e) => setSortBy(e.target.value as SortOption)} className="sm:ml-auto">
+              <option value="NEWEST">Newest First</option>
+              <option value="OLDEST">Oldest First</option>
+              <option value="SLA_URGENCY">SLA Urgency</option>
+            </FilterSelect>
+
+            {dateRangeFilter === "CUSTOM" && (
+              <div className="col-span-2 flex gap-2">
+                <input
+                  type="date"
+                  value={customStart}
+                  onChange={(e) => setCustomStart(e.target.value)}
+                  className="flex-1 h-11 sm:h-10 rounded-xl bg-white border border-slate-200 px-3 text-xs text-slate-600 outline-none appearance-none"
+                />
+                <input
+                  type="date"
+                  value={customEnd}
+                  onChange={(e) => setCustomEnd(e.target.value)}
+                  className="flex-1 h-11 sm:h-10 rounded-xl bg-white border border-slate-200 px-3 text-xs text-slate-600 outline-none appearance-none"
+                />
+              </div>
+            )}
+          </motion.div>
+        </>
+      )}
+
+      {onHistoryTab ? (
+        slaBreachHistory.length === 0 ? (
+          <div className="flex flex-col items-center justify-center mt-16 text-center px-4">
+            <div className="text-5xl mb-3">⚠️</div>
+            <h2 className="text-lg font-semibold text-gray-700">No SLA breaches</h2>
+            <p className="text-sm text-gray-500 mt-1">
+              Leads you didn&apos;t contact in time will show up here after being reassigned.
+            </p>
+          </div>
+        ) : (
+          <div className="mx-4 mt-4 space-y-3 pb-6">
+            {slaBreachHistory.map((entry: any, index: number) => (
+              <SLABreachHistoryCard key={entry.lead_history_id} entry={entry} index={index} />
+            ))}
+          </div>
+        )
+      ) : visibleLeads.length === 0 ? (
         <div className="flex flex-col items-center justify-center mt-16 text-center px-4">
           <div className="text-5xl mb-3">
             {BOARD_STAGES.find((t) => t.stage === activeTab)?.emoji || "📋"}
@@ -404,6 +475,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
               onOpen={() => setSelectedLeadId(lead.id)}
               lead={{
                 id: lead.id,
+                leadHistoryId: lead.lead_history[0]?.id,
                 name: lead.name,
                 mobile: lead.mobile,
                 project: lead.project,

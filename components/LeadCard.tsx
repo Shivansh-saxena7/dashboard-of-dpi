@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { Phone, Timer } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 import { calculateSLAStatus } from "@/lib/calculateSLAStatus";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
@@ -9,6 +10,7 @@ import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
 
 interface LeadCardLead {
   id: string;
+  leadHistoryId: string;
   name: string;
   mobile: string;
   project: string | null;
@@ -90,6 +92,21 @@ export default function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps
 
   const initial = lead.name?.charAt(0)?.toUpperCase() || "?";
 
+  // Fire-and-forget: logs the first-ever call-click timestamp via
+  // log_call_click_atomic (no-ops after the first click, see the
+  // RPC's own coalesce). Deliberately not awaited — the tel: link
+  // must open immediately, this is a background signal for Admin
+  // response-time reporting, not something that should ever block or
+  // interrupt the actual call.
+  function handleCallClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    supabase
+      .rpc("log_call_click_atomic", { p_lead_history_id: lead.leadHistoryId })
+      .then(({ error }) => {
+        if (error) console.error("log_call_click_atomic failed:", error.message);
+      });
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 16 }}
@@ -165,7 +182,7 @@ export default function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps
 
       <motion.a
         href={`tel:${lead.mobile}`}
-        onClick={(e) => e.stopPropagation()}
+        onClick={handleCallClick}
         whileTap={{ scale: 0.98 }}
         className="mt-4 flex items-center justify-center gap-2 h-11 rounded-xl bg-gradient-to-r from-yellow-400 to-amber-500 text-slate-900 text-sm font-bold shadow-[0_6px_16px_rgba(217,119,6,0.3)] active:shadow-[0_2px_8px_rgba(217,119,6,0.3)]"
       >
