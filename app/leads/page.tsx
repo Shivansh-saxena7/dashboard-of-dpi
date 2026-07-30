@@ -68,7 +68,7 @@ export default function LeadsPage() {
   return (
     <main className="min-h-screen bg-gradient-to-br from-white via-blue-50 to-blue-100">
       <Header />
-      <EmployeeTabBar />
+      <EmployeeTabBar role={employee?.role} />
       {employee?.id && <LeadList employeeId={employee.id} />}
       <Footer />
     </main>

@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Users, Crown, Search, Plus, Check } from "lucide-react";
+import { Users, Crown, Search, Plus, Check, Trash2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import toast from "react-hot-toast";
+import DeleteModal from "../components/DeleteModal";
 
 // Admin-only team management — creating teams, assigning a Team
 // Leader, and adding/removing members, all from one team-centric
@@ -31,6 +32,9 @@ export default function AdminTeamsPage() {
   const [togglingMemberId, setTogglingMemberId] = useState<string | null>(null);
 
   const [memberSearch, setMemberSearch] = useState("");
+
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -213,6 +217,68 @@ export default function AdminTeamsPage() {
     }
   }
 
+  async function deleteTeam() {
+    if (!selectedTeam) return;
+
+    setDeleting(true);
+
+    try {
+
+      // Must clear team_id on every member BEFORE deleting the team
+      // row — employees.team_id is a foreign key to teams(id) with
+      // no ON DELETE clause, so deleting the team first would fail
+      // with a foreign-key-violation while any member still points
+      // at it.
+      const { error: clearMembersError } = await supabase
+        .from("employees")
+        .update({ team_id: null })
+        .eq("team_id", selectedTeam.id);
+
+      if (clearMembersError) {
+        toast.error(clearMembersError.message || "Could not remove team members.");
+        return;
+      }
+
+      // Step the leader back down to 'employee' — but only if they
+      // aren't leading some other team too.
+      if (selectedTeam.team_leader_id) {
+        const { count } = await supabase
+          .from("teams")
+          .select("*", { count: "exact", head: true })
+          .eq("team_leader_id", selectedTeam.team_leader_id)
+          .neq("id", selectedTeam.id);
+
+        if (!count) {
+          await supabase
+            .from("employees")
+            .update({ role: "employee" })
+            .eq("id", selectedTeam.team_leader_id);
+        }
+      }
+
+      const { error: deleteError } = await supabase
+        .from("teams")
+        .delete()
+        .eq("id", selectedTeam.id);
+
+      if (deleteError) {
+        toast.error(deleteError.message || "Could not delete team.");
+        return;
+      }
+
+      toast.success("Team deleted.");
+      setDeleteModalOpen(false);
+      setSelectedTeamId(null);
+      await loadData();
+
+    } catch (err) {
+      console.log(err);
+      toast.error("Something went wrong.");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   const visibleEmployeesForChecklist = employees.filter((e) => {
     if (!memberSearch.trim()) return true;
     const q = memberSearch.trim().toLowerCase();
@@ -300,8 +366,16 @@ export default function AdminTeamsPage() {
                 animate={{ opacity: 1, y: 0 }}
                 className="space-y-5"
               >
-                <div className="bg-white rounded-[24px] border border-slate-100 shadow-md p-6">
-                  <div className="flex items-center justify-between mb-3">
+                <div className="bg-white rounded-[24px] border border-slate-100 shadow-md p-6 relative">
+                  <button
+                    onClick={() => setDeleteModalOpen(true)}
+                    title="Delete Team"
+                    className="absolute top-5 right-5 h-9 w-9 rounded-full bg-red-50 border border-red-100 flex items-center justify-center text-red-500 hover:bg-red-500 hover:text-white transition"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+
+                  <div className="flex items-center justify-between mb-3 pr-12">
                     <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold">Team Name</p>
                     <p className="text-[10px] text-slate-400">Edit and press Save to rename</p>
                   </div>
@@ -408,6 +482,20 @@ export default function AdminTeamsPage() {
             )}
           </div>
         </div>
+      )}
+
+      {selectedTeam && (
+        <DeleteModal
+          open={deleteModalOpen}
+          setOpen={setDeleteModalOpen}
+          onDelete={deleteTeam}
+          title="Delete Team"
+          message={
+            deleting
+              ? "Deleting..."
+              : `Are you sure? This will remove ${memberCountByTeam.get(selectedTeam.id) || 0} member(s) from "${selectedTeam.name}" and permanently delete the team. This action cannot be undone.`
+          }
+        />
       )}
     </div>
   );

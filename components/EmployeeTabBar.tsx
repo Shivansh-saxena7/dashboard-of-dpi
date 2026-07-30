@@ -3,22 +3,31 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const TABS = [
+interface EmployeeTabBarProps {
+  role?: string;
+}
+
+const BASE_TABS = [
   { href: "/", label: "Posts" },
   { href: "/leads", label: "Leads" }
 ];
 
-// Simple two-tab nav between the V1 (Posts) and V2 (Leads) employee
-// views. No shared layout wraps both pages yet, so this is dropped
-// into each page individually (app/page.tsx, app/leads/page.tsx) —
-// same as StartShiftCard. Deliberately minimal/extensible: a third
-// V3 tab is just one more entry in this array, nothing to restructure.
-export default function EmployeeTabBar() {
+const TEAM_LEADER_TAB = { href: "/team", label: "Team" };
+
+// Nav between the V1 (Posts) and V2 (Leads) employee views, plus a
+// conditional "Team" tab for team_leader role only — this is exactly
+// the "one more array entry" extensibility this component was built
+// for. No shared layout wraps these pages yet, so this is dropped
+// into each page individually (app/page.tsx, app/leads/page.tsx,
+// app/team/page.tsx) — same as StartShiftCard.
+export default function EmployeeTabBar({ role }: EmployeeTabBarProps) {
   const pathname = usePathname();
+
+  const tabs = role === "team_leader" ? [...BASE_TABS, TEAM_LEADER_TAB] : BASE_TABS;
 
   return (
     <div className="mx-4 mt-4 flex gap-1 rounded-2xl bg-slate-100 p-1">
-      {TABS.map((tab) => {
+      {tabs.map((tab) => {
         const active = pathname === tab.href;
 
         return (

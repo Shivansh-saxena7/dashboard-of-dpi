@@ -6,7 +6,9 @@ export default function DeleteModal({
 
 open,
 setOpen,
-onDelete
+onDelete,
+title = "Delete Employee",
+message = "Are you sure you want to delete this employee?"
 
 }:any){
 
@@ -62,7 +64,7 @@ text-2xl
 font-bold
 ">
 
-Delete Employee
+{title}
 
 </h1>
 
@@ -84,7 +86,7 @@ text-slate-600
 mb-8
 ">
 
-Are you sure you want to delete this employee?
+{message}
 
 </p>
 
