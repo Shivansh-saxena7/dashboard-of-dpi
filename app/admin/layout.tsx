@@ -93,6 +93,12 @@ icon:"🧑‍🤝‍🧑"
 },
 
 {
+name:"Project Rules",
+href:"/admin/project-rules",
+icon:"🏢"
+},
+
+{
 name:"Posts",
 href:"/admin/posts",
 icon:"📝"

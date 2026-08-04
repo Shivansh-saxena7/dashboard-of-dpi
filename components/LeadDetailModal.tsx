@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { X, Phone, Loader2, Send, Repeat } from "lucide-react";
+import { X, Phone, Loader2, Send, Repeat, MessageCircle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import toast from "react-hot-toast";
 import { getValidNextLeadStatuses, LeadStatus } from "@/lib/getValidNextLeadStatuses";
@@ -10,6 +10,7 @@ import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BoardStage } from "@/lib/leadBoardStageDisplay";
 import { LEAD_POINTS } from "@/lib/calculateLeadPoints";
 import { AssignedBySource } from "@/lib/assignedByDisplay";
+import { buildWhatsAppLink } from "@/lib/buildWhatsAppLink";
 
 export interface LeadDetailLead {
   id: string;
@@ -55,6 +56,7 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
   const [loadingNotes, setLoadingNotes] = useState(true);
   const [selectedStatus, setSelectedStatus] = useState<LeadStatus | null>(null);
   const [noteText, setNoteText] = useState("");
+  const [reminderDays, setReminderDays] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const [visitPromptOpen, setVisitPromptOpen] = useState(false);
@@ -81,6 +83,26 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
     setLoadingNotes(false);
   }
 
+  // Same fire-and-forget pattern LeadCard uses — this drawer's own
+  // Call/WhatsApp links previously had no tracking at all, meaning a
+  // click from here (rather than the card) never recorded
+  // first_call_at/first_whatsapp_at.
+  function handleCallClick() {
+    supabase
+      .rpc("log_call_click_atomic", { p_lead_history_id: lead.leadHistoryId })
+      .then(({ error }) => {
+        if (error) console.error("log_call_click_atomic failed:", error.message);
+      });
+  }
+
+  function handleWhatsAppClick() {
+    supabase
+      .rpc("log_whatsapp_click_atomic", { p_lead_history_id: lead.leadHistoryId })
+      .then(({ error }) => {
+        if (error) console.error("log_whatsapp_click_atomic failed:", error.message);
+      });
+  }
+
   const validNextStatuses = getValidNextLeadStatuses(lead.status);
   const isTerminal = validNextStatuses.length === 0;
 
@@ -97,7 +119,8 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
         p_lead_id: lead.id,
         p_lead_history_id: lead.leadHistoryId,
         p_new_status: selectedStatus,
-        p_note: noteText.trim() || null
+        p_note: noteText.trim() || null,
+        p_reminder_days: reminderDays ? parseInt(reminderDays, 10) : null
       });
 
       if (error) {
@@ -113,6 +136,7 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
       });
 
       setNoteText("");
+      setReminderDays("");
       setSelectedStatus(null);
       loadNotes();
 
@@ -258,13 +282,27 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
             </div>
           )}
 
-          <a
-            href={`tel:${lead.mobile}`}
-            className="mt-4 flex items-center justify-center gap-2 h-11 rounded-xl bg-gradient-to-r from-yellow-400 to-amber-500 text-slate-900 text-sm font-semibold shadow-[0_8px_20px_rgba(217,119,6,0.3)]"
-          >
-            <Phone size={15} />
-            Call {lead.mobile}
-          </a>
+          <div className="mt-4 flex items-center gap-2">
+            <a
+              href={`tel:${lead.mobile}`}
+              onClick={handleCallClick}
+              className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl bg-gradient-to-r from-yellow-400 to-amber-500 text-slate-900 text-sm font-semibold shadow-[0_8px_20px_rgba(217,119,6,0.3)]"
+            >
+              <Phone size={15} />
+              Call
+            </a>
+
+            <a
+              href={buildWhatsAppLink(lead.mobile)}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={handleWhatsAppClick}
+              className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl bg-emerald-500 text-white text-sm font-semibold shadow-[0_8px_20px_rgba(16,185,129,0.3)]"
+            >
+              <MessageCircle size={15} />
+              WhatsApp
+            </a>
+          </div>
         </div>
 
         <div className="px-6 py-6 space-y-6">
@@ -384,6 +422,21 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
                 rows={3}
                 className="w-full rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-sm outline-none resize-none"
               />
+
+              {noteText.trim() && (
+                <div className="flex items-center gap-2 mt-2">
+                  <label className="text-xs text-slate-500 shrink-0">Remind me in</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={reminderDays}
+                    onChange={(e) => setReminderDays(e.target.value)}
+                    placeholder="—"
+                    className="w-16 h-8 rounded-lg bg-slate-50 border border-slate-200 px-2 text-sm outline-none text-center"
+                  />
+                  <span className="text-xs text-slate-500">day{reminderDays === "1" ? "" : "s"}</span>
+                </div>
+              )}
 
               <motion.button
                 whileHover={{ scale: 1.01 }}

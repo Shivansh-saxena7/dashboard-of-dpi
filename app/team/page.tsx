@@ -227,7 +227,7 @@ export default function TeamPage() {
         current_owner_id,
         employees ( name ),
         lead_history (
-          assigned_at, is_active, first_call_at, assigned_by_type,
+          assigned_at, is_active, first_call_at, first_whatsapp_at, assigned_by_type,
           assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)
         )
       `

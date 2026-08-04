@@ -5,7 +5,7 @@ import Papa from "papaparse";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import toast from "react-hot-toast";
-import { ArrowLeft, Upload, ChevronDown, Loader2, CheckCircle2, AlertTriangle, RotateCcw, Trash2, Download } from "lucide-react";
+import { ArrowLeft, Upload, ChevronDown, Loader2, CheckCircle2, AlertTriangle, RotateCcw, Trash2, Download, Users, Building2, Plus } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { normalizeMobile } from "@/lib/normalizeMobile";
 import { guessFieldForHeader, MAPPED_FIELD_OPTIONS, MappedField } from "@/lib/csvFieldMatcher";
@@ -95,12 +95,75 @@ export default function ImportLeadsPage() {
   const [deletingBatch, setDeletingBatch] = useState(false);
 
   const [eligibleEmployeeCount, setEligibleEmployeeCount] = useState<number | null>(null);
+  const [confirmZeroEligible, setConfirmZeroEligible] = useState(false);
+
+  const [expandedBatchId, setExpandedBatchId] = useState<string | null>(null);
+  const [loadingBatchDetail, setLoadingBatchDetail] = useState(false);
+  const [batchDetail, setBatchDetail] = useState<{
+    perEmployee: { id: string; name: string; count: number }[];
+    perTeam: { id: string; name: string; count: number }[];
+    stillUnassigned: number;
+  } | null>(null);
+
+  const [assignMode, setAssignMode] = useState<"AUTO" | "TEAM">("AUTO");
+  const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
+  const [targetTeamId, setTargetTeamId] = useState("");
+
+  const [projectRules, setProjectRules] = useState<{ project: string; assigned_employee_id: string }[]>([]);
+  const [creatingRuleForProject, setCreatingRuleForProject] = useState<string | null>(null);
+  const [newRuleEmployeeId, setNewRuleEmployeeId] = useState("");
+  const [creatingRule, setCreatingRule] = useState(false);
 
   useEffect(() => {
     loadSourceOptions();
     loadEmployeeNames();
     loadBatches();
+    loadTeams();
+    loadProjectRules();
   }, []);
+
+  async function loadTeams() {
+    const { data } = await supabase.from("teams").select("id, name").order("name");
+    setTeams(data || []);
+  }
+
+  async function loadProjectRules() {
+    const { data } = await supabase.from("project_assignment_rules").select("project, assigned_employee_id");
+    setProjectRules(data || []);
+  }
+
+  // Distinct project values from whatever column is currently mapped
+  // to "project" — recomputed live as the mapping changes in the MAP
+  // step, so this stays accurate without a separate confirm step.
+  const csvProjectValues = (() => {
+    const projectHeader = Object.entries(mapping).find(([, field]) => field === "project")?.[0];
+    if (!projectHeader) return [];
+    return Array.from(
+      new Set(csvRows.map((row) => (row[projectHeader] || "").trim()).filter(Boolean))
+    );
+  })();
+
+  async function handleCreateRuleForProject(project: string) {
+    if (!newRuleEmployeeId) return;
+
+    setCreatingRule(true);
+
+    const { error } = await supabase.from("project_assignment_rules").insert({
+      project,
+      assigned_employee_id: newRuleEmployeeId
+    });
+
+    if (error) {
+      toast.error(error.message || "Could not create rule.");
+    } else {
+      toast.success(`Rule created for "${project}".`);
+      setCreatingRuleForProject(null);
+      setNewRuleEmployeeId("");
+      loadProjectRules();
+    }
+
+    setCreatingRule(false);
+  }
 
   async function loadSourceOptions() {
     const { data } = await supabase.from("leads").select("source");
@@ -126,6 +189,58 @@ export default function ImportLeadsPage() {
 
     setBatches(data || []);
     setLoadingBatches(false);
+  }
+
+  // Live-queries current leads state rather than trusting the batch's
+  // own stored distribution_summary — a Team Leader may have since
+  // distributed some of a direct-to-team batch's reserved leads to
+  // individual members, which the frozen import-time summary would
+  // never reflect. This always shows what's actually true right now.
+  async function toggleExpand(batchId: string) {
+    if (expandedBatchId === batchId) {
+      setExpandedBatchId(null);
+      setBatchDetail(null);
+      return;
+    }
+
+    setExpandedBatchId(batchId);
+    setBatchDetail(null);
+    setLoadingBatchDetail(true);
+
+    const { data } = await supabase
+      .from("leads")
+      .select("current_owner_id, pending_team_id")
+      .eq("csv_import_batch_id", batchId);
+
+    const employeeCounts = new Map<string, number>();
+    const teamCounts = new Map<string, number>();
+    let stillUnassigned = 0;
+
+    (data || []).forEach((lead) => {
+      if (lead.current_owner_id) {
+        employeeCounts.set(lead.current_owner_id, (employeeCounts.get(lead.current_owner_id) || 0) + 1);
+      } else if (lead.pending_team_id) {
+        teamCounts.set(lead.pending_team_id, (teamCounts.get(lead.pending_team_id) || 0) + 1);
+      } else {
+        stillUnassigned++;
+      }
+    });
+
+    setBatchDetail({
+      perEmployee: Array.from(employeeCounts.entries()).map(([id, count]) => ({
+        id,
+        name: employeeNames.get(id) || "Unknown",
+        count
+      })),
+      perTeam: Array.from(teamCounts.entries()).map(([id, count]) => ({
+        id,
+        name: teams.find((t) => t.id === id)?.name || "Unknown",
+        count
+      })),
+      stillUnassigned
+    });
+
+    setLoadingBatchDetail(false);
   }
 
   async function handleRetryDistribution(batchId: string) {
@@ -256,6 +371,11 @@ export default function ImportLeadsPage() {
       return;
     }
 
+    if (assignMode === "TEAM" && !targetTeamId) {
+      toast.error("Select a team.");
+      return;
+    }
+
     setSourceName(finalSource);
     setLoadingMapping(true);
 
@@ -353,7 +473,14 @@ export default function ImportLeadsPage() {
     });
 
     setMappedRows(finalRows);
-    await checkEligibility();
+
+    // Eligibility is irrelevant for direct-to-team — nothing gets
+    // auto-distributed, so there's no "nobody eligible" scenario to
+    // warn about here.
+    if (assignMode === "AUTO") {
+      await checkEligibility();
+    }
+
     setBuildingPreview(false);
     setStep("PREVIEW");
   }
@@ -420,7 +547,12 @@ export default function ImportLeadsPage() {
             "Content-Type": "application/json",
             Authorization: `Bearer ${session.access_token}`
           },
-          body: JSON.stringify({ rows: rowsToSend, source_name: sourceName, filename })
+          body: JSON.stringify({
+            rows: rowsToSend,
+            source_name: sourceName,
+            filename,
+            target_team_id: assignMode === "TEAM" ? targetTeamId : null
+          })
         }
       );
 
@@ -441,7 +573,22 @@ export default function ImportLeadsPage() {
       toast.error("Something went wrong during import.");
     } finally {
       setImporting(false);
+      setConfirmZeroEligible(false);
     }
+  }
+
+  // Gate between the button and the actual import call — only kicks
+  // in when nobody's eligible right now (AUTO mode). First click shows
+  // an explicit Yes/No confirmation instead of importing silently;
+  // only the second click ("Yes, Import Anyway") actually calls
+  // handleImport. Normal case (someone eligible, or TEAM mode where
+  // eligibility doesn't apply) imports on the first click, unchanged.
+  function handleImportClick() {
+    if (assignMode === "AUTO" && eligibleEmployeeCount === 0 && !confirmZeroEligible) {
+      setConfirmZeroEligible(true);
+      return;
+    }
+    handleImport();
   }
 
   function startNewImport() {
@@ -456,6 +603,9 @@ export default function ImportLeadsPage() {
     setMappedRows([]);
     setResult(null);
     setEligibleEmployeeCount(null);
+    setConfirmZeroEligible(false);
+    setAssignMode("AUTO");
+    setTargetTeamId("");
   }
 
   const validCount = mappedRows.filter((r) => r.isValid && !r.isDuplicate).length;
@@ -524,6 +674,51 @@ export default function ImportLeadsPage() {
           </div>
 
           <div>
+            <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold mb-2">Assignment</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setAssignMode("AUTO")}
+                className={`h-11 rounded-xl text-sm font-semibold border transition ${
+                  assignMode === "AUTO"
+                    ? "bg-blue-50 border-blue-200 text-blue-700"
+                    : "bg-white border-slate-200 text-slate-500"
+                }`}
+              >
+                Auto-distribute
+              </button>
+              <button
+                onClick={() => setAssignMode("TEAM")}
+                className={`h-11 rounded-xl text-sm font-semibold border transition flex items-center justify-center gap-1.5 ${
+                  assignMode === "TEAM"
+                    ? "bg-blue-50 border-blue-200 text-blue-700"
+                    : "bg-white border-slate-200 text-slate-500"
+                }`}
+              >
+                <Users size={14} />
+                Assign to a Team
+              </button>
+            </div>
+
+            {assignMode === "AUTO" ? (
+              <p className="text-[11px] text-slate-400 mt-1.5">
+                Distributed via round-robin + Project Rules, same as a normal lead.
+              </p>
+            ) : (
+              <>
+                <FilterSelect value={targetTeamId} onChange={(e) => setTargetTeamId(e.target.value)} className="mt-2">
+                  <option value="" disabled>Select a team...</option>
+                  {teams.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </FilterSelect>
+                <p className="text-[11px] text-slate-400 mt-1.5">
+                  Round robin is bypassed entirely — every lead is reserved for this team, visible to its Team Leader under "Pending Leads" for manual distribution.
+                </p>
+              </>
+            )}
+          </div>
+
+          <div>
             <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold mb-2">CSV File</p>
             <label className="flex flex-col items-center justify-center gap-2 h-32 rounded-xl border-2 border-dashed border-slate-200 hover:border-blue-300 cursor-pointer transition">
               <Upload size={20} className="text-slate-400" />
@@ -572,6 +767,72 @@ export default function ImportLeadsPage() {
               </div>
             ))}
           </div>
+
+          {csvProjectValues.length > 0 && (
+            <div className="rounded-xl bg-blue-50 border border-blue-100 p-4">
+              <div className="flex items-center gap-1.5 mb-2">
+                <Building2 size={13} className="text-blue-600" />
+                <p className="text-[10px] uppercase tracking-[0.2em] text-blue-700 font-bold">
+                  Project Rules — this CSV's projects
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                {csvProjectValues.map((project) => {
+                  const matchedEmployeeIds = Array.from(
+                    new Set(
+                      projectRules
+                        .filter((r) => r.project.trim().toLowerCase() === project.trim().toLowerCase())
+                        .map((r) => r.assigned_employee_id)
+                    )
+                  );
+
+                  return (
+                    <div key={project} className="text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-700 font-medium truncate">{project}</span>
+                        {matchedEmployeeIds.length > 0 ? (
+                          <span className="shrink-0 text-emerald-700 font-semibold">
+                            Fixed: {matchedEmployeeIds.map((id) => employeeNames.get(id) || "Unknown").join(", ")}
+                          </span>
+                        ) : creatingRuleForProject === project ? (
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <select
+                              value={newRuleEmployeeId}
+                              onChange={(e) => setNewRuleEmployeeId(e.target.value)}
+                              className="h-7 rounded-md bg-white border border-blue-200 px-1.5 text-[11px] outline-none"
+                            >
+                              <option value="">Select...</option>
+                              {Array.from(employeeNames.entries()).map(([id, name]) => (
+                                <option key={id} value={id}>{name}</option>
+                              ))}
+                            </select>
+                            <button
+                              onClick={() => handleCreateRuleForProject(project)}
+                              disabled={creatingRule || !newRuleEmployeeId}
+                              className="h-7 px-2 rounded-md bg-blue-600 text-white text-[11px] font-bold disabled:opacity-50"
+                            >
+                              Save
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => { setCreatingRuleForProject(project); setNewRuleEmployeeId(""); }}
+                            className="shrink-0 flex items-center gap-1 text-blue-700 font-semibold hover:text-blue-800"
+                          >
+                            <Plus size={11} />
+                            Create rule
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] text-blue-700/70 mt-2">
+                Leads for a "Fixed" project bypass round robin automatically at import — no per-row action needed.
+              </p>
+            </div>
+          )}
 
           <div className="flex items-center gap-2">
             <button
@@ -658,23 +919,48 @@ export default function ImportLeadsPage() {
             </table>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setStep("MAP")}
-              disabled={importing}
-              className="h-11 px-5 rounded-xl font-semibold text-slate-600 border border-slate-200 disabled:opacity-50"
-            >
-              Back
-            </button>
-            <button
-              onClick={handleImport}
-              disabled={importing || validCount === 0}
-              className="h-11 px-6 rounded-xl font-semibold text-white bg-gradient-to-r from-blue-600 to-cyan-500 disabled:opacity-50 flex items-center gap-2"
-            >
-              {importing ? <Loader2 className="animate-spin" size={16} /> : null}
-              Import {validCount} Lead{validCount === 1 ? "" : "s"}
-            </button>
-          </div>
+          {confirmZeroEligible ? (
+            <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 space-y-3">
+              <p className="text-sm text-amber-800 font-medium">
+                Abhi koi employee active nahi hai. Import karne par saari {validCount} leads UNASSIGNED reh jayengi — baad mein "Retry Distribution" (Import History mein) karni hogi. Continue karna hai?
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setConfirmZeroEligible(false)}
+                  disabled={importing}
+                  className="h-10 px-4 rounded-lg font-semibold text-slate-600 border border-slate-200 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleImport}
+                  disabled={importing}
+                  className="h-10 px-4 rounded-lg font-semibold text-white bg-amber-500 hover:bg-amber-600 disabled:opacity-50 flex items-center gap-2"
+                >
+                  {importing ? <Loader2 className="animate-spin" size={14} /> : null}
+                  Yes, Import Anyway
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setStep("MAP")}
+                disabled={importing}
+                className="h-11 px-5 rounded-xl font-semibold text-slate-600 border border-slate-200 disabled:opacity-50"
+              >
+                Back
+              </button>
+              <button
+                onClick={handleImportClick}
+                disabled={importing || validCount === 0}
+                className="h-11 px-6 rounded-xl font-semibold text-white bg-gradient-to-r from-blue-600 to-cyan-500 disabled:opacity-50 flex items-center gap-2"
+              >
+                {importing ? <Loader2 className="animate-spin" size={16} /> : null}
+                Import {validCount} Lead{validCount === 1 ? "" : "s"}
+              </button>
+            </div>
+          )}
         </motion.div>
       )}
 
@@ -689,6 +975,16 @@ export default function ImportLeadsPage() {
             <div className="flex items-start gap-2 rounded-xl bg-amber-50 border border-amber-100 p-3">
               <AlertTriangle size={14} className="text-amber-600 shrink-0 mt-0.5" />
               <p className="text-xs text-amber-800">{result.warning}</p>
+            </div>
+          )}
+
+          {result.reservedForTeam && (
+            <div className="flex items-start gap-2 rounded-xl bg-blue-50 border border-blue-100 p-3">
+              <Users size={14} className="text-blue-600 shrink-0 mt-0.5" />
+              <p className="text-xs text-blue-800">
+                Reserved for {teams.find((t) => t.id === result.reservedForTeam.id)?.name || "the selected team"} —
+                now visible in their Team Leader's "Pending Leads" section for manual distribution.
+              </p>
             </div>
           )}
 
@@ -746,60 +1042,137 @@ export default function ImportLeadsPage() {
         ) : batches.length === 0 ? (
           <p className="text-sm text-slate-400">No imports yet.</p>
         ) : (
-          <div className="space-y-2 max-h-[420px] overflow-y-auto">
-            {batches.map((b) => (
-              <div key={b.id} className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-slate-50 gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-semibold text-slate-700 truncate">
-                      {b.source_name} {b.filename && <span className="text-slate-400 font-normal">· {b.filename}</span>}
-                    </p>
-                    {b.status === "deleted" && (
-                      <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-500">
-                        Deleted
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-slate-400">
-                    {new Date(b.uploaded_at).toLocaleString([], {
-                      month: "short",
-                      day: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit"
-                    })}
-                  </p>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    {b.imported_count}/{b.total_rows} imported · {b.assigned_count} assigned
-                  </p>
-                </div>
+          <div className="space-y-2 max-h-[600px] overflow-y-auto">
+            {batches.map((b) => {
+              const isExpanded = expandedBatchId === b.id;
 
-                {b.status === "active" && (
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {b.assigned_count < b.imported_count && (
-                      <button
-                        onClick={() => handleRetryDistribution(b.id)}
-                        disabled={retryingBatchId === b.id}
-                        title="Retry Distribution"
-                        className="h-8 w-8 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 hover:bg-blue-100 transition disabled:opacity-50"
-                      >
-                        {retryingBatchId === b.id ? (
-                          <Loader2 className="animate-spin" size={13} />
-                        ) : (
-                          <RotateCcw size={13} />
-                        )}
-                      </button>
-                    )}
+              return (
+                <div key={b.id} className="rounded-xl bg-slate-50 border border-slate-100 overflow-hidden">
+                  <div className="flex items-center justify-between gap-3 px-3 py-2.5">
                     <button
-                      onClick={() => setDeleteModalBatchId(b.id)}
-                      title="Delete Batch"
-                      className="h-8 w-8 rounded-lg bg-red-50 border border-red-100 flex items-center justify-center text-red-500 hover:bg-red-100 transition"
+                      onClick={() => toggleExpand(b.id)}
+                      className="min-w-0 flex-1 flex items-center gap-2 text-left"
                     >
-                      <Trash2 size={13} />
+                      <ChevronDown
+                        size={14}
+                        className={`shrink-0 text-slate-400 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-semibold text-slate-700 truncate">
+                            {b.source_name} {b.filename && <span className="text-slate-400 font-normal">· {b.filename}</span>}
+                          </p>
+                          {b.status === "deleted" && (
+                            <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-500">
+                              Deleted
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-400">
+                          {new Date(b.uploaded_at).toLocaleString([], {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit"
+                          })}
+                        </p>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          {b.imported_count}/{b.total_rows} imported · {b.assigned_count} assigned
+                        </p>
+                      </div>
                     </button>
+
+                    {b.status === "active" && (
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {b.assigned_count < b.imported_count && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRetryDistribution(b.id);
+                            }}
+                            disabled={retryingBatchId === b.id}
+                            title="Retry Distribution"
+                            className="h-8 w-8 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 hover:bg-blue-100 transition disabled:opacity-50"
+                          >
+                            {retryingBatchId === b.id ? (
+                              <Loader2 className="animate-spin" size={13} />
+                            ) : (
+                              <RotateCcw size={13} />
+                            )}
+                          </button>
+                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteModalBatchId(b.id);
+                          }}
+                          title="Delete Batch"
+                          className="h-8 w-8 rounded-lg bg-red-50 border border-red-100 flex items-center justify-center text-red-500 hover:bg-red-100 transition"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            ))}
+
+                  {isExpanded && (
+                    <div className="px-3 pb-3 pt-1 border-t border-slate-200 space-y-3">
+                      {loadingBatchDetail ? (
+                        <p className="text-xs text-slate-400 py-2">Loading...</p>
+                      ) : batchDetail ? (
+                        <>
+                          {batchDetail.perEmployee.length > 0 && (
+                            <div>
+                              <p className="text-[10px] uppercase tracking-wide text-slate-400 font-bold mb-1.5">
+                                Assigned to employees
+                              </p>
+                              <div className="space-y-1">
+                                {batchDetail.perEmployee.map((e) => (
+                                  <div key={e.id} className="flex items-center justify-between text-xs">
+                                    <span className="text-slate-600">{e.name}</span>
+                                    <span className="font-bold text-blue-700">{e.count}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {batchDetail.perTeam.length > 0 && (
+                            <div>
+                              <p className="text-[10px] uppercase tracking-wide text-slate-400 font-bold mb-1.5">
+                                Reserved for teams (not yet distributed)
+                              </p>
+                              <div className="space-y-1">
+                                {batchDetail.perTeam.map((t) => (
+                                  <div key={t.id} className="flex items-center justify-between text-xs">
+                                    <span className="text-slate-600">{t.name}</span>
+                                    <span className="font-bold text-amber-700">{t.count}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {batchDetail.stillUnassigned > 0 && (
+                            <p className="text-xs text-red-600">
+                              {batchDetail.stillUnassigned} still fully unassigned (no owner, no team)
+                            </p>
+                          )}
+
+                          {batchDetail.perEmployee.length === 0 &&
+                            batchDetail.perTeam.length === 0 &&
+                            batchDetail.stillUnassigned === 0 && (
+                              <p className="text-xs text-slate-400">
+                                No leads found for this batch (may have been deleted).
+                              </p>
+                            )}
+                        </>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

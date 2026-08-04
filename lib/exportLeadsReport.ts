@@ -13,7 +13,7 @@ export interface AdminExportLead {
   board_stage: string | null;
   recycle_count: number;
   employees: { name: string } | null;
-  lead_history: (AssignedBySource & { assigned_at: string | null; first_call_at: string | null })[] | null;
+  lead_history: (AssignedBySource & { assigned_at: string | null; first_call_at: string | null; first_whatsapp_at: string | null })[] | null;
 }
 
 // Everything the report header needs to explain "what criteria was
@@ -47,10 +47,11 @@ const EXPORT_COLUMNS = [
   { key: "assignedDate", header: "Assigned Date", align: "left", width: 20 },
   { key: "firstCallTime", header: "First Call Time", align: "left", width: 20 },
   { key: "responseTime", header: "Response Time", align: "center", width: 16 },
+  { key: "firstWhatsAppTime", header: "First WhatsApp Time", align: "left", width: 20 },
   { key: "recycleCount", header: "Recycle Count", align: "center", width: 14 }
 ] as const;
 
-// Landscape + small font comfortably fits all 12 columns for typical
+// Landscape + small font comfortably fits these columns for typical
 // data. If a future column ever makes the PDF feel cramped, drop it
 // here (e.g. ["recycleCount"]) — Excel is unaffected either way.
 const PDF_EXCLUDED_KEYS: string[] = [];
@@ -100,6 +101,7 @@ function buildExportRows(leads: AdminExportLead[]): ExportRow[] {
     const history = lead.lead_history?.[0];
     const assignedAt = history?.assigned_at ?? null;
     const firstCallAt = history?.first_call_at ?? null;
+    const firstWhatsAppAt = history?.first_whatsapp_at ?? null;
 
     let responseTime = "Not yet contacted";
     if (assignedAt && firstCallAt) {
@@ -131,6 +133,7 @@ function buildExportRows(leads: AdminExportLead[]): ExportRow[] {
       assignedDate: formatDateTime(assignedAt),
       firstCallTime: firstCallAt ? formatDateTime(firstCallAt) : "Not yet contacted",
       responseTime,
+      firstWhatsAppTime: firstWhatsAppAt ? formatDateTime(firstWhatsAppAt) : "Not yet contacted",
       recycleCount: lead.recycle_count ?? 0
     };
   });

@@ -1,13 +1,14 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Phone, Timer, Repeat } from "lucide-react";
+import { Phone, Timer, Repeat, MessageCircle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { calculateSLAStatus } from "@/lib/calculateSLAStatus";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { AssignedBySource } from "@/lib/assignedByDisplay";
+import { buildWhatsAppLink } from "@/lib/buildWhatsAppLink";
 
 interface LeadCardLead {
   id: string;
@@ -111,6 +112,19 @@ export default function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps
       });
   }
 
+  // Same fire-and-forget pattern as handleCallClick, own column
+  // (first_whatsapp_at) and own RPC — kept fully independent of the
+  // call-tracking so Admin can tell which channel an employee
+  // actually used, not just that they did something.
+  function handleWhatsAppClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    supabase
+      .rpc("log_whatsapp_click_atomic", { p_lead_history_id: lead.leadHistoryId })
+      .then(({ error }) => {
+        if (error) console.error("log_whatsapp_click_atomic failed:", error.message);
+      });
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 16 }}
@@ -198,15 +212,29 @@ export default function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps
         </div>
       )}
 
-      <motion.a
-        href={`tel:${lead.mobile}`}
-        onClick={handleCallClick}
-        whileTap={{ scale: 0.98 }}
-        className="mt-4 flex items-center justify-center gap-2 h-11 rounded-xl bg-gradient-to-r from-yellow-400 to-amber-500 text-slate-900 text-sm font-bold shadow-[0_6px_16px_rgba(217,119,6,0.3)] active:shadow-[0_2px_8px_rgba(217,119,6,0.3)]"
-      >
-        <Phone size={15} />
-        Call {lead.mobile}
-      </motion.a>
+      <div className="mt-4 flex items-center gap-2">
+        <motion.a
+          href={`tel:${lead.mobile}`}
+          onClick={handleCallClick}
+          whileTap={{ scale: 0.98 }}
+          className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl bg-gradient-to-r from-yellow-400 to-amber-500 text-slate-900 text-sm font-bold shadow-[0_6px_16px_rgba(217,119,6,0.3)] active:shadow-[0_2px_8px_rgba(217,119,6,0.3)]"
+        >
+          <Phone size={15} />
+          Call
+        </motion.a>
+
+        <motion.a
+          href={buildWhatsAppLink(lead.mobile)}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={handleWhatsAppClick}
+          whileTap={{ scale: 0.98 }}
+          className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl bg-emerald-500 text-white text-sm font-bold shadow-[0_6px_16px_rgba(16,185,129,0.3)] active:shadow-[0_2px_8px_rgba(16,185,129,0.3)]"
+        >
+          <MessageCircle size={15} />
+          WhatsApp
+        </motion.a>
+      </div>
     </motion.div>
   );
 }

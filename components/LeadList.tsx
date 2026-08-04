@@ -141,6 +141,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
           outcome_at,
           assigned_at,
           first_call_at,
+          first_whatsapp_at,
           assigned_by_type,
           reassign_note,
           assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)

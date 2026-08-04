@@ -69,6 +69,25 @@ serve(async () => {
       );
     }
 
+    // For multi-employee project rules — round robin position within
+    // just that project's fixed-employee group, entirely separate
+    // from the company-wide pointer.
+    const { data: projectPointerRows, error: projectPointerError } = await supabase
+      .from("project_rule_pointers")
+      .select("project, last_assigned_employee_id");
+
+    if (projectPointerError) {
+      return new Response(
+        JSON.stringify({ success: false, step: "FETCH_PROJECT_POINTERS", error: projectPointerError.message }),
+        { headers: { "Content-Type": "application/json" }, status: 500 }
+      );
+    }
+
+    const projectPointers: Record<string, string | null> = {};
+    (projectPointerRows || []).forEach((row) => {
+      projectPointers[row.project] = row.last_assigned_employee_id;
+    });
+
     const today = new Date().toISOString().split("T")[0];
 
     const { data: todaysAttendance, error: attendanceError } = await supabase
@@ -224,14 +243,23 @@ serve(async () => {
 
       const normalizedProject = String(lead.project || "").trim().toLowerCase();
 
-      const matchedRule = (projectRules || []).find(
-        (rule) => String(rule.project || "").trim().toLowerCase() === normalizedProject
+      const allMatchedEmployeeIds = Array.from(
+        new Set(
+          (projectRules || [])
+            .filter((rule) => String(rule.project || "").trim().toLowerCase() === normalizedProject)
+            .map((rule) => rule.assigned_employee_id)
+        )
       );
 
-      if (matchedRule) {
+      if (allMatchedEmployeeIds.length === 1) {
 
-        // Project Rules are a hard override — never reassigned away.
-        // Escalate once, never repeat for this same assignment.
+        // Single fixed employee — hard override, never reassigned
+        // away, unchanged from the original design. Escalate once,
+        // never repeat for this same assignment. Notifies
+        // lead.current_owner_id (not the rule row's employee id
+        // directly) — in this single-employee case they're always the
+        // same in practice, but this is the actually-correct signal:
+        // whoever currently holds the lead is who needs the nudge.
         if (!activeHistory.sla_warning_sent_at) {
 
           await supabase
@@ -242,11 +270,11 @@ serve(async () => {
           const { data: employee } = await supabase
             .from("employees")
             .select("name")
-            .eq("id", matchedRule.assigned_employee_id)
+            .eq("id", lead.current_owner_id)
             .single();
 
           await supabase.from("notification").insert({
-            employee_id: matchedRule.assigned_employee_id,
+            employee_id: lead.current_owner_id,
             employee_name: employee?.name || "",
             title: "Lead needs follow-up",
             message: "A lead assigned to you via a Project Rule is past its SLA window — please follow up.",
@@ -259,6 +287,84 @@ serve(async () => {
 
         } else {
           diagnostics.push({ leadId: lead.id, action: "SKIPPED", reason: "project rule, already warned" });
+        }
+
+        continue;
+
+      }
+
+      if (allMatchedEmployeeIds.length > 1) {
+
+        // Multiple fixed employees for this project — SLA breach
+        // rotates within just this group (current/non-responsive
+        // owner excluded, and only currently shift-active members
+        // considered — a project rule bypasses the rr_eligible pool
+        // gate entirely by design, but someone who hasn't clocked in
+        // still can't realistically respond right now). Never escapes
+        // to the system-wide pool. Mirrors team-scoped recycling's
+        // shape exactly.
+        const groupPoolEmployees = allMatchedEmployeeIds.filter(
+          (id) => id !== lead.current_owner_id && shiftStartedEmployeeIds.has(id)
+        );
+
+        if (groupPoolEmployees.length === 0) {
+          diagnostics.push({
+            leadId: lead.id,
+            action: "SKIPPED",
+            reason: "PROJECT_RULE_GROUP_NO_ELIGIBLE_EMPLOYEE",
+            slaStatus,
+            project: lead.project
+          });
+          continue;
+        }
+
+        const lastProjectPointer = projectPointers[normalizedProject] ?? null;
+        const lastIndex = groupPoolEmployees.findIndex((id) => id === lastProjectPointer);
+        const nextIndex = lastIndex === -1 ? 0 : (lastIndex + 1) % groupPoolEmployees.length;
+        const nextEmployeeId = groupPoolEmployees[nextIndex];
+
+        const newSlaDeadline = new Date(
+          Date.now() + settings.sla_first_contact_minutes * 60 * 1000
+        ).toISOString();
+
+        const { error: projectRecycleError } = await supabase.rpc("recycle_lead_atomic", {
+          p_lead_id: lead.id,
+          p_old_lead_history_id: activeHistory.id,
+          p_new_employee_id: nextEmployeeId,
+          p_new_sla_deadline: newSlaDeadline,
+          // Global pointer untouched — this lead was never part of the
+          // company-wide rotation to begin with.
+          p_next_pointer_employee_id: pointerEmployeeId,
+          p_recycle_reason: slaStatus
+        });
+
+        if (projectRecycleError) {
+          diagnostics.push({
+            leadId: lead.id,
+            action: "RECYCLE_FAILED",
+            slaStatus,
+            assignedEmployeeId: nextEmployeeId,
+            error: projectRecycleError.message
+          });
+        } else {
+          recycledCount++;
+          projectPointers[normalizedProject] = nextEmployeeId;
+
+          const { error: projectPointerUpsertError } = await supabase
+            .from("project_rule_pointers")
+            .upsert({ project: normalizedProject, last_assigned_employee_id: nextEmployeeId });
+
+          if (projectPointerUpsertError) {
+            console.error("project_rule_pointers upsert failed:", projectPointerUpsertError.message);
+          }
+
+          diagnostics.push({
+            leadId: lead.id,
+            action: "RECYCLED",
+            slaStatus,
+            assignedEmployeeId: nextEmployeeId,
+            scope: "PROJECT_RULE_GROUP"
+          });
         }
 
         continue;

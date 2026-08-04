@@ -66,7 +66,7 @@ serve(async (req) => {
       return respond({ success: false, message: "Only Admin can import leads" }, 403);
     }
 
-    const { rows, source_name, filename } = await req.json();
+    const { rows, source_name, filename, target_team_id } = await req.json();
 
     if (!Array.isArray(rows) || rows.length === 0) {
       return respond({ success: false, message: "No rows to import" }, 400);
@@ -182,6 +182,54 @@ serve(async (req) => {
 
     if (tagError) {
       return respond({ success: false, step: "TAG_LEADS_WITH_BATCH", error: tagError.message }, 500);
+    }
+
+    // --- Direct-to-Team: reserve every inserted lead for one team
+    // instead of auto-distributing. Reuses pending_team_id (the same
+    // column the single-lead "Reserve for Team" button sets) and
+    // lead_team_reservations (the same audit table that flow already
+    // writes to) — no new schema, so each lead's own History modal
+    // shows "Reserved for Team X by Admin" exactly like a manual
+    // reservation would. ---
+    if (target_team_id) {
+
+      const { error: reserveError } = await supabase
+        .from("leads")
+        .update({ pending_team_id: target_team_id })
+        .in("id", insertedLeads.map((l) => l.id));
+
+      if (reserveError) {
+        return respond({ success: false, step: "RESERVE_FOR_TEAM", error: reserveError.message }, 500);
+      }
+
+      const { error: reservationLogError } = await supabase
+        .from("lead_team_reservations")
+        .insert(
+          insertedLeads.map((l) => ({
+            lead_id: l.id,
+            team_id: target_team_id,
+            reserved_by_employee_id: auth.employeeId
+          }))
+        );
+
+      if (reservationLogError) {
+        // Non-fatal — the leads are already correctly reserved via the
+        // update above; losing this insert only means those leads'
+        // History modals won't show the reservation line.
+        console.error("lead_team_reservations insert failed:", reservationLogError.message);
+      }
+
+      return respond({
+        success: true,
+        batchId: batchRow.id,
+        totalRows: rows.length,
+        duplicateCount,
+        importedCount: insertedLeads.length,
+        assignedCount: 0,
+        distributionSummary: {},
+        reservedForTeam: { id: target_team_id }
+      });
+
     }
 
     // --- Distribution pass ---
