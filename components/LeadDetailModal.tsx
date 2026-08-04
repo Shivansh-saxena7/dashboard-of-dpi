@@ -56,7 +56,8 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
   const [loadingNotes, setLoadingNotes] = useState(true);
   const [selectedStatus, setSelectedStatus] = useState<LeadStatus | null>(null);
   const [noteText, setNoteText] = useState("");
-  const [reminderDays, setReminderDays] = useState("");
+  const [reminderValue, setReminderValue] = useState("");
+  const [reminderUnit, setReminderUnit] = useState<"hours" | "days" | "months">("days");
   const [submitting, setSubmitting] = useState(false);
 
   const [visitPromptOpen, setVisitPromptOpen] = useState(false);
@@ -120,7 +121,8 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
         p_lead_history_id: lead.leadHistoryId,
         p_new_status: selectedStatus,
         p_note: noteText.trim() || null,
-        p_reminder_days: reminderDays ? parseInt(reminderDays, 10) : null
+        p_reminder_value: reminderValue ? parseInt(reminderValue, 10) : null,
+        p_reminder_unit: reminderValue ? reminderUnit : null
       });
 
       if (error) {
@@ -136,7 +138,8 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
       });
 
       setNoteText("");
-      setReminderDays("");
+      setReminderValue("");
+      setReminderUnit("days");
       setSelectedStatus(null);
       loadNotes();
 
@@ -429,12 +432,20 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
                   <input
                     type="number"
                     min={1}
-                    value={reminderDays}
-                    onChange={(e) => setReminderDays(e.target.value)}
+                    value={reminderValue}
+                    onChange={(e) => setReminderValue(e.target.value)}
                     placeholder="—"
                     className="w-16 h-8 rounded-lg bg-slate-50 border border-slate-200 px-2 text-sm outline-none text-center"
                   />
-                  <span className="text-xs text-slate-500">day{reminderDays === "1" ? "" : "s"}</span>
+                  <select
+                    value={reminderUnit}
+                    onChange={(e) => setReminderUnit(e.target.value as "hours" | "days" | "months")}
+                    className="h-8 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs outline-none"
+                  >
+                    <option value="hours">Hours</option>
+                    <option value="days">Days</option>
+                    <option value="months">Months</option>
+                  </select>
                 </div>
               )}
 

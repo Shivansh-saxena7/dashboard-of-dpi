@@ -3,10 +3,14 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-// Scheduled sweep (pg_cron, once daily — reminders are day-
-// granularity, unlike recycle-stale-leads' 15-min SLA-urgency
-// cadence). System job, no CORS/auth, same posture as
-// mark-missed-posts/recycle-stale-leads.
+// Scheduled sweep (pg_cron, once daily) — reminders now carry
+// hour/day/month precision (reminder_at, a timestamptz), so this
+// checks against the exact current moment rather than a calendar-day
+// string. Still only run once daily since that's the sweep cadence
+// that was set up; an hours-scoped reminder just becomes accurate to
+// within a day rather than to the minute — same tradeoff as before,
+// just no longer baked into the column type itself. System job, no
+// CORS/auth, same posture as mark-missed-posts/recycle-stale-leads.
 //
 // Only notifies once per note (reminder_notified_at guard, same
 // pattern as lead_history.sla_warning_sent_at), and only while the
@@ -22,8 +26,6 @@ serve(async () => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    const today = new Date().toISOString().split("T")[0];
-
     const { data: dueNotes, error: dueNotesError } = await supabase
       .from("lead_notes")
       .select(
@@ -33,7 +35,7 @@ serve(async () => {
         leads ( name )
         `
       )
-      .lte("reminder_date", today)
+      .lte("reminder_at", new Date().toISOString())
       .is("reminder_notified_at", null);
 
     if (dueNotesError) {
