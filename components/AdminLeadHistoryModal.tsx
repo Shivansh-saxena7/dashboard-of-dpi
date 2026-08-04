@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
-import { X, User } from "lucide-react";
+import { X, User, Bookmark } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { ENDED_REASON_TEXT } from "@/lib/endedReasonDisplay";
+import { assignedByLabel } from "@/lib/assignedByDisplay";
 
 interface AdminLeadHistoryModalProps {
   leadId: string;
@@ -19,9 +20,29 @@ interface HistoryEntry {
   assigned_at: string;
   is_active: boolean;
   ended_reason: string | null;
+  reassign_note: string | null;
   outcome: string | null;
+  assigned_by_type: "SYSTEM" | "ADMIN" | "TEAM_LEADER";
   employees: { name: string } | null;
+  assigned_by: { name: string } | null;
 }
+
+interface ReservationEntry {
+  id: string;
+  reserved_at: string;
+  team: { name: string } | null;
+  reserved_by: { name: string } | null;
+}
+
+// Reservations (Admin -> team, before anyone owns the lead) and
+// assignments (lead_history rows) are two structurally different
+// event types — merged here into one timestamp-sorted timeline so
+// the drawer reads as a single continuous story, even though they
+// live in two separate tables (a reservation has no employee_id yet,
+// which lead_history's schema doesn't allow).
+type TimelineEntry =
+  | { kind: "ASSIGNMENT"; timestamp: string; data: HistoryEntry }
+  | { kind: "RESERVATION"; timestamp: string; data: ReservationEntry };
 
 // Admin-only, full audit trail — queries lead_history DIRECTLY (never
 // employee_sla_breach_history, which is deliberately scoped/masked
@@ -50,7 +71,7 @@ interface HistoryEntry {
 // AnimatePresence still needs to sit there to see the removal coming.
 export default function AdminLeadHistoryModal({ leadId, leadName, onClose }: AdminLeadHistoryModalProps) {
 
-  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -60,18 +81,46 @@ export default function AdminLeadHistoryModal({ leadId, leadName, onClose }: Adm
   async function loadHistory() {
     setLoading(true);
 
-    const { data, error } = await supabase
-      .from("lead_history")
-      .select("id, employee_id, assigned_at, is_active, ended_reason, outcome, employees(name)")
-      .eq("lead_id", leadId)
-      .order("assigned_at", { ascending: true });
+    const [{ data: historyData, error: historyError }, { data: reservationData, error: reservationError }] =
+      await Promise.all([
+        supabase
+          .from("lead_history")
+          .select(
+            `
+            id, employee_id, assigned_at, is_active, ended_reason, reassign_note, outcome,
+            assigned_by_type, assigned_by_employee_id,
+            employees!lead_history_employee_id_fkey(name),
+            assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)
+            `
+          )
+          .eq("lead_id", leadId),
+        supabase
+          .from("lead_team_reservations")
+          .select("id, reserved_at, team:teams(name), reserved_by:employees(name)")
+          .eq("lead_id", leadId)
+      ]);
 
-    if (!error && data) {
-      setHistory(data as any);
+    const merged: TimelineEntry[] = [];
+
+    if (!historyError && historyData) {
+      (historyData as unknown as HistoryEntry[]).forEach((entry) =>
+        merged.push({ kind: "ASSIGNMENT", timestamp: entry.assigned_at, data: entry })
+      );
     }
 
+    if (!reservationError && reservationData) {
+      (reservationData as unknown as ReservationEntry[]).forEach((entry) =>
+        merged.push({ kind: "RESERVATION", timestamp: entry.reserved_at, data: entry })
+      );
+    }
+
+    merged.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+    setTimeline(merged);
     setLoading(false);
   }
+
+  const assignmentCount = timeline.filter((t) => t.kind === "ASSIGNMENT").length;
 
   return createPortal(
     <>
@@ -105,7 +154,7 @@ export default function AdminLeadHistoryModal({ leadId, leadName, onClose }: Adm
           </p>
           <h2 className="relative text-xl font-bold pr-10">{leadName}</h2>
           <p className="relative text-sm text-white/70 mt-1">
-            {history.length} assignment{history.length === 1 ? "" : "s"}
+            {assignmentCount} assignment{assignmentCount === 1 ? "" : "s"}
           </p>
         </div>
 
@@ -113,61 +162,96 @@ export default function AdminLeadHistoryModal({ leadId, leadName, onClose }: Adm
 
           {loading ? (
             <p className="text-sm text-slate-400">Loading...</p>
-          ) : history.length === 0 ? (
+          ) : timeline.length === 0 ? (
             <p className="text-sm text-slate-400">No history found.</p>
           ) : (
             <div>
-              {history.map((entry, index) => (
-                <div key={entry.id} className="relative pl-8 pb-6 last:pb-0">
+              {timeline.map((item, index) => (
+                <div key={`${item.kind}-${item.data.id}`} className="relative pl-8 pb-6 last:pb-0">
 
-                  {index < history.length - 1 && (
+                  {index < timeline.length - 1 && (
                     <div className="absolute left-[9px] top-6 bottom-0 w-px bg-slate-200" />
                   )}
 
-                  <div
-                    className={`absolute left-0 top-0.5 h-5 w-5 rounded-full flex items-center justify-center ${
-                      entry.is_active
-                        ? "bg-gradient-to-br from-cyan-500 to-blue-600"
-                        : "bg-slate-300"
-                    }`}
-                  >
-                    <User size={11} className="text-white" />
-                  </div>
+                  {item.kind === "RESERVATION" ? (
+                    <>
+                      <div className="absolute left-0 top-0.5 h-5 w-5 rounded-full flex items-center justify-center bg-gradient-to-br from-amber-400 to-orange-500">
+                        <Bookmark size={11} className="text-white" />
+                      </div>
 
-                  <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-bold text-slate-800">
-                        {entry.employees?.name || "Unknown employee"}
-                      </p>
-                      {entry.is_active && (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 shrink-0">
-                          Current
-                        </span>
-                      )}
-                    </div>
+                      <div className="rounded-xl bg-amber-50 border border-amber-100 p-3">
+                        <p className="text-sm font-bold text-amber-800">
+                          Reserved for Team {item.data.team?.name || "Unknown"}
+                        </p>
+                        <p className="text-[11px] text-amber-700/80 mt-1">
+                          By {item.data.reserved_by?.name || "Admin"} ·{" "}
+                          {new Date(item.data.reserved_at).toLocaleString([], {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit"
+                          })}
+                        </p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div
+                        className={`absolute left-0 top-0.5 h-5 w-5 rounded-full flex items-center justify-center ${
+                          item.data.is_active
+                            ? "bg-gradient-to-br from-cyan-500 to-blue-600"
+                            : "bg-slate-300"
+                        }`}
+                      >
+                        <User size={11} className="text-white" />
+                      </div>
 
-                    <p className="text-[11px] text-slate-400 mt-1">
-                      Assigned{" "}
-                      {new Date(entry.assigned_at).toLocaleString([], {
-                        month: "short",
-                        day: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit"
-                      })}
-                    </p>
+                      <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-bold text-slate-800">
+                            {item.data.employees?.name || "Unknown employee"}
+                          </p>
+                          {item.data.is_active && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 shrink-0">
+                              Current
+                            </span>
+                          )}
+                        </div>
 
-                    {entry.outcome && (
-                      <p className="text-xs text-slate-600 mt-2">
-                        Outcome logged: <span className="font-semibold">{entry.outcome}</span>
-                      </p>
-                    )}
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Assigned{" "}
+                          {new Date(item.data.assigned_at).toLocaleString([], {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit"
+                          })}
+                        </p>
 
-                    {!entry.is_active && entry.ended_reason && (
-                      <p className="text-xs text-slate-500 mt-2 leading-relaxed">
-                        {ENDED_REASON_TEXT[entry.ended_reason] || entry.ended_reason}
-                      </p>
-                    )}
-                  </div>
+                        <p className="text-[11px] text-slate-500 mt-0.5 font-medium">
+                          {assignedByLabel(item.data)}
+                        </p>
+
+                        {item.data.outcome && (
+                          <p className="text-xs text-slate-600 mt-2">
+                            Outcome logged: <span className="font-semibold">{item.data.outcome}</span>
+                          </p>
+                        )}
+
+                        {!item.data.is_active && item.data.ended_reason && (
+                          <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                            {ENDED_REASON_TEXT[item.data.ended_reason] || item.data.ended_reason}
+                          </p>
+                        )}
+
+                        {item.data.reassign_note && (
+                          <p className="text-xs text-slate-600 mt-2">
+                            Reason: <span className="font-semibold">{item.data.reassign_note}</span>
+                          </p>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
               ))}
             </div>

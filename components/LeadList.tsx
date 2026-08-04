@@ -14,7 +14,7 @@ interface LeadListProps {
   employeeId: string;
 }
 
-type ActiveTab = BoardStage | "SLA_BREACH_HISTORY";
+type ActiveTab = BoardStage | "HISTORY";
 type SortOption = "NEWEST" | "OLDEST" | "SLA_URGENCY";
 type DateRangeOption = "ALL" | "THIS_WEEK" | "THIS_MONTH" | "CUSTOM";
 
@@ -61,20 +61,27 @@ function FilterSelect({
 // own authored rows). There is no "recycled" badge to accidentally
 // render because the query simply has no path to that data.
 //
-// The 5th tab (SLA Breach) is a different data source entirely —
+// The 5th tab (History) is a different data source entirely —
 // employee_sla_breach_history (a security_invoker view over
-// lead_history) rather than `leads`. It's deliberately queried with NO
-// employee_id filter here: the view's own RLS passthrough is what
-// scopes it to "my rows only," not app code. Adding a redundant
-// .eq("employee_id", ...) here would blur that — the guarantee
-// lives entirely in the database, and the query is written to make
-// that visible rather than implying app code is doing the real work.
+// lead_history) rather than `leads`. The view's name still says
+// "sla_breach" (renaming the DB object was judged riskier than the
+// value it'd add — grants/security_invoker would need to be
+// re-verified for no real benefit), but its WHERE clause now covers
+// every ended_reason, not just SLA_BREACHED, so the tab itself
+// covers any way a lead has left this employee's hands (SLA
+// recycling or a Team Leader's manual reassignment). It's
+// deliberately queried with NO employee_id filter here: the view's
+// own RLS passthrough is what scopes it to "my rows only," not app
+// code. Adding a redundant .eq("employee_id", ...) here would blur
+// that — the guarantee lives entirely in the database, and the
+// query is written to make that visible rather than implying app
+// code is doing the real work.
 //
 // Search/filter/sort apply uniformly across the 4 board tabs (the
 // Lead Board spec named Follow-up/Visit/Booking specifically, but
 // one reusable bar is simpler than three separate ones and strictly
 // more capable, never less, for the Leads tab too) — they're hidden
-// entirely on the SLA Breach tab, since there's no project/source/
+// entirely on the History tab, since there's no project/source/
 // name on that data to filter or search by.
 //
 // Mobile-first throughout (~95% of real usage): tabs scroll
@@ -133,7 +140,10 @@ export default function LeadList({ employeeId }: LeadListProps) {
           call_count,
           outcome_at,
           assigned_at,
-          first_call_at
+          first_call_at,
+          assigned_by_type,
+          reassign_note,
+          assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)
         )
       `
       )
@@ -152,7 +162,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
   async function loadSlaBreachHistory() {
     const { data, error } = await supabase
       .from("employee_sla_breach_history")
-      .select("lead_history_id, assigned_at, ended_reason, project, source")
+      .select("lead_history_id, assigned_at, ended_reason, reassign_note, project, source")
       .order("assigned_at", { ascending: false });
 
     if (!error && data) {
@@ -226,7 +236,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
 
   const visibleLeads = useMemo(() => {
 
-    if (activeTab === "SLA_BREACH_HISTORY") {
+    if (activeTab === "HISTORY") {
       return [];
     }
 
@@ -308,7 +318,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
   }
 
   const selectedLead = leads.find((lead) => lead.id === selectedLeadId);
-  const onHistoryTab = activeTab === "SLA_BREACH_HISTORY";
+  const onHistoryTab = activeTab === "HISTORY";
 
   return (
     <>
@@ -345,15 +355,15 @@ export default function LeadList({ employeeId }: LeadListProps) {
         })}
 
         <button
-          onClick={() => setActiveTab("SLA_BREACH_HISTORY")}
+          onClick={() => setActiveTab("HISTORY")}
           className={`flex items-center gap-1.5 shrink-0 px-3.5 py-2.5 sm:py-2 rounded-xl text-sm font-bold transition ${
             onHistoryTab
-              ? "bg-gradient-to-r from-red-500 to-rose-500 text-white shadow-[0_4px_12px_rgba(225,29,72,0.3)]"
+              ? "bg-gradient-to-r from-slate-600 to-slate-800 text-white shadow-[0_4px_12px_rgba(30,41,59,0.3)]"
               : "bg-white text-slate-600 border border-slate-200"
           }`}
         >
-          <span>⚠️</span>
-          SLA Breach
+          <span>📋</span>
+          History
           <span
             className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full ${
               onHistoryTab ? "bg-white/20" : "bg-slate-100 text-slate-500"
@@ -440,10 +450,10 @@ export default function LeadList({ employeeId }: LeadListProps) {
       {onHistoryTab ? (
         slaBreachHistory.length === 0 ? (
           <div className="flex flex-col items-center justify-center mt-16 text-center px-4">
-            <div className="text-5xl mb-3">⚠️</div>
-            <h2 className="text-lg font-semibold text-gray-700">No SLA breaches</h2>
+            <div className="text-5xl mb-3">📋</div>
+            <h2 className="text-lg font-semibold text-gray-700">No history yet</h2>
             <p className="text-sm text-gray-500 mt-1">
-              Leads you didn&apos;t contact in time will show up here after being reassigned.
+              Leads that get reassigned away from you (by SLA breach or a Team Leader) will show up here.
             </p>
           </div>
         ) : (
@@ -486,7 +496,10 @@ export default function LeadList({ employeeId }: LeadListProps) {
                 recycle_count: lead.recycle_count,
                 call_count: lead.lead_history[0]?.call_count ?? 0,
                 outcome_at: lead.lead_history[0]?.outcome_at ?? null,
-                assigned_at: lead.lead_history[0]?.assigned_at ?? null
+                assigned_at: lead.lead_history[0]?.assigned_at ?? null,
+                assigned_by_type: lead.lead_history[0]?.assigned_by_type ?? null,
+                assigned_by: lead.lead_history[0]?.assigned_by ?? null,
+                reassign_note: lead.lead_history[0]?.reassign_note ?? null
               }}
             />
           ))}
@@ -503,7 +516,10 @@ export default function LeadList({ employeeId }: LeadListProps) {
             project: selectedLead.project,
             status: selectedLead.status,
             callCount: selectedLead.lead_history[0]?.call_count ?? 0,
-            boardStage: (selectedLead.board_stage as BoardStage) || "LEADS"
+            boardStage: (selectedLead.board_stage as BoardStage) || "LEADS",
+            assignedByType: selectedLead.lead_history[0]?.assigned_by_type ?? null,
+            assignedBy: selectedLead.lead_history[0]?.assigned_by ?? null,
+            reassignNote: selectedLead.lead_history[0]?.reassign_note ?? null
           }}
           onClose={() => setSelectedLeadId(null)}
           onUpdated={(updates) => handleLeadUpdated(selectedLead.id, updates)}

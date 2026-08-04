@@ -1,6 +1,7 @@
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { LEAD_PRIORITY_DISPLAY } from "@/lib/leadPriorityDisplay";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
+import { assignedByLabel, AssignedBySource } from "@/lib/assignedByDisplay";
 
 export interface AdminExportLead {
   name: string;
@@ -12,15 +13,18 @@ export interface AdminExportLead {
   board_stage: string | null;
   recycle_count: number;
   employees: { name: string } | null;
-  lead_history: { assigned_at: string | null; first_call_at: string | null }[] | null;
+  lead_history: (AssignedBySource & { assigned_at: string | null; first_call_at: string | null })[] | null;
 }
 
 // Everything the report header needs to explain "what criteria was
 // this pulled with" — Employee gets its own line (per spec), the
-// other four filters are bundled into one "Filters: ..." line.
+// other filters are bundled into one "Filters: ..." line. scopeLabel
+// is optional and only used by scoped callers (e.g. a Team Leader's
+// Team Reports, "Team: Team Yogesh") — Admin's export omits it.
 export interface ExportReportMeta {
   employeeLabel: string | null;
   otherFilters: { label: string; value: string }[];
+  scopeLabel?: string;
 }
 
 const COMPANY_NAME = "Divya Padma Infosystem LLP";
@@ -39,6 +43,7 @@ const EXPORT_COLUMNS = [
   { key: "status", header: "Status", align: "center", width: 16 },
   { key: "boardStage", header: "Board Stage", align: "center", width: 14 },
   { key: "assignedEmployee", header: "Assigned Employee", align: "left", width: 20 },
+  { key: "assignedBy", header: "Assigned By", align: "left", width: 20 },
   { key: "assignedDate", header: "Assigned Date", align: "left", width: 20 },
   { key: "firstCallTime", header: "First Call Time", align: "left", width: 20 },
   { key: "responseTime", header: "Response Time", align: "center", width: 16 },
@@ -122,6 +127,7 @@ function buildExportRows(leads: AdminExportLead[]): ExportRow[] {
       status: statusLabel,
       boardStage: boardStageLabel,
       assignedEmployee: lead.employees?.name || "Unassigned",
+      assignedBy: history ? assignedByLabel(history) : "—",
       assignedDate: formatDateTime(assignedAt),
       firstCallTime: firstCallAt ? formatDateTime(firstCallAt) : "Not yet contacted",
       responseTime,
@@ -176,6 +182,12 @@ export async function exportLeadsToExcel(leads: AdminExportLead[], meta: ExportR
   mergedTextRow(2, "DPI Lead Report", { size: 13, bold: true, color: { argb: "FF0F172A" } });
 
   let row = 3;
+
+  if (meta.scopeLabel) {
+    mergedTextRow(row, `Team: ${meta.scopeLabel}`, { size: 10, bold: true, color: { argb: "FF0F172A" } });
+    row++;
+  }
+
   mergedTextRow(row, `Generated: ${formatDateTime(new Date().toISOString())}`, {
     size: 9,
     color: { argb: "FF64748B" }
@@ -256,11 +268,20 @@ export async function exportLeadsToPDF(leads: AdminExportLead[], meta: ExportRep
   doc.setTextColor(...BRAND_BLUE);
   doc.text(COMPANY_NAME, 20, 44);
 
+  let headerY = 58;
+
+  if (meta.scopeLabel) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(15, 23, 42);
+    doc.text(`Team: ${meta.scopeLabel}`, 20, headerY);
+    headerY += 12;
+  }
+
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.setTextColor(...SLATE_500);
 
-  let headerY = 58;
   doc.text(`Generated: ${generatedAt}`, 20, headerY);
 
   if (meta.employeeLabel) {

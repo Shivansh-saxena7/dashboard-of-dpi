@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Users, Crown, Search, Plus, Check, Trash2 } from "lucide-react";
+import { Users, Crown, Search, Plus, Check, Trash2, Activity, Repeat } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import toast from "react-hot-toast";
 import DeleteModal from "../components/DeleteModal";
@@ -36,6 +36,12 @@ export default function AdminTeamsPage() {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  const [rightTab, setRightTab] = useState<"MEMBERS" | "ACTIVITY">("MEMBERS");
+  const [activityRows, setActivityRows] = useState<any[]>([]);
+  const [loadingActivity, setLoadingActivity] = useState(false);
+  const [snapshotLeads, setSnapshotLeads] = useState<any[]>([]);
+  const [loadingSnapshot, setLoadingSnapshot] = useState(false);
+
   useEffect(() => {
     loadData();
   }, []);
@@ -58,6 +64,76 @@ export default function AdminTeamsPage() {
   useEffect(() => {
     setTeamNameDraft(selectedTeam?.name || "");
   }, [selectedTeamId, selectedTeam?.name]);
+
+  // Clears both datasets immediately on every team switch (not just
+  // refetches) — the "strictly one team's data at a time" guarantee
+  // has to hold even in the gap before the new fetch resolves, not
+  // just once it lands.
+  useEffect(() => {
+    setActivityRows([]);
+    setSnapshotLeads([]);
+    setRightTab("MEMBERS");
+
+    if (!selectedTeamId) return;
+
+    loadTeamActivity(selectedTeamId);
+    loadTeamSnapshot(selectedTeamId);
+  }, [selectedTeamId]);
+
+  // "Team Leader gave/reassigned a lead" feed for this team.
+  // assigned_by.team_id is the ASSIGNER's CURRENT team, not a
+  // historical snapshot of what team they led at the time — if a
+  // leader later moves teams, their past actions here follow them to
+  // the new team. Same current-state-as-source-of-truth simplification
+  // already used for reassignment/recycling scoping elsewhere.
+  async function loadTeamActivity(teamId: string) {
+    setLoadingActivity(true);
+
+    const { data, error } = await supabase
+      .from("lead_history")
+      .select(
+        `
+        id, assigned_at, reassign_note,
+        leads ( name, mobile, project ),
+        employee:employees!lead_history_employee_id_fkey ( name ),
+        assigned_by:employees!lead_history_assigned_by_employee_id_fkey!inner ( name, team_id )
+        `
+      )
+      .eq("assigned_by_type", "TEAM_LEADER")
+      .eq("assigned_by.team_id", teamId)
+      .order("assigned_at", { ascending: false })
+      .limit(100);
+
+    if (!error && data) {
+      setActivityRows(data);
+    }
+
+    setLoadingActivity(false);
+  }
+
+  // Current snapshot — who on this team is holding what, right now.
+  async function loadTeamSnapshot(teamId: string) {
+    setLoadingSnapshot(true);
+
+    const memberIds = employees.filter((e) => e.team_id === teamId).map((e) => e.id);
+
+    if (memberIds.length === 0) {
+      setSnapshotLeads([]);
+      setLoadingSnapshot(false);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("leads")
+      .select("id, name, current_owner_id, status, board_stage")
+      .in("current_owner_id", memberIds);
+
+    if (!error && data) {
+      setSnapshotLeads(data);
+    }
+
+    setLoadingSnapshot(false);
+  }
 
   const teamNameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -279,6 +355,14 @@ export default function AdminTeamsPage() {
     }
   }
 
+  const snapshotByMember = useMemo(() => {
+    const map = new Map<string, number>();
+    snapshotLeads.forEach((l) => {
+      if (l.current_owner_id) map.set(l.current_owner_id, (map.get(l.current_owner_id) || 0) + 1);
+    });
+    return map;
+  }, [snapshotLeads]);
+
   const visibleEmployeesForChecklist = employees.filter((e) => {
     if (!memberSearch.trim()) return true;
     const q = memberSearch.trim().toLowerCase();
@@ -411,6 +495,24 @@ export default function AdminTeamsPage() {
                   </div>
                 </div>
 
+                <div className="flex gap-1 rounded-2xl bg-slate-100 p-1">
+                  {(["MEMBERS", "ACTIVITY"] as const).map((tab) => (
+                    <button
+                      key={tab}
+                      onClick={() => setRightTab(tab)}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-semibold transition-colors ${
+                        rightTab === tab
+                          ? "bg-white text-slate-800 shadow"
+                          : "text-slate-500 hover:text-slate-700"
+                      }`}
+                    >
+                      {tab === "ACTIVITY" && <Activity size={14} />}
+                      {tab === "MEMBERS" ? "Members" : "Activity"}
+                    </button>
+                  ))}
+                </div>
+
+                {rightTab === "MEMBERS" && (
                 <div className="bg-white rounded-[24px] border border-slate-100 shadow-md p-6">
                   <div className="flex items-center justify-between mb-1">
                     <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold">
@@ -478,6 +580,85 @@ export default function AdminTeamsPage() {
                     })}
                   </div>
                 </div>
+                )}
+
+                {rightTab === "ACTIVITY" && (
+                  <div className="space-y-5">
+                    <div className="bg-white rounded-[24px] border border-slate-100 shadow-md p-6">
+                      <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold mb-1">
+                        Current Snapshot
+                      </p>
+                      <p className="text-[11px] text-slate-400 mb-4">
+                        What each member is holding right now.
+                      </p>
+
+                      {loadingSnapshot ? (
+                        <p className="text-sm text-slate-400">Loading...</p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {employees
+                            .filter((e) => e.team_id === selectedTeam.id)
+                            .map((member) => (
+                              <div
+                                key={member.id}
+                                className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50"
+                              >
+                                <p className="text-sm font-medium text-slate-700">{member.name}</p>
+                                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">
+                                  {snapshotByMember.get(member.id) || 0} lead{(snapshotByMember.get(member.id) || 0) === 1 ? "" : "s"}
+                                </span>
+                              </div>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="bg-white rounded-[24px] border border-slate-100 shadow-md p-6">
+                      <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold mb-1">
+                        Recent Activity
+                      </p>
+                      <p className="text-[11px] text-slate-400 mb-4">
+                        Leads this team's leader has given out or reassigned.
+                      </p>
+
+                      {loadingActivity ? (
+                        <p className="text-sm text-slate-400">Loading...</p>
+                      ) : activityRows.length === 0 ? (
+                        <p className="text-sm text-slate-400">No team-leader-driven assignments yet.</p>
+                      ) : (
+                        <div className="space-y-2 max-h-[480px] overflow-y-auto">
+                          {activityRows.map((row) => (
+                            <div key={row.id} className="rounded-xl bg-slate-50 border border-slate-100 p-3">
+                              <div className="flex items-start gap-2">
+                                <Repeat size={13} className="text-blue-600 shrink-0 mt-0.5" />
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-sm font-semibold text-slate-700 truncate">
+                                    {row.leads?.name || "Unknown lead"}
+                                  </p>
+                                  <p className="text-xs text-slate-500 mt-0.5">
+                                    Assigned to <span className="font-semibold">{row.employee?.name || "Unknown"}</span>
+                                    {" · "}
+                                    {new Date(row.assigned_at).toLocaleString([], {
+                                      month: "short",
+                                      day: "numeric",
+                                      hour: "2-digit",
+                                      minute: "2-digit"
+                                    })}
+                                  </p>
+                                  {row.reassign_note && (
+                                    <p className="text-xs text-slate-500 mt-1">
+                                      Reason: <span className="font-medium">{row.reassign_note}</span>
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </motion.div>
             )}
           </div>

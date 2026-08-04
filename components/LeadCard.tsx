@@ -1,12 +1,13 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Phone, Timer } from "lucide-react";
+import { Phone, Timer, Repeat } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { calculateSLAStatus } from "@/lib/calculateSLAStatus";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
+import { AssignedBySource } from "@/lib/assignedByDisplay";
 
 interface LeadCardLead {
   id: string;
@@ -22,6 +23,9 @@ interface LeadCardLead {
   call_count: number;
   outcome_at: string | null;
   assigned_at: string | null;
+  assigned_by_type: AssignedBySource["assigned_by_type"] | null;
+  assigned_by: { name: string } | null;
+  reassign_note: string | null;
 }
 
 interface LeadCardProps {
@@ -178,6 +182,20 @@ export default function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps
             minute: "2-digit"
           })}
         </p>
+      )}
+
+      {lead.assigned_by_type === "TEAM_LEADER" && (
+        <div className="flex items-start gap-1.5 mt-2 rounded-xl bg-amber-50 border border-amber-100 px-2.5 py-2">
+          <Repeat size={12} className="text-amber-600 shrink-0 mt-0.5" />
+          <p className="text-[11px] text-amber-800 leading-relaxed">
+            {lead.assigned_by?.name || "Your Team Leader"} reassigned this lead to you
+            {lead.reassign_note && (
+              <>
+                {" "}— <span className="font-semibold">{lead.reassign_note}</span>
+              </>
+            )}
+          </p>
+        </div>
       )}
 
       <motion.a

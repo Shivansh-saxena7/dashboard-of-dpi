@@ -21,10 +21,14 @@ interface AdminLeadCardLead {
   recycleCount: number;
   ownerName: string | null;
   assignedAt: string | null;
+  pendingTeamId: string | null;
+  pendingTeamName: string | null;
 }
 
 interface AdminLeadCardProps {
   lead: AdminLeadCardLead;
+  teams: { id: string; name: string }[];
+  onReserveTeam: (leadId: string, teamId: string | null) => void;
   index?: number;
 }
 
@@ -40,8 +44,12 @@ interface AdminLeadCardProps {
 // Styled in blue-cyan (the established Admin accent, Section 2.7) —
 // deliberately NOT gold, which is reserved for employee-facing
 // primary CTAs. This card has no CTAs at all except "View History,"
-// which is read-only (opens AdminLeadHistoryModal) and only shown
-// once there's actually a recycle chain worth auditing.
+// which is read-only (opens AdminLeadHistoryModal). Always shown, not
+// gated on recycleCount > 0 like it used to be — every assigned lead
+// has at least one lead_history row (the initial SYSTEM assignment),
+// and now that Admin-reservation events are tracked too (see
+// AdminLeadHistoryModal), there's meaningful history to show even for
+// leads that were never recycled.
 //
 // The history modal's open/close state lives HERE (self-contained),
 // not lifted to the parent page — unlike the employee-side
@@ -60,7 +68,7 @@ interface AdminLeadCardProps {
 // drawer resolve against the viewport, not this card's transformed
 // (animated) box — that was the cause of the drawer sometimes
 // rendering as if it were a small centered card.
-export default function AdminLeadCard({ lead, index = 0 }: AdminLeadCardProps) {
+export default function AdminLeadCard({ lead, teams, onReserveTeam, index = 0 }: AdminLeadCardProps) {
 
   const [historyOpen, setHistoryOpen] = useState(false);
 
@@ -133,9 +141,28 @@ export default function AdminLeadCard({ lead, index = 0 }: AdminLeadCardProps) {
           {lead.ownerName ? (
             <p className="text-sm font-semibold text-slate-700">{lead.ownerName}</p>
           ) : (
-            <span className="inline-block mt-0.5 text-[11px] font-bold px-2 py-0.5 rounded-full bg-red-50 text-red-600">
-              Unassigned
-            </span>
+            <div className="mt-0.5 space-y-1">
+              {lead.pendingTeamName ? (
+                <span className="inline-block text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">
+                  Reserved for {lead.pendingTeamName}
+                </span>
+              ) : (
+                <span className="inline-block text-[11px] font-bold px-2 py-0.5 rounded-full bg-red-50 text-red-600">
+                  Unassigned
+                </span>
+              )}
+
+              <select
+                value={lead.pendingTeamId || ""}
+                onChange={(e) => onReserveTeam(lead.id, e.target.value || null)}
+                className="block h-7 rounded-md bg-slate-50 border border-slate-200 px-1.5 text-[10px] font-semibold text-slate-600 outline-none"
+              >
+                <option value="">No team reserved</option>
+                {teams.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </div>
           )}
         </div>
 
@@ -154,15 +181,13 @@ export default function AdminLeadCard({ lead, index = 0 }: AdminLeadCardProps) {
         )}
       </div>
 
-      {lead.recycleCount > 0 && (
-        <button
-          onClick={() => setHistoryOpen(true)}
-          className="flex items-center gap-1.5 mt-3 text-[11px] font-bold text-blue-700 hover:text-blue-900 transition"
-        >
-          <History size={12} />
-          View History
-        </button>
-      )}
+      <button
+        onClick={() => setHistoryOpen(true)}
+        className="flex items-center gap-1.5 mt-3 text-[11px] font-bold text-blue-700 hover:text-blue-900 transition"
+      >
+        <History size={12} />
+        View History
+      </button>
 
       <AnimatePresence>
         {historyOpen && (

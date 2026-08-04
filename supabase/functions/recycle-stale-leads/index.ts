@@ -88,7 +88,7 @@ serve(async () => {
 
     const { data: allActiveEmployees, error: employeesError } = await supabase
       .from("employees")
-      .select("id")
+      .select("id, team_id")
       .eq("is_active", true)
       .eq("rr_eligible", true)
       .order("id", { ascending: true });
@@ -104,6 +104,29 @@ serve(async () => {
       shiftStartedEmployeeIds.has(employee.id)
     );
 
+    // Team-scoping lookup for recycling a Team-Leader-assigned lead
+    // (see below): keyed by the CURRENT OWNER's team, not the
+    // assigner's — the assigner could change teams later, but the
+    // current owner's team is what "this lead belongs to this team's
+    // pool" actually means at recycle time. A separate, unfiltered
+    // fetch because the current owner themselves might not be
+    // is_active/rr_eligible/shift-started (and so wouldn't appear in
+    // allActiveEmployees at all), but we still need to know their
+    // team to scope the pool correctly.
+    const { data: allEmployeesForTeamLookup, error: teamLookupError } = await supabase
+      .from("employees")
+      .select("id, team_id");
+
+    if (teamLookupError) {
+      return new Response(
+        JSON.stringify({ success: false, step: "FETCH_TEAM_LOOKUP", error: teamLookupError.message }),
+        { headers: { "Content-Type": "application/json" }, status: 500 }
+      );
+    }
+
+    const teamIdByEmployeeId = new Map<string, string | null>();
+    (allEmployeesForTeamLookup || []).forEach((e) => teamIdByEmployeeId.set(e.id, e.team_id));
+
     const { data: leads, error: leadsError } = await supabase
       .from("leads")
       .select(
@@ -118,7 +141,8 @@ serve(async () => {
           id,
           outcome_at,
           is_active,
-          sla_warning_sent_at
+          sla_warning_sent_at,
+          assigned_by_type
         )
       `
       )
@@ -243,9 +267,37 @@ serve(async () => {
 
       // Round robin: exclude the current owner so a non-responsive
       // employee doesn't just get the same lead back.
-      const eligibleEmployees = shiftActiveEmployees.filter(
+      let eligibleEmployees = shiftActiveEmployees.filter(
         (employee) => employee.id !== lead.current_owner_id
       );
+
+      // A Team-Leader-assigned lead was that team's own resource, not
+      // part of the company-wide round-robin rotation to begin with —
+      // recycling it stays inside the current owner's team rather
+      // than falling back to the system-wide pool. If the team has
+      // nobody else eligible right now, this is skipped (retried next
+      // sweep) rather than silently escaping team scope.
+      const isTeamLeaderAssigned = activeHistory.assigned_by_type === "TEAM_LEADER";
+      let scopedTeamId: string | null = null;
+
+      if (isTeamLeaderAssigned) {
+        scopedTeamId = teamIdByEmployeeId.get(lead.current_owner_id) ?? null;
+
+        eligibleEmployees = scopedTeamId
+          ? eligibleEmployees.filter((employee) => employee.team_id === scopedTeamId)
+          : [];
+
+        if (eligibleEmployees.length === 0) {
+          diagnostics.push({
+            leadId: lead.id,
+            action: "SKIPPED",
+            reason: "TEAM_SCOPED_NO_ELIGIBLE_EMPLOYEE",
+            slaStatus,
+            teamId: scopedTeamId
+          });
+          continue;
+        }
+      }
 
       const result = calculateLeadAssignment(
         lead.project,
@@ -275,7 +327,11 @@ serve(async () => {
         p_old_lead_history_id: activeHistory.id,
         p_new_employee_id: result.assignedEmployeeId,
         p_new_sla_deadline: newSlaDeadline,
-        p_next_pointer_employee_id: result.nextPointerEmployeeId,
+        // Team-scoped recycles never advance the system-wide pointer
+        // — that pointer tracks company-wide rotation, which this
+        // lead was never part of (same "bypasses round-robin"
+        // principle the manual-assign/reassign RPCs follow).
+        p_next_pointer_employee_id: isTeamLeaderAssigned ? pointerEmployeeId : result.nextPointerEmployeeId,
         p_recycle_reason: slaStatus
       });
 
@@ -289,12 +345,15 @@ serve(async () => {
         });
       } else {
         recycledCount++;
-        pointerEmployeeId = result.nextPointerEmployeeId;
+        if (!isTeamLeaderAssigned) {
+          pointerEmployeeId = result.nextPointerEmployeeId;
+        }
         diagnostics.push({
           leadId: lead.id,
           action: "RECYCLED",
           slaStatus,
-          assignedEmployeeId: result.assignedEmployeeId
+          assignedEmployeeId: result.assignedEmployeeId,
+          scope: isTeamLeaderAssigned ? "TEAM" : "SYSTEM_WIDE"
         });
       }
 

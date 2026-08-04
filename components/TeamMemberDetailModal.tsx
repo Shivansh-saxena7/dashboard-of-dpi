@@ -2,18 +2,22 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { X, Send, Loader2 } from "lucide-react";
+import { X, Send, Loader2, Repeat } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import toast from "react-hot-toast";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES } from "@/lib/leadBoardStageDisplay";
+import { assignedByLabel, AssignedBySource } from "@/lib/assignedByDisplay";
 import { MemberAttendanceStatus } from "./TeamMemberCard";
 
 interface TeamMemberDetailModalProps {
   member: { id: string; name: string };
   teamLeaderId: string;
+  teamId: string;
+  teamMembers: { id: string; name: string; is_active: boolean }[];
   attendanceStatus: MemberAttendanceStatus;
   onClose: () => void;
+  onReassigned: () => void;
 }
 
 interface MemberLead {
@@ -22,6 +26,9 @@ interface MemberLead {
   project: string | null;
   status: string;
   board_stage: string | null;
+  activeHistoryId: string | null;
+  assignedByType: "SYSTEM" | "ADMIN" | "TEAM_LEADER" | null;
+  assignedByName: string | null;
 }
 
 interface TeamNote {
@@ -36,6 +43,8 @@ const ATTENDANCE_LABEL: Record<MemberAttendanceStatus, string> = {
   ENDED: "Shift Ended"
 };
 
+const LEADS_PAGE_SIZE = 10;
+
 // View-only — no status/board_stage change controls at all, unlike
 // LeadDetailModal (which this reuses the drawer motion pattern from).
 // Team Notes are the one thing this screen can WRITE, and even that
@@ -43,10 +52,13 @@ const ATTENDANCE_LABEL: Record<MemberAttendanceStatus, string> = {
 // about this leader's own team members only — the noted employee
 // themselves has no policy that could ever surface these rows to
 // them, enforced at the database level (see the Phase 5 SQL).
-export default function TeamMemberDetailModal({ member, teamLeaderId, attendanceStatus, onClose }: TeamMemberDetailModalProps) {
+export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, teamMembers, attendanceStatus, onClose, onReassigned }: TeamMemberDetailModalProps) {
 
   const [leads, setLeads] = useState<MemberLead[]>([]);
   const [loadingLeads, setLoadingLeads] = useState(true);
+  const [loadingMoreLeads, setLoadingMoreLeads] = useState(false);
+  const [leadsPage, setLeadsPage] = useState(0);
+  const [leadsTotalCount, setLeadsTotalCount] = useState(0);
 
   const [notes, setNotes] = useState<TeamNote[]>([]);
   const [loadingNotes, setLoadingNotes] = useState(true);
@@ -54,25 +66,124 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, attendance
   const [noteText, setNoteText] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  const [reassigningLeadId, setReassigningLeadId] = useState<string | null>(null);
+  const [reassignTargetId, setReassignTargetId] = useState("");
+  const [reassignNote, setReassignNote] = useState("");
+  const [reassignSubmitting, setReassignSubmitting] = useState(false);
+
   useEffect(() => {
-    loadLeads();
+    setLeads([]);
+    setLeadsPage(0);
+    loadLeads(0, false);
     loadNotes();
   }, [member.id]);
 
-  async function loadLeads() {
-    setLoadingLeads(true);
+  // lead_history!inner + is_active filter: the "only one active
+  // assignment per lead" constraint guarantees at most one match, so
+  // [0] below is safe — same assumption recycle-stale-leads already
+  // makes on this same shape. { count: "exact" } + .range() paginate
+  // — a team member with a large book of leads no longer forces this
+  // drawer to fetch (and render) all of it at once.
+  async function loadLeads(pageIndex: number, append: boolean) {
+    if (append) {
+      setLoadingMoreLeads(true);
+    } else {
+      setLoadingLeads(true);
+    }
 
-    const { data, error } = await supabase
+    const from = pageIndex * LEADS_PAGE_SIZE;
+    const to = from + LEADS_PAGE_SIZE - 1;
+
+    const { data, error, count } = await supabase
       .from("leads")
-      .select("id, name, project, status, board_stage")
+      .select(
+        `
+        id, name, project, status, board_stage,
+        lead_history!inner (
+          id, assigned_by_type,
+          assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)
+        )
+        `,
+        { count: "exact" }
+      )
       .eq("current_owner_id", member.id)
-      .order("created_at", { ascending: false });
+      .eq("lead_history.is_active", true)
+      .order("created_at", { ascending: false })
+      .range(from, to);
 
     if (!error && data) {
-      setLeads(data);
+      type RawLead = {
+        id: string;
+        name: string;
+        project: string | null;
+        status: string;
+        board_stage: string | null;
+        lead_history: (AssignedBySource & { id: string })[] | null;
+      };
+
+      const mapped = (data as unknown as RawLead[]).map((lead) => {
+        const activeHistory = lead.lead_history?.[0] || null;
+        return {
+          id: lead.id,
+          name: lead.name,
+          project: lead.project,
+          status: lead.status,
+          board_stage: lead.board_stage,
+          activeHistoryId: activeHistory?.id ?? null,
+          assignedByType: activeHistory?.assigned_by_type ?? null,
+          assignedByName: activeHistory
+            ? assignedByLabel(activeHistory)
+            : null
+        };
+      });
+
+      setLeads((prev) => (append ? [...prev, ...mapped] : mapped));
+      setLeadsTotalCount(count ?? 0);
     }
 
     setLoadingLeads(false);
+    setLoadingMoreLeads(false);
+  }
+
+  function loadMoreLeads() {
+    const next = leadsPage + 1;
+    setLeadsPage(next);
+    loadLeads(next, true);
+  }
+
+  async function submitReassign(lead: MemberLead) {
+    if (!reassignTargetId || !lead.activeHistoryId) return;
+
+    setReassignSubmitting(true);
+
+    try {
+
+      const { error } = await supabase.rpc("reassign_lead_by_team_leader_atomic", {
+        p_lead_id: lead.id,
+        p_old_lead_history_id: lead.activeHistoryId,
+        p_new_employee_id: reassignTargetId,
+        p_note: reassignNote.trim() || null
+      });
+
+      if (error) {
+        toast.error(error.message || "Could not reassign this lead.");
+        return;
+      }
+
+      toast.success("Lead reassigned.");
+      setReassigningLeadId(null);
+      setReassignTargetId("");
+      setReassignNote("");
+      setLeadsPage(0);
+      loadLeads(0, false);
+      onReassigned();
+
+    } catch (err) {
+      console.log(err);
+      toast.error("Something went wrong.");
+    } finally {
+      setReassignSubmitting(false);
+    }
   }
 
   async function loadNotes() {
@@ -81,7 +192,7 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, attendance
     const { data, error } = await supabase
       .from("team_notes")
       .select("id, note, created_at")
-      .eq("about_employee_id", member.id)
+      .eq("employee_id", member.id)
       .order("created_at", { ascending: false });
 
     if (!error && data) {
@@ -99,8 +210,9 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, attendance
     try {
 
       const { error } = await supabase.from("team_notes").insert({
-        team_leader_id: teamLeaderId,
-        about_employee_id: member.id,
+        team_id: teamId,
+        author_id: teamLeaderId,
+        employee_id: member.id,
         note: noteText.trim()
       });
 
@@ -160,7 +272,7 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, attendance
 
           <div>
             <p className="text-[10.5px] uppercase tracking-[0.25em] text-slate-400 font-bold mb-3">
-              Leads ({leads.length})
+              Leads ({leadsTotalCount})
             </p>
 
             {loadingLeads ? (
@@ -172,6 +284,8 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, attendance
                 {leads.map((lead) => {
                   const statusDisplay = LEAD_STATUS_DISPLAY[lead.status as keyof typeof LEAD_STATUS_DISPLAY];
                   const boardStageDisplay = BOARD_STAGES.find((b) => b.stage === (lead.board_stage || "LEADS"));
+                  const reassignOptions = teamMembers.filter((m) => m.is_active && m.id !== member.id);
+                  const isReassigning = reassigningLeadId === lead.id;
 
                   return (
                     <div key={lead.id} className="rounded-xl bg-white border border-slate-100 p-3">
@@ -189,9 +303,89 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, attendance
                           </span>
                         )}
                       </div>
+
+                      {lead.assignedByName && (
+                        <p className="text-[11px] text-slate-400 mt-1.5 font-medium">
+                          {lead.assignedByName}
+                        </p>
+                      )}
+
+                      {reassignOptions.length > 0 && (
+                        <div className="mt-2 pt-2 border-t border-slate-100">
+                          {!isReassigning ? (
+                            <button
+                              onClick={() => {
+                                setReassigningLeadId(lead.id);
+                                setReassignTargetId("");
+                                setReassignNote("");
+                              }}
+                              className="flex items-center gap-1 text-[11px] font-bold text-amber-700 hover:text-amber-800 transition"
+                            >
+                              <Repeat size={11} />
+                              Reassign
+                            </button>
+                          ) : (
+                            <div className="space-y-1.5">
+                              <select
+                                value={reassignTargetId}
+                                onChange={(e) => setReassignTargetId(e.target.value)}
+                                className="w-full h-8 rounded-lg bg-slate-50 border border-slate-200 px-2 text-[11px] font-semibold text-slate-600 outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-300 transition"
+                              >
+                                <option value="">Select member...</option>
+                                {reassignOptions.map((m) => (
+                                  <option key={m.id} value={m.id}>{m.name}</option>
+                                ))}
+                              </select>
+
+                              <input
+                                type="text"
+                                value={reassignNote}
+                                onChange={(e) => setReassignNote(e.target.value)}
+                                placeholder="Reason (optional)"
+                                className="w-full h-8 rounded-lg bg-slate-50 border border-slate-200 px-2 text-[11px] text-slate-600 outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-300 transition"
+                              />
+
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  onClick={() => submitReassign(lead)}
+                                  disabled={!reassignTargetId || reassignSubmitting}
+                                  className="flex-1 h-8 rounded-lg bg-amber-500 text-white text-[11px] font-bold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-amber-600 transition"
+                                >
+                                  {reassignSubmitting ? <Loader2 className="animate-spin mx-auto" size={12} /> : "Confirm"}
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setReassigningLeadId(null);
+                                    setReassignTargetId("");
+                                    setReassignNote("");
+                                  }}
+                                  disabled={reassignSubmitting}
+                                  className="h-8 px-2 rounded-lg text-slate-400 text-[11px] font-semibold hover:text-slate-600 transition"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
+
+                {leads.length < leadsTotalCount && (
+                  <button
+                    onClick={loadMoreLeads}
+                    disabled={loadingMoreLeads}
+                    className="w-full h-9 rounded-lg text-[12px] font-bold text-amber-700 hover:text-amber-800 transition disabled:opacity-50"
+                  >
+                    {loadingMoreLeads ? (
+                      <Loader2 className="animate-spin mx-auto" size={14} />
+                    ) : (
+                      `Load More (${leadsTotalCount - leads.length} more)`
+                    )}
+                  </button>
+                )}
               </div>
             )}
           </div>

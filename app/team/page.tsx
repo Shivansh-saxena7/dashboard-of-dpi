@@ -3,14 +3,53 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
+import { ChevronDown, FileSpreadsheet, FileText, Loader2, UserPlus } from "lucide-react";
+import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import EmployeeTabBar from "@/components/EmployeeTabBar";
 import TeamMemberCard, { MemberAttendanceStatus } from "@/components/TeamMemberCard";
 import TeamMemberDetailModal from "@/components/TeamMemberDetailModal";
+import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
+import { BOARD_STAGES } from "@/lib/leadBoardStageDisplay";
+import { exportLeadsToExcel, exportLeadsToPDF } from "@/lib/exportLeadsReport";
+import { DateRangeOption, isWithinDateRange, dateRangeFilterLabel } from "@/lib/dateRangeFilter";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const ALL_STATUSES = Object.keys(LEAD_STATUS_DISPLAY);
+
+// Same appearance-none + overlaid chevron pattern as LeadList's
+// FilterSelect, but kept as its own local copy rather than a shared
+// component — the gold ring here is deliberate (employee-facing
+// accent, Section 2.7), and Admin's equivalent is blue. Sharing one
+// component across both would either force a theme prop for two call
+// sites or silently drift the colors together; a third near-identical
+// copy is cheaper than that coupling.
+function FilterSelect({
+  value,
+  onChange,
+  children,
+  className = ""
+}: {
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLSelectElement>) => void;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`relative ${className}`}>
+      <select
+        value={value}
+        onChange={onChange}
+        className="appearance-none w-full h-10 rounded-xl bg-white border border-slate-200 pl-3 pr-8 text-xs font-semibold text-slate-600 outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-300 transition"
+      >
+        {children}
+      </select>
+      <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+    </div>
+  );
+}
 
 // Team Leader's own read-only dashboard. Every read here relies
 // entirely on the Phase 5 RLS policies (employees/leads/attendance/
@@ -38,6 +77,25 @@ export default function TeamPage() {
   const [loadingTeam, setLoadingTeam] = useState(true);
 
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
+
+  const [pendingLeads, setPendingLeads] = useState<any[]>([]);
+  const [loadingPending, setLoadingPending] = useState(true);
+  const [assigningLeadId, setAssigningLeadId] = useState<string | null>(null);
+  const [assignTargetId, setAssignTargetId] = useState("");
+  const [assignNote, setAssignNote] = useState("");
+  const [assignSubmitting, setAssignSubmitting] = useState(false);
+
+  const [reportLeads, setReportLeads] = useState<any[]>([]);
+  const [loadingReport, setLoadingReport] = useState(true);
+  const [reportEmployeeFilter, setReportEmployeeFilter] = useState("");
+  const [reportProjectFilter, setReportProjectFilter] = useState("");
+  const [reportSourceFilter, setReportSourceFilter] = useState("");
+  const [reportBoardStageFilter, setReportBoardStageFilter] = useState("");
+  const [reportStatusFilter, setReportStatusFilter] = useState("");
+  const [reportDateRangeFilter, setReportDateRangeFilter] = useState<DateRangeOption>("ALL");
+  const [reportCustomStart, setReportCustomStart] = useState("");
+  const [reportCustomEnd, setReportCustomEnd] = useState("");
+  const [exportingReport, setExportingReport] = useState(false);
 
   useEffect(() => {
     async function getLoggedInEmployee() {
@@ -90,8 +148,99 @@ export default function TeamPage() {
   useEffect(() => {
     if (employee?.id) {
       loadTeamData();
+      loadReportLeads();
+      loadPendingLeads();
     }
   }, [employee]);
+
+  // Leads Admin has reserved for this team (pending_team_id set,
+  // current_owner_id still null) — relies on the
+  // leads_team_leader_pending_select RLS policy, plus the explicit
+  // .eq/.is here as a readable convenience filter matching the same
+  // condition the RPC itself re-checks atomically at claim time.
+  async function loadPendingLeads() {
+    setLoadingPending(true);
+
+    const { data, error } = await supabase
+      .from("leads")
+      .select("id, name, mobile, project, source, priority")
+      .eq("pending_team_id", employee.team_id)
+      .is("current_owner_id", null)
+      .order("created_at", { ascending: false });
+
+    if (!error && data) {
+      setPendingLeads(data);
+    }
+
+    setLoadingPending(false);
+  }
+
+  async function submitAssignPending(lead: { id: string }) {
+    if (!assignTargetId) return;
+
+    setAssignSubmitting(true);
+
+    try {
+
+      const { error } = await supabase.rpc("assign_lead_by_team_leader_atomic", {
+        p_lead_id: lead.id,
+        p_employee_id: assignTargetId,
+        p_note: assignNote.trim() || null
+      });
+
+      if (error) {
+        toast.error(error.message || "Could not assign this lead.");
+        return;
+      }
+
+      toast.success("Lead assigned.");
+      setAssigningLeadId(null);
+      setAssignTargetId("");
+      setAssignNote("");
+      loadPendingLeads();
+      loadTeamData();
+      loadReportLeads();
+
+    } catch (err) {
+      console.log(err);
+      toast.error("Something went wrong.");
+    } finally {
+      setAssignSubmitting(false);
+    }
+  }
+
+  // Team Reports data source — relies entirely on leads_team_leader_select
+  // + lead_history_team_leader_select RLS (Phase 5 + the gap we filled
+  // fixing this same read for the roster), no explicit team_id filter
+  // here. Separate from loadTeamData's stats fetch above: that one is
+  // scoped by memberIds for the roster cards, this one needs the full
+  // row shape (priority, board_stage, first_call_at, etc.) that
+  // lib/exportLeadsReport.ts expects.
+  async function loadReportLeads() {
+    setLoadingReport(true);
+
+    const { data, error } = await supabase
+      .from("leads")
+      .select(
+        `
+        id, name, mobile, project, source, status, priority, board_stage, recycle_count,
+        current_owner_id,
+        employees ( name ),
+        lead_history (
+          assigned_at, is_active, first_call_at, assigned_by_type,
+          assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)
+        )
+      `
+      )
+      .eq("lead_history.is_active", true)
+      .order("created_at", { ascending: false });
+
+    if (!error && data) {
+      setReportLeads(data);
+    }
+
+    setLoadingReport(false);
+  }
 
   async function loadTeamData() {
     setLoadingTeam(true);
@@ -188,6 +337,129 @@ export default function TeamPage() {
     return ranked[0] || null;
   }, [members, pointsByEmployee]);
 
+  const reportProjectOptions = useMemo(
+    () => Array.from(new Set(reportLeads.map((l) => l.project).filter(Boolean))) as string[],
+    [reportLeads]
+  );
+
+  const reportSourceOptions = useMemo(
+    () => Array.from(new Set(reportLeads.map((l) => l.source).filter(Boolean))) as string[],
+    [reportLeads]
+  );
+
+  const visibleReportLeads = useMemo(() => {
+    let result = reportLeads;
+
+    if (reportEmployeeFilter) {
+      result = result.filter((lead) => lead.current_owner_id === reportEmployeeFilter);
+    }
+
+    if (reportProjectFilter) {
+      result = result.filter((lead) => lead.project === reportProjectFilter);
+    }
+
+    if (reportSourceFilter) {
+      result = result.filter((lead) => lead.source === reportSourceFilter);
+    }
+
+    if (reportBoardStageFilter) {
+      result = result.filter((lead) => (lead.board_stage || "LEADS") === reportBoardStageFilter);
+    }
+
+    if (reportStatusFilter) {
+      result = result.filter((lead) => lead.status === reportStatusFilter);
+    }
+
+    if (reportDateRangeFilter !== "ALL") {
+      result = result.filter((lead) =>
+        isWithinDateRange(
+          lead.lead_history?.[0]?.assigned_at,
+          reportDateRangeFilter,
+          reportCustomStart,
+          reportCustomEnd
+        )
+      );
+    }
+
+    return result;
+  }, [
+    reportLeads,
+    reportEmployeeFilter,
+    reportProjectFilter,
+    reportSourceFilter,
+    reportBoardStageFilter,
+    reportStatusFilter,
+    reportDateRangeFilter,
+    reportCustomStart,
+    reportCustomEnd
+  ]);
+
+  const reportMeta = useMemo(() => {
+    const employeeLabel = reportEmployeeFilter
+      ? members.find((m) => m.id === reportEmployeeFilter)?.name ?? null
+      : null;
+
+    const otherFilters: { label: string; value: string }[] = [];
+
+    if (reportProjectFilter) {
+      otherFilters.push({ label: "Project", value: reportProjectFilter });
+    }
+
+    if (reportSourceFilter) {
+      otherFilters.push({ label: "Source", value: reportSourceFilter });
+    }
+
+    if (reportBoardStageFilter) {
+      otherFilters.push({
+        label: "Board Stage",
+        value: BOARD_STAGES.find((b) => b.stage === reportBoardStageFilter)?.label || reportBoardStageFilter
+      });
+    }
+
+    if (reportStatusFilter) {
+      otherFilters.push({
+        label: "Status",
+        value: LEAD_STATUS_DISPLAY[reportStatusFilter as keyof typeof LEAD_STATUS_DISPLAY]?.label || reportStatusFilter
+      });
+    }
+
+    const dateLabel = dateRangeFilterLabel(reportDateRangeFilter, reportCustomStart, reportCustomEnd);
+    if (dateLabel) {
+      otherFilters.push({ label: "Date", value: dateLabel });
+    }
+
+    return { employeeLabel, otherFilters, scopeLabel: team?.name };
+  }, [
+    reportEmployeeFilter,
+    reportProjectFilter,
+    reportSourceFilter,
+    reportBoardStageFilter,
+    reportStatusFilter,
+    reportDateRangeFilter,
+    reportCustomStart,
+    reportCustomEnd,
+    members,
+    team
+  ]);
+
+  async function handleReportExport(format: "excel" | "pdf") {
+    if (visibleReportLeads.length === 0 || exportingReport) return;
+
+    setExportingReport(true);
+    try {
+      if (format === "excel") {
+        await exportLeadsToExcel(visibleReportLeads, reportMeta);
+      } else {
+        await exportLeadsToPDF(visibleReportLeads, reportMeta);
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Export failed. Please try again.");
+    } finally {
+      setExportingReport(false);
+    }
+  }
+
   if (!authChecked) {
     return <div className="min-h-screen bg-white" />;
   }
@@ -249,6 +521,93 @@ export default function TeamPage() {
         </div>
       </motion.div>
 
+      {pendingLeads.length > 0 && (
+        <div className="mx-4 mt-5">
+          <p className="text-[10.5px] uppercase tracking-[0.25em] text-slate-400 font-bold mb-3">
+            Pending Leads ({pendingLeads.length})
+          </p>
+
+          <div className="space-y-2.5">
+            {pendingLeads.map((lead) => {
+              const isAssigning = assigningLeadId === lead.id;
+
+              return (
+                <div key={lead.id} className="rounded-2xl bg-white border border-slate-100 shadow-md p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-slate-800 truncate">{lead.name}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">{lead.mobile}</p>
+                      {lead.project && <p className="text-xs text-slate-500">{lead.project}</p>}
+                    </div>
+                    {lead.source && (
+                      <span className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">
+                        {lead.source}
+                      </span>
+                    )}
+                  </div>
+
+                  {!isAssigning ? (
+                    <button
+                      onClick={() => {
+                        setAssigningLeadId(lead.id);
+                        setAssignTargetId("");
+                        setAssignNote("");
+                      }}
+                      className="flex items-center gap-1.5 mt-3 text-[11px] font-bold text-amber-700 hover:text-amber-800 transition"
+                    >
+                      <UserPlus size={12} />
+                      Assign to a team member
+                    </button>
+                  ) : (
+                    <div className="mt-3 pt-3 border-t border-slate-100 space-y-1.5">
+                      <select
+                        value={assignTargetId}
+                        onChange={(e) => setAssignTargetId(e.target.value)}
+                        className="w-full h-9 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs font-semibold text-slate-600 outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-300 transition"
+                      >
+                        <option value="">Select member...</option>
+                        {members.filter((m) => m.is_active).map((m) => (
+                          <option key={m.id} value={m.id}>{m.name}</option>
+                        ))}
+                      </select>
+
+                      <input
+                        type="text"
+                        value={assignNote}
+                        onChange={(e) => setAssignNote(e.target.value)}
+                        placeholder="Reason (optional)"
+                        className="w-full h-9 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs text-slate-600 outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-300 transition"
+                      />
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => submitAssignPending(lead)}
+                          disabled={!assignTargetId || assignSubmitting}
+                          className="flex-1 h-9 rounded-lg bg-amber-500 text-white text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-amber-600 transition"
+                        >
+                          {assignSubmitting ? <Loader2 className="animate-spin mx-auto" size={13} /> : "Confirm"}
+                        </button>
+                        <button
+                          onClick={() => {
+                            setAssigningLeadId(null);
+                            setAssignTargetId("");
+                            setAssignNote("");
+                          }}
+                          disabled={assignSubmitting}
+                          className="h-9 px-3 rounded-lg text-slate-400 text-xs font-semibold hover:text-slate-600 transition"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="mx-4 mt-5">
         <p className="text-[10.5px] uppercase tracking-[0.25em] text-slate-400 font-bold mb-3">
           Team Roster
@@ -275,12 +634,116 @@ export default function TeamPage() {
         )}
       </div>
 
+      <div className="mx-4 mt-6">
+        <p className="text-[10.5px] uppercase tracking-[0.25em] text-slate-400 font-bold mb-3">
+          Team Reports
+        </p>
+
+        <div className="bg-white rounded-[24px] border border-slate-100 shadow-md p-5 space-y-4">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+            <FilterSelect value={reportEmployeeFilter} onChange={(e) => setReportEmployeeFilter(e.target.value)}>
+              <option value="">All Members</option>
+              {members.map((m) => (
+                <option key={m.id} value={m.id}>{m.name}</option>
+              ))}
+            </FilterSelect>
+
+            <FilterSelect value={reportProjectFilter} onChange={(e) => setReportProjectFilter(e.target.value)}>
+              <option value="">All Projects</option>
+              {reportProjectOptions.map((p) => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </FilterSelect>
+
+            <FilterSelect value={reportSourceFilter} onChange={(e) => setReportSourceFilter(e.target.value)}>
+              <option value="">All Sources</option>
+              {reportSourceOptions.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </FilterSelect>
+
+            <FilterSelect value={reportBoardStageFilter} onChange={(e) => setReportBoardStageFilter(e.target.value)}>
+              <option value="">All Board Stages</option>
+              {BOARD_STAGES.map((stage) => (
+                <option key={stage.stage} value={stage.stage}>{stage.emoji} {stage.label}</option>
+              ))}
+            </FilterSelect>
+
+            <FilterSelect value={reportStatusFilter} onChange={(e) => setReportStatusFilter(e.target.value)}>
+              <option value="">All Statuses</option>
+              {ALL_STATUSES.map((status) => (
+                <option key={status} value={status}>{LEAD_STATUS_DISPLAY[status as keyof typeof LEAD_STATUS_DISPLAY].label}</option>
+              ))}
+            </FilterSelect>
+
+            <FilterSelect
+              value={reportDateRangeFilter}
+              onChange={(e) => setReportDateRangeFilter(e.target.value as DateRangeOption)}
+            >
+              <option value="ALL">Any Time</option>
+              <option value="THIS_WEEK">This Week</option>
+              <option value="THIS_MONTH">This Month</option>
+              <option value="CUSTOM">Custom</option>
+            </FilterSelect>
+
+            {reportDateRangeFilter === "CUSTOM" && (
+              <div className="col-span-2 flex gap-2">
+                <input
+                  type="date"
+                  value={reportCustomStart}
+                  onChange={(e) => setReportCustomStart(e.target.value)}
+                  className="flex-1 h-10 rounded-xl bg-slate-50 border border-slate-200 px-3 text-xs text-slate-600 outline-none"
+                />
+                <input
+                  type="date"
+                  value={reportCustomEnd}
+                  onChange={(e) => setReportCustomEnd(e.target.value)}
+                  className="flex-1 h-10 rounded-xl bg-slate-50 border border-slate-200 px-3 text-xs text-slate-600 outline-none"
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+            <p className="text-xs text-slate-500">
+              {loadingReport ? "Loading..." : `${visibleReportLeads.length} lead${visibleReportLeads.length === 1 ? "" : "s"} match these filters`}
+            </p>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handleReportExport("excel")}
+                disabled={visibleReportLeads.length === 0 || exportingReport}
+                className="flex items-center gap-1.5 h-10 px-3 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-emerald-100 transition"
+              >
+                <FileSpreadsheet size={14} />
+                Excel
+              </button>
+
+              <button
+                onClick={() => handleReportExport("pdf")}
+                disabled={visibleReportLeads.length === 0 || exportingReport}
+                className="flex items-center gap-1.5 h-10 px-3 rounded-lg bg-red-50 text-red-700 text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-red-100 transition"
+              >
+                <FileText size={14} />
+                PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {selectedMember && (
         <TeamMemberDetailModal
           member={selectedMember}
           teamLeaderId={employee.id}
+          teamId={team.id}
+          teamMembers={members}
           attendanceStatus={getAttendanceStatus(selectedMember.id)}
           onClose={() => setSelectedMemberId(null)}
+          onReassigned={() => {
+            loadTeamData();
+            loadReportLeads();
+          }}
         />
       )}
 

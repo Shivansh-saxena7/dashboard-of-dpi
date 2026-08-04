@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { X, Phone, Loader2, Send } from "lucide-react";
+import { X, Phone, Loader2, Send, Repeat } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import toast from "react-hot-toast";
 import { getValidNextLeadStatuses, LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BoardStage } from "@/lib/leadBoardStageDisplay";
 import { LEAD_POINTS } from "@/lib/calculateLeadPoints";
+import { AssignedBySource } from "@/lib/assignedByDisplay";
 
 export interface LeadDetailLead {
   id: string;
@@ -19,6 +20,9 @@ export interface LeadDetailLead {
   status: LeadStatus;
   callCount: number;
   boardStage: BoardStage;
+  assignedByType: AssignedBySource["assigned_by_type"] | null;
+  assignedBy: { name: string } | null;
+  reassignNote: string | null;
 }
 
 interface LeadNote {
@@ -239,6 +243,20 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
           >
             {LEAD_STATUS_DISPLAY[lead.status].label}
           </span>
+
+          {lead.assignedByType === "TEAM_LEADER" && (
+            <div className="flex items-start gap-1.5 mt-3 rounded-xl bg-amber-50 border border-amber-100 px-2.5 py-2">
+              <Repeat size={12} className="text-amber-600 shrink-0 mt-0.5" />
+              <p className="text-[11px] text-amber-800 leading-relaxed">
+                {lead.assignedBy?.name || "Your Team Leader"} reassigned this lead to you
+                {lead.reassignNote && (
+                  <>
+                    {" "}— <span className="font-semibold">{lead.reassignNote}</span>
+                  </>
+                )}
+              </p>
+            </div>
+          )}
 
           <a
             href={`tel:${lead.mobile}`}

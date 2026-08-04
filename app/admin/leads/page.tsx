@@ -9,6 +9,7 @@ import AdminLeadCard from "@/components/AdminLeadCard";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES } from "@/lib/leadBoardStageDisplay";
 import { exportLeadsToExcel, exportLeadsToPDF } from "@/lib/exportLeadsReport";
+import { DateRangeOption, isWithinDateRange, dateRangeFilterLabel } from "@/lib/dateRangeFilter";
 
 type SortOption = "NEWEST" | "OLDEST" | "SLA_URGENCY";
 
@@ -54,6 +55,8 @@ export default function AdminLeadsPage() {
 
   const [leads, setLeads] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
+  const [adminEmployeeId, setAdminEmployeeId] = useState<string | null>(null);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [employeeFilter, setEmployeeFilter] = useState("");
@@ -61,12 +64,38 @@ export default function AdminLeadsPage() {
   const [sourceFilter, setSourceFilter] = useState("");
   const [boardStageFilter, setBoardStageFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [dateRangeFilter, setDateRangeFilter] = useState<DateRangeOption>("ALL");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("NEWEST");
   const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     loadLeads();
+    loadTeams();
+    loadAdminEmployeeId();
   }, []);
+
+  // Needed as reserved_by_employee_id when logging a team reservation
+  // — this page's own layout only tracks the admin's display name
+  // locally, not their employees.id, so it's fetched here directly.
+  async function loadAdminEmployeeId() {
+    const {
+      data: { session }
+    } = await supabase.auth.getSession();
+
+    if (!session) return;
+
+    const { data } = await supabase
+      .from("employees")
+      .select("id")
+      .eq("auth_user_id", session.user.id)
+      .single();
+
+    if (data) {
+      setAdminEmployeeId(data.id);
+    }
+  }
 
   async function loadLeads() {
     setLoading(true);
@@ -87,8 +116,13 @@ export default function AdminLeadsPage() {
         recycle_count,
         created_at,
         current_owner_id,
+        pending_team_id,
         employees ( name ),
-        lead_history ( assigned_at, is_active, first_call_at )
+        pending_team:teams ( name ),
+        lead_history (
+          assigned_at, is_active, first_call_at, assigned_by_type,
+          assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)
+        )
       `
       )
       .eq("lead_history.is_active", true)
@@ -99,6 +133,57 @@ export default function AdminLeadsPage() {
     }
 
     setLoading(false);
+  }
+
+  async function loadTeams() {
+    const { data, error } = await supabase.from("teams").select("id, name").order("name");
+    if (!error && data) {
+      setTeams(data);
+    }
+  }
+
+  // Reserving a lead for a team is a plain client-side update (not an
+  // RPC) — same precedent as the rest of app/admin/teams/page.tsx:
+  // Admin already has full RLS access to `leads`, and this is one
+  // trusted column, not a multi-table transaction. Optimistic local
+  // patch avoids a full refetch for a single-field change.
+  //
+  // The reservation itself is also logged to lead_team_reservations —
+  // this is a genuinely separate event from an assignment (nobody
+  // owns the lead yet), so it can't be a lead_history row (employee_id
+  // there is NOT NULL, by design, on every existing write path).
+  // AdminLeadHistoryModal merges both tables into one timeline. Only
+  // logged when actually reserving for a team, not when clearing back
+  // to "No team reserved" — there's no assignment-shaped event to
+  // record in that direction.
+  async function handleReserveTeam(leadId: string, teamId: string | null) {
+    const { error } = await supabase
+      .from("leads")
+      .update({ pending_team_id: teamId })
+      .eq("id", leadId);
+
+    if (error) {
+      toast.error(error.message || "Could not update team reservation.");
+      return;
+    }
+
+    if (teamId && adminEmployeeId) {
+      await supabase.from("lead_team_reservations").insert({
+        lead_id: leadId,
+        team_id: teamId,
+        reserved_by_employee_id: adminEmployeeId
+      });
+    }
+
+    const teamName = teamId ? teams.find((t) => t.id === teamId)?.name ?? null : null;
+
+    setLeads((prev) =>
+      prev.map((lead) =>
+        lead.id === leadId
+          ? { ...lead, pending_team_id: teamId, pending_team: teamName ? { name: teamName } : null }
+          : lead
+      )
+    );
   }
 
   const employeeOptions = useMemo(() => {
@@ -155,6 +240,12 @@ export default function AdminLeadsPage() {
       result = result.filter((lead) => lead.status === statusFilter);
     }
 
+    if (dateRangeFilter !== "ALL") {
+      result = result.filter((lead) =>
+        isWithinDateRange(lead.lead_history?.[0]?.assigned_at, dateRangeFilter, customStart, customEnd)
+      );
+    }
+
     result = [...result].sort((a, b) => {
 
       if (sortBy === "SLA_URGENCY") {
@@ -171,7 +262,19 @@ export default function AdminLeadsPage() {
 
     return result;
 
-  }, [leads, searchQuery, employeeFilter, projectFilter, sourceFilter, boardStageFilter, statusFilter, sortBy]);
+  }, [
+    leads,
+    searchQuery,
+    employeeFilter,
+    projectFilter,
+    sourceFilter,
+    boardStageFilter,
+    statusFilter,
+    dateRangeFilter,
+    customStart,
+    customEnd,
+    sortBy
+  ]);
 
   // Report-header content — Employee gets its own labeled line (per
   // spec), the other four filters bundle into one "Filters: ..."
@@ -207,8 +310,23 @@ export default function AdminLeadsPage() {
       });
     }
 
+    const dateLabel = dateRangeFilterLabel(dateRangeFilter, customStart, customEnd);
+    if (dateLabel) {
+      otherFilters.push({ label: "Date", value: dateLabel });
+    }
+
     return { employeeLabel, otherFilters };
-  }, [employeeFilter, projectFilter, sourceFilter, boardStageFilter, statusFilter, employeeOptions]);
+  }, [
+    employeeFilter,
+    projectFilter,
+    sourceFilter,
+    boardStageFilter,
+    statusFilter,
+    dateRangeFilter,
+    customStart,
+    customEnd,
+    employeeOptions
+  ]);
 
   // Exports exactly visibleLeads (already filtered/searched/sorted
   // above) — never the full leads array. Both exceljs and jspdf are
@@ -300,6 +418,16 @@ export default function AdminLeadsPage() {
             ))}
           </FilterSelect>
 
+          <FilterSelect
+            value={dateRangeFilter}
+            onChange={(e) => setDateRangeFilter(e.target.value as DateRangeOption)}
+          >
+            <option value="ALL">Any Time</option>
+            <option value="THIS_WEEK">This Week</option>
+            <option value="THIS_MONTH">This Month</option>
+            <option value="CUSTOM">Custom</option>
+          </FilterSelect>
+
           <FilterSelect value={sortBy} onChange={(e) => setSortBy(e.target.value as SortOption)} className="sm:ml-auto">
             <option value="NEWEST">Newest First</option>
             <option value="OLDEST">Oldest First</option>
@@ -325,6 +453,23 @@ export default function AdminLeadsPage() {
               PDF
             </button>
           </div>
+
+          {dateRangeFilter === "CUSTOM" && (
+            <div className="col-span-2 flex gap-2">
+              <input
+                type="date"
+                value={customStart}
+                onChange={(e) => setCustomStart(e.target.value)}
+                className="flex-1 h-11 sm:h-10 rounded-lg bg-slate-50 border border-slate-200 px-3 text-xs text-slate-600 outline-none appearance-none"
+              />
+              <input
+                type="date"
+                value={customEnd}
+                onChange={(e) => setCustomEnd(e.target.value)}
+                className="flex-1 h-11 sm:h-10 rounded-lg bg-slate-50 border border-slate-200 px-3 text-xs text-slate-600 outline-none appearance-none"
+              />
+            </div>
+          )}
         </div>
       </motion.div>
 
@@ -341,6 +486,8 @@ export default function AdminLeadsPage() {
             <AdminLeadCard
               key={lead.id}
               index={index}
+              teams={teams}
+              onReserveTeam={handleReserveTeam}
               lead={{
                 id: lead.id,
                 name: lead.name,
@@ -352,7 +499,9 @@ export default function AdminLeadsPage() {
                 boardStage: lead.board_stage || "LEADS",
                 recycleCount: lead.recycle_count,
                 ownerName: lead.employees?.name ?? null,
-                assignedAt: lead.lead_history?.[0]?.assigned_at ?? null
+                assignedAt: lead.lead_history?.[0]?.assigned_at ?? null,
+                pendingTeamId: lead.pending_team_id ?? null,
+                pendingTeamName: lead.pending_team?.name ?? null
               }}
             />
           ))}
