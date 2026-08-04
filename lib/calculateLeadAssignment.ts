@@ -19,44 +19,88 @@ export interface EligibleEmployee {
   id: string;
 }
 
+// project -> last-assigned-employee-id within that project's own
+// fixed-employee pool. Keyed by the SAME normalization this function
+// applies internally (trim + lowercase) — callers read/write
+// project_rule_pointers using whatever key calculateLeadAssignment
+// hands back in nextProjectPointer.project, so they never need to
+// normalize independently.
+export type ProjectRulePointers = Record<string, string | null>;
+
 export interface LeadAssignmentResult {
   assignedEmployeeId: string | null;
-  nextPointerEmployeeId: string | null;
   reason: LeadAssignmentReason;
+  // lead_engine_settings.round_robin_pointer_employee_id — only
+  // actually moves on ROUND_ROBIN. PROJECT_RULE and
+  // NO_ELIGIBLE_EMPLOYEE both pass the input value straight through,
+  // so writing this back is always safe, even when nothing changed.
+  nextGlobalPointerEmployeeId: string | null;
+  // Present only when this was a PROJECT_RULE match against a project
+  // with MORE than one fixed employee — the caller persists this into
+  // project_rule_pointers. Null for a single-employee project rule
+  // (nothing to rotate) and for ROUND_ROBIN/NO_ELIGIBLE_EMPLOYEE.
+  nextProjectPointer: { project: string; employeeId: string } | null;
 }
 
 // `eligibleEmployees` must already be filtered by the caller to
-// employees where is_active = true, rr_eligible = true, and (once
-// the attendance gate ships in Phase 2) shift started today — this
-// function only decides ordering/turn-taking within that pool, per
-// the boundary rule that shift status only gates NEW lead assignment.
-// The list must also be in a stable, consistent order every time it's
-// built (e.g. sorted by id), since round robin depends on that order.
+// employees where is_active = true, rr_eligible = true, and shift
+// started today — this function only decides ordering/turn-taking
+// within that pool. The list must be in a stable, consistent order
+// every time it's built (e.g. sorted by id), since round robin
+// depends on that order. Same stability requirement applies to a
+// project's matched-employee list, which is derived here from
+// projectRules in whatever order those rows were fetched in — callers
+// should fetch project_assignment_rules with a stable order (e.g. by
+// id) for the multi-employee rotation to behave predictably.
 export function calculateLeadAssignment(
   project: string | null,
   projectRules: ProjectAssignmentRule[],
   eligibleEmployees: EligibleEmployee[],
-  lastAssignedEmployeeId: string | null
+  lastGlobalAssignedEmployeeId: string | null,
+  projectPointers: ProjectRulePointers = {}
 ): LeadAssignmentResult {
 
   const normalizedProject = String(project || "").trim().toLowerCase();
 
   if (normalizedProject) {
 
-    const matchedRule = projectRules.find(
-      (rule) => String(rule.project || "").trim().toLowerCase() === normalizedProject
+    const matchedEmployeeIds = Array.from(
+      new Set(
+        projectRules
+          .filter((rule) => String(rule.project || "").trim().toLowerCase() === normalizedProject)
+          .map((rule) => rule.assigned_employee_id)
+      )
     );
 
-    if (matchedRule) {
-      // Project Rules override bypasses round robin entirely — the
-      // pointer is left untouched so the rest of the pool's turn
-      // order stays fair. If the rule's employee is later deactivated,
-      // the rule itself must be updated/removed — this function does
-      // not fall back to round robin automatically.
+    if (matchedEmployeeIds.length === 1) {
+      // Single fixed employee — bypasses round robin entirely, pointer
+      // left untouched so the company-wide pool's turn order stays
+      // fair. If the rule's employee is later deactivated, the rule
+      // itself must be updated/removed — this function does not fall
+      // back to round robin automatically.
       return {
-        assignedEmployeeId: matchedRule.assigned_employee_id,
-        nextPointerEmployeeId: lastAssignedEmployeeId,
-        reason: "PROJECT_RULE"
+        assignedEmployeeId: matchedEmployeeIds[0],
+        reason: "PROJECT_RULE",
+        nextGlobalPointerEmployeeId: lastGlobalAssignedEmployeeId,
+        nextProjectPointer: null
+      };
+    }
+
+    if (matchedEmployeeIds.length > 1) {
+      // Multiple fixed employees for this project — round robin among
+      // just this group, using a pointer scoped to the project itself,
+      // never the company-wide one. Still bypasses the general pool
+      // entirely, same as the single-employee case.
+      const lastProjectPointer = projectPointers[normalizedProject] ?? null;
+      const lastIndex = matchedEmployeeIds.findIndex((id) => id === lastProjectPointer);
+      const nextIndex = lastIndex === -1 ? 0 : (lastIndex + 1) % matchedEmployeeIds.length;
+      const nextEmployeeId = matchedEmployeeIds[nextIndex];
+
+      return {
+        assignedEmployeeId: nextEmployeeId,
+        reason: "PROJECT_RULE",
+        nextGlobalPointerEmployeeId: lastGlobalAssignedEmployeeId,
+        nextProjectPointer: { project: normalizedProject, employeeId: nextEmployeeId }
       };
     }
 
@@ -65,13 +109,14 @@ export function calculateLeadAssignment(
   if (eligibleEmployees.length === 0) {
     return {
       assignedEmployeeId: null,
-      nextPointerEmployeeId: lastAssignedEmployeeId,
-      reason: "NO_ELIGIBLE_EMPLOYEE"
+      reason: "NO_ELIGIBLE_EMPLOYEE",
+      nextGlobalPointerEmployeeId: lastGlobalAssignedEmployeeId,
+      nextProjectPointer: null
     };
   }
 
   const lastIndex = eligibleEmployees.findIndex(
-    (employee) => employee.id === lastAssignedEmployeeId
+    (employee) => employee.id === lastGlobalAssignedEmployeeId
   );
 
   const nextIndex = lastIndex === -1 ? 0 : (lastIndex + 1) % eligibleEmployees.length;
@@ -80,8 +125,9 @@ export function calculateLeadAssignment(
 
   return {
     assignedEmployeeId: nextEmployee.id,
-    nextPointerEmployeeId: nextEmployee.id,
-    reason: "ROUND_ROBIN"
+    reason: "ROUND_ROBIN",
+    nextGlobalPointerEmployeeId: nextEmployee.id,
+    nextProjectPointer: null
   };
 
 }

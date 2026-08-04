@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Search, ChevronDown, Target, FileSpreadsheet, FileText } from "lucide-react";
+import { Search, ChevronDown, Target, FileSpreadsheet, FileText, Upload } from "lucide-react";
+import Link from "next/link";
 import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
 import AdminLeadCard from "@/components/AdminLeadCard";
@@ -361,10 +362,22 @@ export default function AdminLeadsPage() {
         <div className="absolute top-[-60px] right-[-60px] w-[150px] h-[150px] rounded-full bg-white/10 blur-3xl" />
         <Target size={140} strokeWidth={1} className="absolute -bottom-8 -right-4 text-white/10 pointer-events-none" />
 
-        <h1 className="text-3xl font-bold">Leads</h1>
-        <p className="mt-2 text-white/80 text-sm">
-          Every lead, across every employee — {leads.length} total
-        </p>
+        <div className="relative flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-3xl font-bold">Leads</h1>
+            <p className="mt-2 text-white/80 text-sm">
+              Every lead, across every employee — {leads.length} total
+            </p>
+          </div>
+
+          <Link
+            href="/admin/leads/import"
+            className="shrink-0 flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition"
+          >
+            <Upload size={14} />
+            Import CSV
+          </Link>
+        </div>
       </motion.div>
 
       <motion.div

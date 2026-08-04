@@ -77,7 +77,8 @@ serve(async (req) => {
 
     const { data: projectRules, error: rulesError } = await supabase
       .from("project_assignment_rules")
-      .select("project, assigned_employee_id");
+      .select("project, assigned_employee_id")
+      .order("id", { ascending: true });
 
     if (rulesError) {
       return respond(
@@ -89,6 +90,26 @@ serve(async (req) => {
         500
       );
     }
+
+    const { data: projectPointerRows, error: pointerError } = await supabase
+      .from("project_rule_pointers")
+      .select("project, last_assigned_employee_id");
+
+    if (pointerError) {
+      return respond(
+        {
+          success: false,
+          step: "FETCH_PROJECT_POINTERS",
+          error: pointerError.message
+        },
+        500
+      );
+    }
+
+    const projectPointers = {};
+    (projectPointerRows || []).forEach((row) => {
+      projectPointers[row.project] = row.last_assigned_employee_id;
+    });
 
     // Round-robin pool = active + rr_eligible employees who have
     // started today's shift AND not yet ended it (Phase 2 attendance
@@ -165,7 +186,8 @@ serve(async (req) => {
       lead.project,
       projectRules || [],
       eligibleEmployees || [],
-      settings.round_robin_pointer_employee_id
+      settings.round_robin_pointer_employee_id,
+      projectPointers
     );
 
     if (!result.assignedEmployeeId) {
@@ -196,7 +218,7 @@ serve(async (req) => {
       p_lead_id: lead_id,
       p_employee_id: result.assignedEmployeeId,
       p_sla_deadline: slaDeadline,
-      p_next_pointer_employee_id: result.nextPointerEmployeeId
+      p_next_pointer_employee_id: result.nextGlobalPointerEmployeeId
     });
 
     if (assignError) {
@@ -208,6 +230,23 @@ serve(async (req) => {
         },
         500
       );
+    }
+
+    // Non-fatal if this fails — the lead is already correctly
+    // assigned via assign_lead_atomic above. Losing this write just
+    // means the next multi-employee-project-rule lead for this
+    // project might repeat the same employee instead of rotating.
+    if (result.nextProjectPointer) {
+      const { error: projectPointerError } = await supabase
+        .from("project_rule_pointers")
+        .upsert({
+          project: result.nextProjectPointer.project,
+          last_assigned_employee_id: result.nextProjectPointer.employeeId
+        });
+
+      if (projectPointerError) {
+        console.error("project_rule_pointers upsert failed:", projectPointerError.message);
+      }
     }
 
     return respond({

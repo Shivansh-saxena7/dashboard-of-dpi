@@ -331,7 +331,7 @@ serve(async () => {
         // — that pointer tracks company-wide rotation, which this
         // lead was never part of (same "bypasses round-robin"
         // principle the manual-assign/reassign RPCs follow).
-        p_next_pointer_employee_id: isTeamLeaderAssigned ? pointerEmployeeId : result.nextPointerEmployeeId,
+        p_next_pointer_employee_id: isTeamLeaderAssigned ? pointerEmployeeId : result.nextGlobalPointerEmployeeId,
         p_recycle_reason: slaStatus
       });
 
@@ -346,7 +346,7 @@ serve(async () => {
       } else {
         recycledCount++;
         if (!isTeamLeaderAssigned) {
-          pointerEmployeeId = result.nextPointerEmployeeId;
+          pointerEmployeeId = result.nextGlobalPointerEmployeeId;
         }
         diagnostics.push({
           leadId: lead.id,
