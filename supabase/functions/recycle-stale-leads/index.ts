@@ -58,9 +58,12 @@ serve(async () => {
       );
     }
 
-    const { data: projectRules, error: rulesError } = await supabase
+    // employees(is_active) joined so the multi-employee group-recycle
+    // branch below can skip a deactivated member's turn without a
+    // second round-trip.
+    const { data: projectRulesRaw, error: rulesError } = await supabase
       .from("project_assignment_rules")
-      .select("project, assigned_employee_id");
+      .select("project, assigned_employee_id, employees(is_active)");
 
     if (rulesError) {
       return new Response(
@@ -68,6 +71,12 @@ serve(async () => {
         { headers: { "Content-Type": "application/json" }, status: 500 }
       );
     }
+
+    const projectRules = (projectRulesRaw || []).map((row) => ({
+      project: row.project,
+      assigned_employee_id: row.assigned_employee_id,
+      employee_is_active: row.employees?.is_active ?? false
+    }));
 
     // For multi-employee project rules — round robin position within
     // just that project's fixed-employee group, entirely separate
@@ -131,10 +140,14 @@ serve(async () => {
     // fetch because the current owner themselves might not be
     // is_active/rr_eligible/shift-started (and so wouldn't appear in
     // allActiveEmployees at all), but we still need to know their
-    // team to scope the pool correctly.
+    // team to scope the pool correctly. Also carries is_active/name
+    // now — the single/multi-employee Project Rule branches below
+    // need to know whether a fixed employee is still active, and (for
+    // the single-employee case) their name for the Admin-redirect
+    // alert when they're not.
     const { data: allEmployeesForTeamLookup, error: teamLookupError } = await supabase
       .from("employees")
-      .select("id, team_id");
+      .select("id, team_id, is_active, name");
 
     if (teamLookupError) {
       return new Response(
@@ -144,7 +157,23 @@ serve(async () => {
     }
 
     const teamIdByEmployeeId = new Map<string, string | null>();
-    (allEmployeesForTeamLookup || []).forEach((e) => teamIdByEmployeeId.set(e.id, e.team_id));
+    const isActiveByEmployeeId = new Map<string, boolean>();
+    const nameByEmployeeId = new Map<string, string>();
+    (allEmployeesForTeamLookup || []).forEach((e) => {
+      teamIdByEmployeeId.set(e.id, e.team_id);
+      isActiveByEmployeeId.set(e.id, e.is_active);
+      nameByEmployeeId.set(e.id, e.name);
+    });
+
+    // Fetched once, outside the per-lead loop below — the admin
+    // roster doesn't change mid-sweep, and this is the redirect
+    // target when a single-fixed-employee Project Rule's employee has
+    // been deactivated (see that branch's own comment).
+    const { data: activeAdmins } = await supabase
+      .from("employees")
+      .select("id, name")
+      .eq("role", "admin")
+      .eq("is_active", true);
 
     const { data: leads, error: leadsError } = await supabase
       .from("leads")
@@ -275,7 +304,16 @@ serve(async () => {
         // lead.current_owner_id (not the rule row's employee id
         // directly) — in this single-employee case they're always the
         // same in practice, but this is the actually-correct signal:
-        // whoever currently holds the lead is who needs the nudge.
+        // whoever currently holds the lead is who needs the nudge —
+        // UNLESS that employee has since been deactivated, in which
+        // case they can't log in to ever see it, and this lead would
+        // just sit stuck forever with nobody able to act (ownership
+        // never auto-reassigns away from a single-fixed-employee
+        // rule, by design). The alert goes to Admin(s) instead in
+        // that case — they're the ones who can actually fix the stale
+        // Project Rule.
+        const fixedEmployeeIsActive = isActiveByEmployeeId.get(lead.current_owner_id) ?? false;
+
         if (!activeHistory.sla_warning_sent_at) {
 
           await supabase
@@ -283,23 +321,48 @@ serve(async () => {
             .update({ sla_warning_sent_at: new Date().toISOString() })
             .eq("id", activeHistory.id);
 
-          const { data: employee } = await supabase
-            .from("employees")
-            .select("name")
-            .eq("id", lead.current_owner_id)
-            .single();
+          if (fixedEmployeeIsActive) {
 
-          await supabase.from("notification").insert({
-            employee_id: lead.current_owner_id,
-            employee_name: employee?.name || "",
-            title: "Lead needs follow-up",
-            message: "A lead assigned to you via a Project Rule is past its SLA window — please follow up.",
-            type: "SLA_WARNING",
-            is_read: false
-          });
+            const { data: employee } = await supabase
+              .from("employees")
+              .select("name")
+              .eq("id", lead.current_owner_id)
+              .single();
+
+            await supabase.from("notification").insert({
+              employee_id: lead.current_owner_id,
+              employee_name: employee?.name || "",
+              title: "Lead needs follow-up",
+              message: "A lead assigned to you via a Project Rule is past its SLA window — please follow up.",
+              type: "SLA_WARNING",
+              is_read: false
+            });
+
+          } else {
+
+            const employeeName = nameByEmployeeId.get(lead.current_owner_id) || "Unknown";
+
+            for (const admin of activeAdmins || []) {
+              await supabase.from("notification").insert({
+                employee_id: admin.id,
+                employee_name: admin.name || "",
+                title: "Project Rule points to a deactivated employee",
+                message: `"${lead.project}"'s fixed employee (${employeeName}) is deactivated — a lead is stuck past its SLA window. Update or remove the Project Rule to unstick it.`,
+                type: "PROJECT_RULE_STALE",
+                is_read: false
+              });
+            }
+
+          }
 
           warnedCount++;
-          diagnostics.push({ leadId: lead.id, action: "WARNED", slaStatus, project: lead.project });
+          diagnostics.push({
+            leadId: lead.id,
+            action: "WARNED",
+            slaStatus,
+            project: lead.project,
+            notifiedAdminInstead: !fixedEmployeeIsActive
+          });
 
         } else {
           diagnostics.push({ leadId: lead.id, action: "SKIPPED", reason: "project rule, already warned" });
@@ -313,14 +376,18 @@ serve(async () => {
 
         // Multiple fixed employees for this project — SLA breach
         // rotates within just this group (current/non-responsive
-        // owner excluded, and only currently shift-active members
+        // owner excluded, only currently shift-active members
         // considered — a project rule bypasses the rr_eligible pool
         // gate entirely by design, but someone who hasn't clocked in
-        // still can't realistically respond right now). Never escapes
-        // to the system-wide pool. Mirrors team-scoped recycling's
-        // shape exactly.
+        // still can't realistically respond right now — and a
+        // deactivated member never can, regardless of shift). Never
+        // escapes to the system-wide pool. Mirrors team-scoped
+        // recycling's shape exactly.
         const groupPoolEmployees = allMatchedEmployeeIds.filter(
-          (id) => id !== lead.current_owner_id && shiftStartedEmployeeIds.has(id)
+          (id) =>
+            id !== lead.current_owner_id &&
+            shiftStartedEmployeeIds.has(id) &&
+            (isActiveByEmployeeId.get(id) ?? false)
         );
 
         if (groupPoolEmployees.length === 0) {

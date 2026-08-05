@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import EmployeeTabBar from "@/components/EmployeeTabBar";
+import StartShiftCard from "@/components/StartShiftCard";
 import LeadList from "@/components/LeadList";
 
 // New V2 route — deliberately its own page rather than folded into
@@ -68,6 +69,7 @@ export default function LeadsPage() {
   return (
     <main className="min-h-screen bg-gradient-to-br from-white via-blue-50 to-blue-100">
       <Header />
+      {employee?.id && <StartShiftCard employeeId={employee.id} compact />}
       <EmployeeTabBar role={employee?.role} />
       {employee?.id && <LeadList employeeId={employee.id} />}
       <Footer />

@@ -75,9 +75,12 @@ serve(async (req) => {
       );
     }
 
-    const { data: projectRules, error: rulesError } = await supabase
+    // employees(is_active) joined so calculateLeadAssignment's
+    // multi-employee Project Rule branch can skip a deactivated
+    // member's turn in rotation without a second round-trip.
+    const { data: projectRulesRaw, error: rulesError } = await supabase
       .from("project_assignment_rules")
-      .select("project, assigned_employee_id")
+      .select("project, assigned_employee_id, employees(is_active)")
       .order("id", { ascending: true });
 
     if (rulesError) {
@@ -90,6 +93,12 @@ serve(async (req) => {
         500
       );
     }
+
+    const projectRules = (projectRulesRaw || []).map((row) => ({
+      project: row.project,
+      assigned_employee_id: row.assigned_employee_id,
+      employee_is_active: row.employees?.is_active ?? false
+    }));
 
     const { data: projectPointerRows, error: pointerError } = await supabase
       .from("project_rule_pointers")

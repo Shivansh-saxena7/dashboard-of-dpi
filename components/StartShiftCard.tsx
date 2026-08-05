@@ -16,6 +16,15 @@ import {
 
 interface StartShiftCardProps {
   employeeId: string;
+  // Slim single-row status-strip instead of the full card — same
+  // component, same state/RPC-logic, just a different render branch
+  // (see the bottom of the function). Used on Leads/Data/Team, where
+  // shift-status is relevant (new leads/Data depend on it) but
+  // repeating the full card on every tab would be redundant, most of
+  // the time showing nothing actionable (shift already started, the
+  // common case for most of the day). The full card stays exactly as
+  // it was on Posts (app/page.tsx), untouched.
+  compact?: boolean;
 }
 
 interface ShiftTimingConfig {
@@ -58,7 +67,7 @@ const WINDOW_RECHECK_INTERVAL_MS = 30000;
 // full-screen hero moments, and this is a dashboard card, not one of
 // those. Most usage is expected to be on a phone at the office, so
 // touch targets (icon badge, button) are sized generously.
-export default function StartShiftCard({ employeeId }: StartShiftCardProps) {
+export default function StartShiftCard({ employeeId, compact = false }: StartShiftCardProps) {
 
   const [checking, setChecking] = useState(true);
   const [starting, setStarting] = useState(false);
@@ -302,6 +311,55 @@ export default function StartShiftCard({ employeeId }: StartShiftCardProps) {
 
   const canStart = !config || !startWindow ? false : startWindow.allowed;
   const canEnd = !config || !endWindow ? false : endWindow.allowed;
+
+  if (compact) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="mx-4 mt-4 flex items-center justify-between gap-3 rounded-xl bg-white border border-slate-100 shadow-sm px-4 py-2.5"
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <span
+            className={`h-2 w-2 rounded-full shrink-0 ${
+              ended ? "bg-slate-300" : started ? "bg-emerald-500" : "bg-amber-400"
+            }`}
+          />
+          <p className="text-xs font-semibold text-slate-600 truncate">
+            {ended
+              ? "Shift ended"
+              : started
+              ? `Shift active since ${new Date(shiftStartAt!).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit"
+                })}`
+              : "Shift not started — new leads are locked"}
+          </p>
+        </div>
+
+        {/* Only the Start action is duplicated here — End Shift stays
+            exclusively on the full card (Posts): it's a voluntary,
+            low-priority action per the top-level comment, no need to
+            surface it everywhere shift-status is glanceable. */}
+        {!started && !ended && (
+          <motion.button
+            whileTap={canStart ? { scale: 0.96 } : undefined}
+            disabled={starting || !canStart}
+            onClick={startShift}
+            className={`shrink-0 flex items-center gap-1 h-8 px-3 rounded-lg text-[11px] font-bold disabled:opacity-50 ${
+              canStart
+                ? "bg-gradient-to-r from-yellow-400 to-amber-500 text-slate-900"
+                : "bg-slate-100 text-slate-400"
+            }`}
+          >
+            {starting ? <Loader2 className="animate-spin" size={11} /> : <MapPin size={11} />}
+            {starting ? "Starting..." : "Start"}
+          </motion.button>
+        )}
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div

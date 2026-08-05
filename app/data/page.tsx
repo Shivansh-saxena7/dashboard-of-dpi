@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import EmployeeTabBar from "@/components/EmployeeTabBar";
+import StartShiftCard from "@/components/StartShiftCard";
 import DataList from "@/components/DataList";
 
 // Data's own top-level route — mirrors app/leads/page.tsx exactly
@@ -69,6 +70,7 @@ export default function DataPage() {
   return (
     <main className="min-h-screen bg-gradient-to-br from-white via-blue-50 to-blue-100">
       <Header />
+      {employee?.id && <StartShiftCard employeeId={employee.id} compact />}
       <EmployeeTabBar role={employee?.role} />
       {employee?.id && <DataList employeeId={employee.id} />}
       <Footer />

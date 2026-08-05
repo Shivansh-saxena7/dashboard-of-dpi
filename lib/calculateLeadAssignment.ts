@@ -13,6 +13,13 @@ export type LeadAssignmentReason =
 export interface ProjectAssignmentRule {
   project: string;
   assigned_employee_id: string;
+  // Whether assigned_employee_id is currently is_active — callers
+  // fetch this via a join to employees. Used ONLY to skip a
+  // deactivated member's turn within a MULTI-employee project rule's
+  // rotation (see the length > 1 branch below); a single-employee
+  // rule stays a hard override regardless of this flag, unchanged —
+  // see that branch's own comment for why.
+  employee_is_active: boolean;
 }
 
 export interface EligibleEmployee {
@@ -64,20 +71,22 @@ export function calculateLeadAssignment(
 
   if (normalizedProject) {
 
-    const matchedEmployeeIds = Array.from(
-      new Set(
-        projectRules
-          .filter((rule) => String(rule.project || "").trim().toLowerCase() === normalizedProject)
-          .map((rule) => rule.assigned_employee_id)
-      )
+    const rulesForProject = projectRules.filter(
+      (rule) => String(rule.project || "").trim().toLowerCase() === normalizedProject
     );
+
+    const matchedEmployeeIds = Array.from(new Set(rulesForProject.map((rule) => rule.assigned_employee_id)));
 
     if (matchedEmployeeIds.length === 1) {
       // Single fixed employee — bypasses round robin entirely, pointer
       // left untouched so the company-wide pool's turn order stays
-      // fair. If the rule's employee is later deactivated, the rule
-      // itself must be updated/removed — this function does not fall
-      // back to round robin automatically.
+      // fair. Deliberately NOT filtered by employee_is_active here —
+      // if the rule's employee is later deactivated, the rule itself
+      // must be updated/removed by an Admin (this function does not
+      // fall back to round robin automatically). assign_lead_atomic
+      // itself rejects assigning to an inactive employee, so this
+      // correctly surfaces as an unassigned/diagnosed lead rather than
+      // a silent mis-assignment or a silent reroute.
       return {
         assignedEmployeeId: matchedEmployeeIds[0],
         reason: "PROJECT_RULE",
@@ -90,11 +99,32 @@ export function calculateLeadAssignment(
       // Multiple fixed employees for this project — round robin among
       // just this group, using a pointer scoped to the project itself,
       // never the company-wide one. Still bypasses the general pool
-      // entirely, same as the single-employee case.
+      // entirely, same as the single-employee case — but UNLIKE the
+      // single-employee case, a deactivated member's turn is skipped
+      // rather than left to fail: the group still has other valid
+      // fixed employees, so narrowing the rotation to just the active
+      // ones is a natural refinement of "who's currently in this
+      // group," not a fallback out of it.
+      const activeMatchedEmployeeIds = Array.from(
+        new Set(rulesForProject.filter((rule) => rule.employee_is_active).map((rule) => rule.assigned_employee_id))
+      );
+
+      if (activeMatchedEmployeeIds.length === 0) {
+        // Every fixed employee for this group is currently inactive —
+        // same "must be fixed manually, no silent fallback" posture as
+        // the single-employee case above.
+        return {
+          assignedEmployeeId: null,
+          reason: "NO_ELIGIBLE_EMPLOYEE",
+          nextGlobalPointerEmployeeId: lastGlobalAssignedEmployeeId,
+          nextProjectPointer: null
+        };
+      }
+
       const lastProjectPointer = projectPointers[normalizedProject] ?? null;
-      const lastIndex = matchedEmployeeIds.findIndex((id) => id === lastProjectPointer);
-      const nextIndex = lastIndex === -1 ? 0 : (lastIndex + 1) % matchedEmployeeIds.length;
-      const nextEmployeeId = matchedEmployeeIds[nextIndex];
+      const lastIndex = activeMatchedEmployeeIds.findIndex((id) => id === lastProjectPointer);
+      const nextIndex = lastIndex === -1 ? 0 : (lastIndex + 1) % activeMatchedEmployeeIds.length;
+      const nextEmployeeId = activeMatchedEmployeeIds[nextIndex];
 
       return {
         assignedEmployeeId: nextEmployeeId,

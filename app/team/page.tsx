@@ -9,6 +9,7 @@ import { supabase } from "@/lib/supabase";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import EmployeeTabBar from "@/components/EmployeeTabBar";
+import StartShiftCard from "@/components/StartShiftCard";
 import TeamMemberCard, { MemberAttendanceStatus } from "@/components/TeamMemberCard";
 import TeamMemberDetailModal from "@/components/TeamMemberDetailModal";
 import ExportPreviewTable from "@/components/ExportPreviewTable";
@@ -499,6 +500,7 @@ export default function TeamPage() {
   return (
     <main className="min-h-screen bg-gradient-to-br from-white via-blue-50 to-blue-100">
       <Header />
+      {employee?.id && <StartShiftCard employeeId={employee.id} compact />}
       <EmployeeTabBar role={employee?.role} />
 
       {/* Hero — dark/gold with looping ambient glow. Deliberate

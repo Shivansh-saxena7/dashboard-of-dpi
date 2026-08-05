@@ -23,10 +23,19 @@ export async function fetchDistributionInputs(supabase) {
     return { error: "lead_engine_settings row not found" };
   }
 
-  const { data: projectRules } = await supabase
+  // employees(is_active) joined so calculateLeadAssignment's
+  // multi-employee Project Rule branch can skip a deactivated
+  // member's turn in rotation without a second round-trip.
+  const { data: projectRulesRaw } = await supabase
     .from("project_assignment_rules")
-    .select("project, assigned_employee_id")
+    .select("project, assigned_employee_id, employees(is_active)")
     .order("id", { ascending: true });
+
+  const projectRules = (projectRulesRaw || []).map((row) => ({
+    project: row.project,
+    assigned_employee_id: row.assigned_employee_id,
+    employee_is_active: row.employees?.is_active ?? false
+  }));
 
   const { data: projectPointerRows } = await supabase
     .from("project_rule_pointers")
@@ -58,7 +67,7 @@ export async function fetchDistributionInputs(supabase) {
     shiftStartedEmployeeIds.has(e.id)
   );
 
-  return { settings, projectRules: projectRules || [], eligibleEmployees, projectPointers };
+  return { settings, projectRules, eligibleEmployees, projectPointers };
 }
 
 // Callers own fetching the leads list and writing back whatever
