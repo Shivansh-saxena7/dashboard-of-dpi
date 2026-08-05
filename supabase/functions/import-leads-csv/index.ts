@@ -66,7 +66,14 @@ serve(async (req) => {
       return respond({ success: false, message: "Only Admin can import leads" }, 403);
     }
 
-    const { rows, source_name, filename, target_team_id } = await req.json();
+    const { rows, source_name, filename, target_team_id, excluded_employee_ids } = await req.json();
+
+    // Defensive normalize — only ever consulted for AUTO-mode
+    // distribution below; irrelevant (and ignored) for target_team_id
+    // imports, which bypass round robin entirely already.
+    const excludedEmployeeIds = Array.isArray(excluded_employee_ids)
+      ? excluded_employee_ids.filter((id) => typeof id === "string")
+      : [];
 
     if (!Array.isArray(rows) || rows.length === 0) {
       return respond({ success: false, message: "No rows to import" }, 400);
@@ -163,7 +170,8 @@ serve(async (req) => {
         uploaded_by_employee_id: auth.employeeId,
         total_rows: rows.length,
         duplicate_count: duplicateCount,
-        imported_count: insertedLeads.length
+        imported_count: insertedLeads.length,
+        excluded_employee_ids: excludedEmployeeIds.length > 0 ? excludedEmployeeIds : null
       })
       .select()
       .single();
@@ -254,7 +262,8 @@ serve(async (req) => {
       inputs.settings,
       inputs.projectRules,
       inputs.eligibleEmployees,
-      inputs.projectPointers
+      inputs.projectPointers,
+      excludedEmployeeIds
     );
 
     await supabase

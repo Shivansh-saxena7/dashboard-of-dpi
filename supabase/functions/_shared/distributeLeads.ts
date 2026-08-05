@@ -64,7 +64,29 @@ export async function fetchDistributionInputs(supabase) {
 // Callers own fetching the leads list and writing back whatever
 // batch/summary counters they track — this function only runs the
 // assign loop itself and returns what happened.
-export async function distributeLeadsBatch(supabase, leadsToDistribute, settings, projectRules, eligibleEmployees, projectPointers) {
+//
+// excludedEmployeeIds (optional, defaults to none) — a one-time,
+// this-call-only exclusion from the ROUND-ROBIN pool, e.g. CSV
+// Import's "Exclude from this distribution" picker. It is NOT a
+// standing pause (that's a separate, not-yet-built feature) and is
+// never persisted here — it only narrows the `eligibleEmployees` list
+// passed into calculateLeadAssignment for the duration of this one
+// loop. Deliberately does NOT touch Project Rules (fixed-employee-
+// per-project) assignments: calculateLeadAssignment's PROJECT_RULE
+// branch never consults eligibleEmployees at all, so an excluded
+// employee who is also a project's fixed employee still receives that
+// project's leads — same as how rr_eligible/shift-status already
+// never affects a project rule today. Pointer continuity needs no
+// special handling either: nextGlobalPointerEmployeeId is only ever
+// drawn from the (already-filtered) pool, so lead_engine_settings
+// ends this batch pointing at a non-excluded employee, and the next
+// unrelated call (which won't pass excludedEmployeeIds) resumes fair
+// rotation across everyone automatically.
+export async function distributeLeadsBatch(supabase, leadsToDistribute, settings, projectRules, eligibleEmployees, projectPointers, excludedEmployeeIds = []) {
+
+  const pool = excludedEmployeeIds && excludedEmployeeIds.length > 0
+    ? eligibleEmployees.filter((e) => !excludedEmployeeIds.includes(e.id))
+    : eligibleEmployees;
 
   let pointerEmployeeId = settings.round_robin_pointer_employee_id;
   const workingProjectPointers = { ...(projectPointers || {}) };
@@ -77,7 +99,7 @@ export async function distributeLeadsBatch(supabase, leadsToDistribute, settings
     const result = calculateLeadAssignment(
       lead.project,
       projectRules || [],
-      eligibleEmployees,
+      pool,
       pointerEmployeeId,
       workingProjectPointers
     );

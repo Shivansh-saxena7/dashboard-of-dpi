@@ -2,10 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Building2, Plus, X, ArrowRightLeft, Trash2 } from "lucide-react";
+import { Building2, Plus, X, ArrowRightLeft, Trash2, ChevronDown } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import toast from "react-hot-toast";
 import DeleteModal from "../components/DeleteModal";
+
+const NEW_PROJECT_SENTINEL = "__new__";
 
 interface Rule {
   id: string;
@@ -35,9 +37,11 @@ export default function ProjectRulesPage() {
 
   const [rules, setRules] = useState<Rule[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [projectOptions, setProjectOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [newProjectName, setNewProjectName] = useState("");
+  const [newProjectSelect, setNewProjectSelect] = useState("");
+  const [newProjectFreeText, setNewProjectFreeText] = useState("");
   const [newProjectEmployeeId, setNewProjectEmployeeId] = useState("");
   const [creatingProject, setCreatingProject] = useState(false);
 
@@ -59,13 +63,17 @@ export default function ProjectRulesPage() {
   async function loadData() {
     setLoading(true);
 
-    const [{ data: rulesData }, { data: employeesData }] = await Promise.all([
+    const [{ data: rulesData }, { data: employeesData }, { data: leadsData }] = await Promise.all([
       supabase.from("project_assignment_rules").select("id, project, assigned_employee_id").order("project"),
-      supabase.from("employees").select("id, name").order("name")
+      supabase.from("employees").select("id, name").order("name"),
+      supabase.from("leads").select("project")
     ]);
 
     setRules(rulesData || []);
     setEmployees(employeesData || []);
+    setProjectOptions(
+      Array.from(new Set((leadsData || []).map((l) => l.project).filter(Boolean))).sort() as string[]
+    );
     setLoading(false);
   }
 
@@ -85,15 +93,19 @@ export default function ProjectRulesPage() {
   }, [rules]);
 
   async function handleCreateNewProject() {
-    if (!newProjectName.trim() || !newProjectEmployeeId) {
-      toast.error("Enter a project name and select an employee.");
+    const finalProject = newProjectSelect === NEW_PROJECT_SENTINEL
+      ? newProjectFreeText.trim()
+      : newProjectSelect;
+
+    if (!finalProject || !newProjectEmployeeId) {
+      toast.error("Select or enter a project name, and select an employee.");
       return;
     }
 
     setCreatingProject(true);
 
     const { error } = await supabase.from("project_assignment_rules").insert({
-      project: newProjectName.trim(),
+      project: finalProject,
       assigned_employee_id: newProjectEmployeeId
     });
 
@@ -101,7 +113,8 @@ export default function ProjectRulesPage() {
       toast.error(error.message || "Could not create rule.");
     } else {
       toast.success("Project rule created.");
-      setNewProjectName("");
+      setNewProjectSelect("");
+      setNewProjectFreeText("");
       setNewProjectEmployeeId("");
       loadData();
     }
@@ -201,12 +214,30 @@ export default function ProjectRulesPage() {
       <div className="bg-white rounded-[24px] border border-slate-100 shadow-md p-6">
         <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold mb-3">New Project Rule</p>
         <div className="flex flex-col sm:flex-row gap-2">
-          <input
-            value={newProjectName}
-            onChange={(e) => setNewProjectName(e.target.value)}
-            placeholder="Project name..."
-            className="flex-1 h-11 rounded-xl bg-slate-50 border border-slate-200 px-3 text-sm outline-none focus:ring-2 focus:ring-blue-200"
-          />
+          <div className="relative flex-1">
+            <select
+              value={newProjectSelect}
+              onChange={(e) => setNewProjectSelect(e.target.value)}
+              className="appearance-none w-full h-11 rounded-xl bg-slate-50 border border-slate-200 pl-3 pr-8 text-sm outline-none focus:ring-2 focus:ring-blue-200"
+            >
+              <option value="" disabled>Select a project...</option>
+              {projectOptions.map((p) => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+              <option value={NEW_PROJECT_SENTINEL}>+ Add new project</option>
+            </select>
+            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+          </div>
+
+          {newProjectSelect === NEW_PROJECT_SENTINEL && (
+            <input
+              value={newProjectFreeText}
+              onChange={(e) => setNewProjectFreeText(e.target.value)}
+              placeholder="New project name..."
+              className="flex-1 h-11 rounded-xl bg-slate-50 border border-slate-200 px-3 text-sm outline-none focus:ring-2 focus:ring-blue-200"
+            />
+          )}
+
           <select
             value={newProjectEmployeeId}
             onChange={(e) => setNewProjectEmployeeId(e.target.value)}
@@ -250,12 +281,17 @@ export default function ProjectRulesPage() {
                   </div>
                   <p className="text-sm font-bold text-slate-800 truncate">{project}</p>
                 </div>
+                {/* Icon-only + hover-title was too easy to miss (title
+                    tooltips don't even show on touch) — visible text
+                    label makes this discoverable without relying on
+                    hover. Same handler/modal as before, just clearer. */}
                 <button
                   onClick={() => setDeleteProjectTarget(project)}
                   title="Delete this project's rule entirely"
-                  className="shrink-0 h-8 w-8 rounded-lg bg-red-50 border border-red-100 flex items-center justify-center text-red-500 hover:bg-red-100 transition"
+                  className="shrink-0 flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-red-50 border border-red-100 text-red-500 text-xs font-bold hover:bg-red-100 transition"
                 >
                   <Trash2 size={13} />
+                  Delete Rule
                 </button>
               </div>
 

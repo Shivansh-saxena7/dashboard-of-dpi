@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { ChevronDown, FileSpreadsheet, FileText, Loader2, UserPlus } from "lucide-react";
+import { ChevronDown, FileSpreadsheet, FileText, Loader2, UserPlus, Table2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
 import Header from "@/components/Header";
@@ -11,6 +11,7 @@ import Footer from "@/components/Footer";
 import EmployeeTabBar from "@/components/EmployeeTabBar";
 import TeamMemberCard, { MemberAttendanceStatus } from "@/components/TeamMemberCard";
 import TeamMemberDetailModal from "@/components/TeamMemberDetailModal";
+import ExportPreviewTable from "@/components/ExportPreviewTable";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES } from "@/lib/leadBoardStageDisplay";
 import { exportLeadsToExcel, exportLeadsToPDF } from "@/lib/exportLeadsReport";
@@ -96,6 +97,7 @@ export default function TeamPage() {
   const [reportCustomStart, setReportCustomStart] = useState("");
   const [reportCustomEnd, setReportCustomEnd] = useState("");
   const [exportingReport, setExportingReport] = useState(false);
+  const [showPreviewTable, setShowPreviewTable] = useState(false);
 
   useEffect(() => {
     async function getLoggedInEmployee() {
@@ -704,12 +706,29 @@ export default function TeamPage() {
             )}
           </div>
 
-          <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+          {/* flex-col on mobile: the label + 3 buttons (View Report/
+              Excel/PDF) sharing one justify-between row had no wrap at
+              all — on a phone-width screen that's a label plus ~280px
+              of buttons fighting for ~300px, guaranteed overflow.
+              Stacking them (row layout only from sm: up) plus
+              flex-wrap on the button group as a safety net fixes it. */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-slate-100">
             <p className="text-xs text-slate-500">
               {loadingReport ? "Loading..." : `${visibleReportLeads.length} lead${visibleReportLeads.length === 1 ? "" : "s"} match these filters`}
             </p>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setShowPreviewTable((v) => !v)}
+                disabled={visibleReportLeads.length === 0}
+                className={`flex items-center gap-1.5 h-10 px-3 rounded-lg text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed transition ${
+                  showPreviewTable ? "bg-amber-500 text-white" : "bg-amber-50 text-amber-700 hover:bg-amber-100"
+                }`}
+              >
+                <Table2 size={14} />
+                {showPreviewTable ? "Hide Table" : "View Report"}
+              </button>
+
               <button
                 onClick={() => handleReportExport("excel")}
                 disabled={visibleReportLeads.length === 0 || exportingReport}
@@ -729,6 +748,12 @@ export default function TeamPage() {
               </button>
             </div>
           </div>
+
+          {!loadingReport && showPreviewTable && (
+            <div className="pt-3 border-t border-slate-100">
+              <ExportPreviewTable leads={visibleReportLeads} />
+            </div>
+          )}
         </div>
       </div>
 

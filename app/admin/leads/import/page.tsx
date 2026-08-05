@@ -109,6 +109,12 @@ export default function ImportLeadsPage() {
   const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
   const [targetTeamId, setTargetTeamId] = useState("");
 
+  // One-time, this-import-only exclusion from the round-robin pool —
+  // never persisted as a setting, reset on every new import (see
+  // startNewImport). Only meaningful in AUTO mode; TEAM mode already
+  // bypasses round robin entirely so there's nothing to exclude from.
+  const [excludedEmployeeIds, setExcludedEmployeeIds] = useState<string[]>([]);
+
   const [projectRules, setProjectRules] = useState<{ project: string; assigned_employee_id: string }[]>([]);
   const [creatingRuleForProject, setCreatingRuleForProject] = useState<string | null>(null);
   const [newRuleEmployeeId, setNewRuleEmployeeId] = useState("");
@@ -183,7 +189,7 @@ export default function ImportLeadsPage() {
 
     const { data } = await supabase
       .from("csv_import_batches")
-      .select("id, source_name, filename, uploaded_at, total_rows, duplicate_count, imported_count, assigned_count, status")
+      .select("id, source_name, filename, uploaded_at, total_rows, duplicate_count, imported_count, assigned_count, status, excluded_employee_ids")
       .order("uploaded_at", { ascending: false })
       .limit(20);
 
@@ -321,7 +327,12 @@ export default function ImportLeadsPage() {
   // Pre-import awareness — checked once Preview is reached, not a
   // blocker. Same "today's attendance + is_active/rr_eligible" shape
   // the backend itself uses, so the count Admin sees here matches
-  // what the Edge Function will actually find.
+  // what the Edge Function will actually find. Also subtracts
+  // excludedEmployeeIds — without this, excluding the only eligible
+  // employee would silently pass the zero-eligible check here (count
+  // computed pre-exclusion) while the backend's actual pool ends up
+  // empty, so the "0 eligible, continue anyway?" confirmation would
+  // never trigger even though every lead is about to go unassigned.
   async function checkEligibility() {
     const today = new Date().toISOString().split("T")[0];
 
@@ -331,7 +342,9 @@ export default function ImportLeadsPage() {
     ]);
 
     const shiftStarted = new Set((todaysAttendance || []).map((a) => a.employee_id));
-    const eligible = (allEligible || []).filter((e) => shiftStarted.has(e.id));
+    const eligible = (allEligible || []).filter(
+      (e) => shiftStarted.has(e.id) && !excludedEmployeeIds.includes(e.id)
+    );
 
     setEligibleEmployeeCount(eligible.length);
   }
@@ -551,7 +564,8 @@ export default function ImportLeadsPage() {
             rows: rowsToSend,
             source_name: sourceName,
             filename,
-            target_team_id: assignMode === "TEAM" ? targetTeamId : null
+            target_team_id: assignMode === "TEAM" ? targetTeamId : null,
+            excluded_employee_ids: assignMode === "AUTO" ? excludedEmployeeIds : []
           })
         }
       );
@@ -606,6 +620,13 @@ export default function ImportLeadsPage() {
     setConfirmZeroEligible(false);
     setAssignMode("AUTO");
     setTargetTeamId("");
+    setExcludedEmployeeIds([]);
+  }
+
+  function toggleExcludedEmployee(employeeId: string) {
+    setExcludedEmployeeIds((prev) =>
+      prev.includes(employeeId) ? prev.filter((id) => id !== employeeId) : [...prev, employeeId]
+    );
   }
 
   const validCount = mappedRows.filter((r) => r.isValid && !r.isDuplicate).length;
@@ -700,9 +721,55 @@ export default function ImportLeadsPage() {
             </div>
 
             {assignMode === "AUTO" ? (
-              <p className="text-[11px] text-slate-400 mt-1.5">
-                Distributed via round-robin + Project Rules, same as a normal lead.
-              </p>
+              <>
+                <p className="text-[11px] text-slate-400 mt-1.5">
+                  Distributed via round-robin + Project Rules, same as a normal lead.
+                </p>
+
+                <div className="mt-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <p className="text-[11px] font-semibold text-slate-500">
+                      Exclude from this distribution (optional)
+                    </p>
+                    {excludedEmployeeIds.length > 0 && (
+                      <button
+                        onClick={() => setExcludedEmployeeIds([])}
+                        className="text-[11px] font-bold text-blue-700 hover:text-blue-800"
+                      >
+                        Clear ({excludedEmployeeIds.length})
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-2 rounded-xl border border-slate-200 bg-slate-50">
+                    {employeeNames.size === 0 ? (
+                      <p className="text-[11px] text-slate-400">No employees found.</p>
+                    ) : (
+                      Array.from(employeeNames.entries())
+                        .sort((a, b) => a[1].localeCompare(b[1]))
+                        .map(([id, name]) => {
+                          const isExcluded = excludedEmployeeIds.includes(id);
+                          return (
+                            <button
+                              key={id}
+                              type="button"
+                              onClick={() => toggleExcludedEmployee(id)}
+                              className={`h-7 px-2.5 rounded-full text-[11px] font-semibold border transition ${
+                                isExcluded
+                                  ? "bg-red-50 border-red-200 text-red-600 line-through"
+                                  : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
+                              }`}
+                            >
+                              {name}
+                            </button>
+                          );
+                        })
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1.5">
+                    Skipped for THIS import only — round robin returns to normal next time. Doesn't affect leads for a project with a fixed employee (Project Rules).
+                  </p>
+                </div>
+              </>
             ) : (
               <>
                 <FilterSelect value={targetTeamId} onChange={(e) => setTargetTeamId(e.target.value)} className="mt-2">
@@ -1117,6 +1184,17 @@ export default function ImportLeadsPage() {
 
                   {isExpanded && (
                     <div className="px-3 pb-3 pt-1 border-t border-slate-200 space-y-3">
+                      {b.excluded_employee_ids && b.excluded_employee_ids.length > 0 && (
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wide text-slate-400 font-bold mb-1">
+                            Excluded from this import
+                          </p>
+                          <p className="text-xs text-slate-600">
+                            {b.excluded_employee_ids.map((id: string) => employeeNames.get(id) || "Unknown").join(", ")}
+                          </p>
+                        </div>
+                      )}
+
                       {loadingBatchDetail ? (
                         <p className="text-xs text-slate-400 py-2">Loading...</p>
                       ) : batchDetail ? (

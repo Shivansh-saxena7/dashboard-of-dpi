@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Search, ChevronDown, Target, FileSpreadsheet, FileText, Upload } from "lucide-react";
+import { Search, ChevronDown, Target, FileSpreadsheet, FileText, Upload, Table2 } from "lucide-react";
 import Link from "next/link";
 import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
 import AdminLeadCard from "@/components/AdminLeadCard";
+import ExportPreviewTable from "@/components/ExportPreviewTable";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES } from "@/lib/leadBoardStageDisplay";
 import { exportLeadsToExcel, exportLeadsToPDF } from "@/lib/exportLeadsReport";
@@ -58,6 +59,7 @@ export default function AdminLeadsPage() {
   const [loading, setLoading] = useState(true);
   const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
   const [adminEmployeeId, setAdminEmployeeId] = useState<string | null>(null);
+  const [showPreviewTable, setShowPreviewTable] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [employeeFilter, setEmployeeFilter] = useState("");
@@ -447,7 +449,24 @@ export default function AdminLeadsPage() {
             <option value="SLA_URGENCY">SLA Urgency</option>
           </FilterSelect>
 
-          <div className="flex items-center gap-2">
+          {/* col-span-2: on the mobile 2-col grid this row needs the
+              FULL card width, not one half-width cell — 3 buttons
+              ("View Report"/"Excel"/"PDF") don't fit ~150px. flex-wrap
+              is a safety net under that even on the smallest phones
+              (~320px) — same col-span-2 escape hatch already used
+              below for the custom date-range inputs. */}
+          <div className="col-span-2 flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setShowPreviewTable((v) => !v)}
+              disabled={visibleLeads.length === 0}
+              className={`flex items-center gap-1.5 h-10 px-3 rounded-lg text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed transition ${
+                showPreviewTable ? "bg-blue-600 text-white" : "bg-blue-50 text-blue-700 hover:bg-blue-100"
+              }`}
+            >
+              <Table2 size={14} />
+              {showPreviewTable ? "Hide Table" : "View Report"}
+            </button>
+
             <button
               onClick={() => handleExport("excel")}
               disabled={visibleLeads.length === 0 || exporting}
@@ -485,6 +504,19 @@ export default function AdminLeadsPage() {
           )}
         </div>
       </motion.div>
+
+      {!loading && showPreviewTable && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-white rounded-[24px] border border-slate-100 shadow-md p-6"
+        >
+          <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold mb-3">
+            Report Table — {visibleLeads.length} lead{visibleLeads.length === 1 ? "" : "s"}
+          </p>
+          <ExportPreviewTable leads={visibleLeads} />
+        </motion.div>
+      )}
 
       {loading ? (
         <div className="text-center text-sm text-slate-400 py-10">Loading leads...</div>

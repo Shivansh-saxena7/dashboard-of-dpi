@@ -34,7 +34,7 @@ const SLATE_500: [number, number, number] = [100, 116, 139];
 // Single source of truth for export columns — Excel and PDF both
 // read from this. `align` and `width` are metadata each format
 // interprets its own way (Excel column width vs. PDF cell halign).
-const EXPORT_COLUMNS = [
+export const EXPORT_COLUMNS = [
   { key: "leadName", header: "Lead Name", align: "left", width: 24 },
   { key: "mobile", header: "Mobile", align: "left", width: 16 },
   { key: "project", header: "Project", align: "left", width: 22 },
@@ -56,7 +56,7 @@ const EXPORT_COLUMNS = [
 // here (e.g. ["recycleCount"]) — Excel is unaffected either way.
 const PDF_EXCLUDED_KEYS: string[] = [];
 
-type ExportRow = Record<(typeof EXPORT_COLUMNS)[number]["key"], string | number>;
+export type ExportRow = Record<(typeof EXPORT_COLUMNS)[number]["key"], string | number>;
 
 function formatDateTime(iso: string | null): string {
   if (!iso) return "—";
@@ -96,7 +96,7 @@ function buildFiltersLine(otherFilters: { label: string; value: string }[]): str
   return "Filters: " + otherFilters.map((f) => `${f.label}=${f.value}`).join(", ");
 }
 
-function buildExportRows(leads: AdminExportLead[]): ExportRow[] {
+export function buildExportRows(leads: AdminExportLead[]): ExportRow[] {
   return leads.map((lead) => {
     const history = lead.lead_history?.[0];
     const assignedAt = history?.assigned_at ?? null;
