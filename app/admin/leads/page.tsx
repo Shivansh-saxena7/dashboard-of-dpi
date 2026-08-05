@@ -125,7 +125,7 @@ export default function AdminLeadsPage() {
         employees ( name ),
         pending_team:teams ( name ),
         lead_history (
-          assigned_at, is_active, first_call_at, first_whatsapp_at, assigned_by_type,
+          assigned_at, is_active, first_call_at, first_whatsapp_at, assigned_by_type, call_count,
           assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)
         )
       `
@@ -565,7 +565,8 @@ export default function AdminLeadsPage() {
                 assignedAt: lead.lead_history?.[0]?.assigned_at ?? null,
                 pendingTeamId: lead.pending_team_id ?? null,
                 pendingTeamName: lead.pending_team?.name ?? null,
-                leadType: lead.lead_type || "LEAD"
+                leadType: lead.lead_type || "LEAD",
+                callCount: lead.lead_history?.[0]?.call_count ?? 0
               }}
             />
           ))}

@@ -24,6 +24,7 @@ interface AdminLeadCardLead {
   pendingTeamId: string | null;
   pendingTeamName: string | null;
   leadType: string;
+  callCount: number;
 }
 
 interface AdminLeadCardProps {
@@ -129,9 +130,20 @@ export default function AdminLeadCard({ lead, teams, onReserveTeam, index = 0 }:
           {statusDisplay.label}
         </span>
 
-        {boardStageDisplay && (
+        {/* Data has no board_stage/Visit/Booking funnel at all (Phase
+            4 — board_stage stays 'LEADS' forever on a Data row, purely
+            an unused artifact of the column's default) — showing this
+            badge next to "Data" implied a workflow that doesn't exist
+            for it, hence Lead-only. */}
+        {lead.leadType !== "DATA" && boardStageDisplay && (
           <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-blue-50 text-blue-700">
             {boardStageDisplay.emoji} {boardStageDisplay.label}
+          </span>
+        )}
+
+        {lead.callCount > 0 && (
+          <span className="text-[11px] font-medium text-slate-400 px-1">
+            Called {lead.callCount}x
           </span>
         )}
 
