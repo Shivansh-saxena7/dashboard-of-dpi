@@ -1,7 +1,7 @@
 // @ts-nocheck
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 import { corsHeaders } from "../_shared/cors.ts";
 import { resolveCallingEmployeeId } from "../_shared/auth.ts";
 import { fetchDistributionInputs, distributeLeadsBatch } from "../_shared/distributeLeads.ts";
@@ -62,7 +62,7 @@ serve(async (req) => {
 
     const { data: batchRow, error: batchRowError } = await supabase
       .from("csv_import_batches")
-      .select("id, status, assigned_count, distribution_summary")
+      .select("id, status, assigned_count, distribution_summary, lead_type")
       .eq("id", batch_id)
       .single();
 
@@ -72,6 +72,21 @@ serve(async (req) => {
 
     if (batchRow.status !== "active") {
       return respond({ success: false, message: "This batch has been deleted" }, 400);
+    }
+
+    // Data batches distribute via an Admin-picked employee list that
+    // isn't persisted anywhere retryable (it only ever existed in the
+    // original import request) — routing any leftover-unassigned rows
+    // through this function's round-robin/project-rules path would
+    // silently misassign them (wrong employees, plus a real SLA-
+    // deadline, which Data leads must never have). Refused outright
+    // rather than guessed at; the wizard's UI already hides the Retry
+    // button for Data batches for the same reason.
+    if (batchRow.lead_type === "DATA") {
+      return respond({
+        success: false,
+        message: "Retry Distribution isn't supported for Data imports — Data bypasses round robin entirely by design."
+      }, 400);
     }
 
     const { data: pendingLeads, error: pendingLeadsError } = await supabase

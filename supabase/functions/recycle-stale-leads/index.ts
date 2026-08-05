@@ -1,7 +1,7 @@
 // @ts-nocheck
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 import { calculateSLAStatus } from "../../../lib/calculateSLAStatus.ts";
 import { calculateLeadAssignment } from "../../../lib/calculateLeadAssignment.ts";
 
@@ -156,12 +156,14 @@ serve(async () => {
         sla_deadline,
         recycle_count,
         current_owner_id,
+        lead_type,
         lead_history!inner (
           id,
           outcome_at,
           is_active,
           sla_warning_sent_at,
-          assigned_by_type
+          assigned_by_type,
+          call_count
         )
       `
       )
@@ -200,7 +202,9 @@ serve(async () => {
         {
           status: lead.status,
           sla_deadline: lead.sla_deadline,
-          recycle_count: lead.recycle_count
+          recycle_count: lead.recycle_count,
+          lead_type: lead.lead_type,
+          call_count: activeHistory.call_count
         },
         activeHistory.outcome_at,
         notInterestedCount || 0
@@ -236,10 +240,22 @@ serve(async () => {
 
       }
 
-      if (slaStatus !== "SLA_BREACHED" && slaStatus !== "RECYCLE_READY") {
+      if (
+        slaStatus !== "SLA_BREACHED" &&
+        slaStatus !== "RECYCLE_READY" &&
+        slaStatus !== "DATA_MAX_ATTEMPTS_REACHED"
+      ) {
         diagnostics.push({ leadId: lead.id, action: "SKIPPED", reason: `slaStatus=${slaStatus}` });
         continue;
       }
+
+      // DATA leads carry no SLA-clock at all — even after this
+      // recycle lands them with a new owner, per the approved design
+      // they stay attempt-count-based (not time-based) for as long as
+      // they remain unreached, so the new lead_history row should
+      // start with no sla_deadline too, same as their very first
+      // assignment did.
+      const isDataLead = lead.lead_type === "DATA";
 
       const normalizedProject = String(lead.project || "").trim().toLowerCase();
 
@@ -323,9 +339,9 @@ serve(async () => {
         const nextIndex = lastIndex === -1 ? 0 : (lastIndex + 1) % groupPoolEmployees.length;
         const nextEmployeeId = groupPoolEmployees[nextIndex];
 
-        const newSlaDeadline = new Date(
-          Date.now() + settings.sla_first_contact_minutes * 60 * 1000
-        ).toISOString();
+        const newSlaDeadline = isDataLead
+          ? null
+          : new Date(Date.now() + settings.sla_first_contact_minutes * 60 * 1000).toISOString();
 
         const { error: projectRecycleError } = await supabase.rpc("recycle_lead_atomic", {
           p_lead_id: lead.id,
@@ -424,9 +440,9 @@ serve(async () => {
         continue;
       }
 
-      const newSlaDeadline = new Date(
-        Date.now() + settings.sla_first_contact_minutes * 60 * 1000
-      ).toISOString();
+      const newSlaDeadline = isDataLead
+        ? null
+        : new Date(Date.now() + settings.sla_first_contact_minutes * 60 * 1000).toISOString();
 
       const { error: recycleError } = await supabase.rpc("recycle_lead_atomic", {
         p_lead_id: lead.id,

@@ -1,7 +1,7 @@
 // @ts-nocheck
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 
 // Scheduled sweep (pg_cron, once daily) — reminders now carry
 // hour/day/month precision (reminder_at, a timestamptz), so this

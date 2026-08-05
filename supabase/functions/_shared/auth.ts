@@ -1,6 +1,6 @@
 // @ts-nocheck
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 
 // Resolves the CALLING employee's own id from their verified Supabase
 // session JWT (the Authorization header) — never from a client-

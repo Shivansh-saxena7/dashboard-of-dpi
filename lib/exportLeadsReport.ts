@@ -12,6 +12,10 @@ export interface AdminExportLead {
   priority: string;
   board_stage: string | null;
   recycle_count: number;
+  // Optional + defaults to "LEAD" in buildExportRows below — older
+  // callers/rows that predate the Leads-vs-Data distinction still
+  // export correctly without needing to be touched.
+  lead_type?: string | null;
   employees: { name: string } | null;
   lead_history: (AssignedBySource & { assigned_at: string | null; first_call_at: string | null; first_whatsapp_at: string | null })[] | null;
 }
@@ -37,6 +41,7 @@ const SLATE_500: [number, number, number] = [100, 116, 139];
 export const EXPORT_COLUMNS = [
   { key: "leadName", header: "Lead Name", align: "left", width: 24 },
   { key: "mobile", header: "Mobile", align: "left", width: 16 },
+  { key: "type", header: "Type", align: "center", width: 10 },
   { key: "project", header: "Project", align: "left", width: 22 },
   { key: "source", header: "Source", align: "left", width: 16 },
   { key: "priority", header: "Priority", align: "center", width: 12 },
@@ -120,9 +125,12 @@ export function buildExportRows(leads: AdminExportLead[]): ExportRow[] {
     const statusLabel =
       LEAD_STATUS_DISPLAY[lead.status as keyof typeof LEAD_STATUS_DISPLAY]?.label || lead.status;
 
+    const typeLabel = lead.lead_type === "DATA" ? "Data" : "Leads";
+
     return {
       leadName: lead.name || "",
       mobile: lead.mobile || "",
+      type: typeLabel,
       project: lead.project || "",
       source: lead.source || "",
       priority: priorityLabel,

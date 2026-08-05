@@ -1,11 +1,11 @@
 // @ts-nocheck
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 import { normalizeMobile } from "../../../lib/normalizeMobile.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { resolveCallingEmployeeId } from "../_shared/auth.ts";
-import { fetchDistributionInputs, distributeLeadsBatch } from "../_shared/distributeLeads.ts";
+import { fetchDistributionInputs, distributeLeadsBatch, distributeDataLeadsManually } from "../_shared/distributeLeads.ts";
 
 // Admin-only bulk lead intake — one CSV upload becomes: insert every
 // non-duplicate row (unassigned), then a single round-robin/project-
@@ -66,13 +66,31 @@ serve(async (req) => {
       return respond({ success: false, message: "Only Admin can import leads" }, 403);
     }
 
-    const { rows, source_name, filename, target_team_id, excluded_employee_ids } = await req.json();
+    const {
+      rows,
+      source_name,
+      filename,
+      target_team_id,
+      excluded_employee_ids,
+      lead_type,
+      manual_employee_ids
+    } = await req.json();
 
     // Defensive normalize — only ever consulted for AUTO-mode
     // distribution below; irrelevant (and ignored) for target_team_id
     // imports, which bypass round robin entirely already.
     const excludedEmployeeIds = Array.isArray(excluded_employee_ids)
       ? excluded_employee_ids.filter((id) => typeof id === "string")
+      : [];
+
+    // Defaults to "LEAD" for any caller that omits it (there's only
+    // one caller today — the import wizard — but this keeps the
+    // pre-Data behavior as the fallback rather than requiring every
+    // request to specify it).
+    const leadType = lead_type === "DATA" ? "DATA" : "LEAD";
+
+    const manualEmployeeIds = Array.isArray(manual_employee_ids)
+      ? manual_employee_ids.filter((id) => typeof id === "string")
       : [];
 
     if (!Array.isArray(rows) || rows.length === 0) {
@@ -83,11 +101,33 @@ serve(async (req) => {
       return respond({ success: false, message: "source_name is required" }, 400);
     }
 
+    // Data always distributes via an explicit Admin pick, never round
+    // robin/a team reservation — same authoritative-check posture as
+    // the Admin-role check above (client-side validation could be
+    // stale or bypassed, this is what's actually enforced).
+    if (leadType === "DATA" && manualEmployeeIds.length === 0) {
+      return respond({ success: false, message: "Select at least one employee for a Data import" }, 400);
+    }
+
     // --- Server-side duplicate re-check (defense-in-depth — the
     // client-side preview could be stale by the time this runs) ---
-    const { data: existingLeads, error: existingLeadsError } = await supabase
-      .from("leads")
-      .select("mobile");
+    //
+    // Data's duplicate-check is scoped to the employee(s) THIS batch
+    // targets, not global — the same number can go to multiple
+    // employees across separate imports (e.g. re-uploading the same
+    // CSV for a different employee), as long as neither of them
+    // already has it. "already has it" means current_owner_id, not
+    // status — a Data lead that's since recycled away from someone
+    // updates current_owner_id off them, so they're correctly no
+    // longer blocked from receiving that number again. Leads keep the
+    // original global check, completely unaffected.
+    let existingLeadsQuery = supabase.from("leads").select("mobile");
+
+    if (leadType === "DATA") {
+      existingLeadsQuery = existingLeadsQuery.eq("lead_type", "DATA").in("current_owner_id", manualEmployeeIds);
+    }
+
+    const { data: existingLeads, error: existingLeadsError } = await existingLeadsQuery;
 
     if (existingLeadsError) {
       return respond(
@@ -137,7 +177,13 @@ serve(async (req) => {
         // the stable "which platform did this CSV come from" value.
         source: row.source || source_name,
         status: "NEW",
-        extra_data: row.extra_data || null
+        extra_data: row.extra_data || null,
+        lead_type: leadType,
+        // Explicit rather than relying on the column's own DB default
+        // (which happens to also be 'cold' today) — Data's priority
+        // is a deliberate, self-documented rule of this feature, not
+        // an accident of what the table default currently is.
+        ...(leadType === "DATA" ? { priority: "cold" } : {})
       });
 
     }
@@ -171,7 +217,8 @@ serve(async (req) => {
         total_rows: rows.length,
         duplicate_count: duplicateCount,
         imported_count: insertedLeads.length,
-        excluded_employee_ids: excludedEmployeeIds.length > 0 ? excludedEmployeeIds : null
+        excluded_employee_ids: excludedEmployeeIds.length > 0 ? excludedEmployeeIds : null,
+        lead_type: leadType
       })
       .select()
       .single();
@@ -190,6 +237,61 @@ serve(async (req) => {
 
     if (tagError) {
       return respond({ success: false, step: "TAG_LEADS_WITH_BATCH", error: tagError.message }, 500);
+    }
+
+    // --- Data: manual per-employee distribution. Checked before
+    // target_team_id below (mutually exclusive in practice — the
+    // wizard never sends both — but Data takes precedence if it ever
+    // did, since it's the more specific, more recently-stated intent
+    // for this batch). Bypasses round robin/Project Rules/eligibility
+    // entirely, via distributeDataLeadsManually — see its own
+    // comment. Needs the CURRENT round-robin pointer only to pass it
+    // through unchanged (this batch was never part of that rotation).
+    if (leadType === "DATA") {
+
+      const { data: settingsRow, error: settingsError } = await supabase
+        .from("lead_engine_settings")
+        .select("round_robin_pointer_employee_id")
+        .eq("id", 1)
+        .single();
+
+      if (settingsError || !settingsRow) {
+        return respond({
+          success: true,
+          batchId: batchRow.id,
+          totalRows: rows.length,
+          duplicateCount,
+          importedCount: insertedLeads.length,
+          assignedCount: 0,
+          distributionSummary: {},
+          warning: "lead_engine_settings row not found — leads imported but not distributed"
+        });
+      }
+
+      const { assignedCount, distributionSummary, diagnostics } = await distributeDataLeadsManually(
+        supabase,
+        insertedLeads,
+        manualEmployeeIds,
+        auth.employeeId,
+        settingsRow.round_robin_pointer_employee_id
+      );
+
+      await supabase
+        .from("csv_import_batches")
+        .update({ assigned_count: assignedCount, distribution_summary: distributionSummary })
+        .eq("id", batchRow.id);
+
+      return respond({
+        success: true,
+        batchId: batchRow.id,
+        totalRows: rows.length,
+        duplicateCount,
+        importedCount: insertedLeads.length,
+        assignedCount,
+        distributionSummary,
+        diagnostics
+      });
+
     }
 
     // --- Direct-to-Team: reserve every inserted lead for one team

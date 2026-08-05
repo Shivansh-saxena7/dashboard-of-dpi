@@ -115,6 +115,16 @@ export default function ImportLeadsPage() {
   // bypasses round robin entirely so there's nothing to exclude from.
   const [excludedEmployeeIds, setExcludedEmployeeIds] = useState<string[]>([]);
 
+  // Leads vs Data (V2_MASTER_BLUEPRINT's newer distinction) — this
+  // toggle governs everything else in the Assignment section below.
+  // A Data import always distributes manually (no AUTO/TEAM choice at
+  // all), gets no SLA, and recycles on failed-attempt-count instead
+  // of time — see lib/calculateSLAStatus.ts and
+  // supabase/functions/_shared/distributeLeads.ts's
+  // distributeDataLeadsManually for the actual rules.
+  const [leadType, setLeadType] = useState<"LEAD" | "DATA">("LEAD");
+  const [manualEmployeeIds, setManualEmployeeIds] = useState<string[]>([]);
+
   const [projectRules, setProjectRules] = useState<{ project: string; assigned_employee_id: string }[]>([]);
   const [creatingRuleForProject, setCreatingRuleForProject] = useState<string | null>(null);
   const [newRuleEmployeeId, setNewRuleEmployeeId] = useState("");
@@ -189,7 +199,7 @@ export default function ImportLeadsPage() {
 
     const { data } = await supabase
       .from("csv_import_batches")
-      .select("id, source_name, filename, uploaded_at, total_rows, duplicate_count, imported_count, assigned_count, status, excluded_employee_ids")
+      .select("id, source_name, filename, uploaded_at, total_rows, duplicate_count, imported_count, assigned_count, status, excluded_employee_ids, lead_type")
       .order("uploaded_at", { ascending: false })
       .limit(20);
 
@@ -384,8 +394,13 @@ export default function ImportLeadsPage() {
       return;
     }
 
-    if (assignMode === "TEAM" && !targetTeamId) {
+    if (leadType === "LEAD" && assignMode === "TEAM" && !targetTeamId) {
       toast.error("Select a team.");
+      return;
+    }
+
+    if (leadType === "DATA" && manualEmployeeIds.length === 0) {
+      toast.error("Select at least one employee to assign this Data to.");
       return;
     }
 
@@ -469,8 +484,19 @@ export default function ImportLeadsPage() {
     // Preview-only duplicate detection (informational) — the actual
     // import always re-checks server-side (import-leads-csv is
     // authoritative), so a narrow race here between preview and
-    // submit is expected and harmless.
-    const { data: existing } = await supabase.from("leads").select("mobile");
+    // submit is expected and harmless. Mirrors the backend's Data
+    // scoping exactly (per-target-employee, not global) — without
+    // this, the preview would show numbers as "duplicate — will skip"
+    // that the backend would actually import fine for a different
+    // employee, which is exactly the re-upload-for-someone-else flow
+    // Data is meant to support.
+    let existingQuery = supabase.from("leads").select("mobile");
+
+    if (leadType === "DATA") {
+      existingQuery = existingQuery.eq("lead_type", "DATA").in("current_owner_id", manualEmployeeIds);
+    }
+
+    const { data: existing } = await existingQuery;
     const existingNormalized = new Set((existing || []).map((l) => normalizeMobile(l.mobile)));
 
     const seen = new Set<string>();
@@ -487,10 +513,12 @@ export default function ImportLeadsPage() {
 
     setMappedRows(finalRows);
 
-    // Eligibility is irrelevant for direct-to-team — nothing gets
-    // auto-distributed, so there's no "nobody eligible" scenario to
-    // warn about here.
-    if (assignMode === "AUTO") {
+    // Eligibility is irrelevant for direct-to-team and for Data
+    // (manual per-employee, bypasses the eligible-pool concept
+    // entirely) — nothing gets auto-distributed via round robin in
+    // either case, so there's no "nobody eligible" scenario to warn
+    // about here.
+    if (leadType === "LEAD" && assignMode === "AUTO") {
       await checkEligibility();
     }
 
@@ -564,8 +592,10 @@ export default function ImportLeadsPage() {
             rows: rowsToSend,
             source_name: sourceName,
             filename,
-            target_team_id: assignMode === "TEAM" ? targetTeamId : null,
-            excluded_employee_ids: assignMode === "AUTO" ? excludedEmployeeIds : []
+            target_team_id: leadType === "LEAD" && assignMode === "TEAM" ? targetTeamId : null,
+            excluded_employee_ids: leadType === "LEAD" && assignMode === "AUTO" ? excludedEmployeeIds : [],
+            lead_type: leadType,
+            manual_employee_ids: leadType === "DATA" ? manualEmployeeIds : []
           })
         }
       );
@@ -598,7 +628,7 @@ export default function ImportLeadsPage() {
   // handleImport. Normal case (someone eligible, or TEAM mode where
   // eligibility doesn't apply) imports on the first click, unchanged.
   function handleImportClick() {
-    if (assignMode === "AUTO" && eligibleEmployeeCount === 0 && !confirmZeroEligible) {
+    if (leadType === "LEAD" && assignMode === "AUTO" && eligibleEmployeeCount === 0 && !confirmZeroEligible) {
       setConfirmZeroEligible(true);
       return;
     }
@@ -621,10 +651,18 @@ export default function ImportLeadsPage() {
     setAssignMode("AUTO");
     setTargetTeamId("");
     setExcludedEmployeeIds([]);
+    setLeadType("LEAD");
+    setManualEmployeeIds([]);
   }
 
   function toggleExcludedEmployee(employeeId: string) {
     setExcludedEmployeeIds((prev) =>
+      prev.includes(employeeId) ? prev.filter((id) => id !== employeeId) : [...prev, employeeId]
+    );
+  }
+
+  function toggleManualEmployee(employeeId: string) {
+    setManualEmployeeIds((prev) =>
       prev.includes(employeeId) ? prev.filter((id) => id !== employeeId) : [...prev, employeeId]
     );
   }
@@ -670,6 +708,37 @@ export default function ImportLeadsPage() {
       {step === "UPLOAD" && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-[24px] border border-slate-100 shadow-md p-6 space-y-5">
           <div>
+            <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold mb-2">Type</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setLeadType("LEAD")}
+                className={`h-11 rounded-xl text-sm font-semibold border transition ${
+                  leadType === "LEAD"
+                    ? "bg-blue-50 border-blue-200 text-blue-700"
+                    : "bg-white border-slate-200 text-slate-500"
+                }`}
+              >
+                Leads
+              </button>
+              <button
+                onClick={() => setLeadType("DATA")}
+                className={`h-11 rounded-xl text-sm font-semibold border transition ${
+                  leadType === "DATA"
+                    ? "bg-blue-50 border-blue-200 text-blue-700"
+                    : "bg-white border-slate-200 text-slate-500"
+                }`}
+              >
+                Data
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1.5">
+              {leadType === "LEAD"
+                ? "Normal SLA, priority, and recycling rules apply."
+                : "No SLA deadline, priority is auto-Cold, and it recycles automatically after 4 failed contact attempts (never connected) — not on a time-based cooldown."}
+            </p>
+          </div>
+
+          <div>
             <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold mb-2">Source</p>
             <div className="flex gap-2">
               <FilterSelect value={sourceSelect} onChange={(e) => setSourceSelect(e.target.value)} className="flex-1">
@@ -696,91 +765,143 @@ export default function ImportLeadsPage() {
 
           <div>
             <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold mb-2">Assignment</p>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => setAssignMode("AUTO")}
-                className={`h-11 rounded-xl text-sm font-semibold border transition ${
-                  assignMode === "AUTO"
-                    ? "bg-blue-50 border-blue-200 text-blue-700"
-                    : "bg-white border-slate-200 text-slate-500"
-                }`}
-              >
-                Auto-distribute
-              </button>
-              <button
-                onClick={() => setAssignMode("TEAM")}
-                className={`h-11 rounded-xl text-sm font-semibold border transition flex items-center justify-center gap-1.5 ${
-                  assignMode === "TEAM"
-                    ? "bg-blue-50 border-blue-200 text-blue-700"
-                    : "bg-white border-slate-200 text-slate-500"
-                }`}
-              >
-                <Users size={14} />
-                Assign to a Team
-              </button>
-            </div>
 
-            {assignMode === "AUTO" ? (
-              <>
-                <p className="text-[11px] text-slate-400 mt-1.5">
-                  Distributed via round-robin + Project Rules, same as a normal lead.
-                </p>
-
-                <div className="mt-3">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <p className="text-[11px] font-semibold text-slate-500">
-                      Exclude from this distribution (optional)
-                    </p>
-                    {excludedEmployeeIds.length > 0 && (
-                      <button
-                        onClick={() => setExcludedEmployeeIds([])}
-                        className="text-[11px] font-bold text-blue-700 hover:text-blue-800"
-                      >
-                        Clear ({excludedEmployeeIds.length})
-                      </button>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-2 rounded-xl border border-slate-200 bg-slate-50">
-                    {employeeNames.size === 0 ? (
-                      <p className="text-[11px] text-slate-400">No employees found.</p>
-                    ) : (
-                      Array.from(employeeNames.entries())
-                        .sort((a, b) => a[1].localeCompare(b[1]))
-                        .map(([id, name]) => {
-                          const isExcluded = excludedEmployeeIds.includes(id);
-                          return (
-                            <button
-                              key={id}
-                              type="button"
-                              onClick={() => toggleExcludedEmployee(id)}
-                              className={`h-7 px-2.5 rounded-full text-[11px] font-semibold border transition ${
-                                isExcluded
-                                  ? "bg-red-50 border-red-200 text-red-600 line-through"
-                                  : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
-                              }`}
-                            >
-                              {name}
-                            </button>
-                          );
-                        })
-                    )}
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-1.5">
-                    Skipped for THIS import only — round robin returns to normal next time. Doesn't affect leads for a project with a fixed employee (Project Rules).
+            {leadType === "DATA" ? (
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-[11px] font-semibold text-slate-500">
+                    Assign to employee(s) — required
                   </p>
+                  {manualEmployeeIds.length > 0 && (
+                    <button
+                      onClick={() => setManualEmployeeIds([])}
+                      className="text-[11px] font-bold text-blue-700 hover:text-blue-800"
+                    >
+                      Clear ({manualEmployeeIds.length})
+                    </button>
+                  )}
                 </div>
-              </>
+                <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-2 rounded-xl border border-slate-200 bg-slate-50">
+                  {employeeNames.size === 0 ? (
+                    <p className="text-[11px] text-slate-400">No employees found.</p>
+                  ) : (
+                    Array.from(employeeNames.entries())
+                      .sort((a, b) => a[1].localeCompare(b[1]))
+                      .map(([id, name]) => {
+                        const isSelected = manualEmployeeIds.includes(id);
+                        return (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => toggleManualEmployee(id)}
+                            className={`h-7 px-2.5 rounded-full text-[11px] font-semibold border transition ${
+                              isSelected
+                                ? "bg-blue-600 border-blue-600 text-white"
+                                : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
+                            }`}
+                          >
+                            {name}
+                          </button>
+                        );
+                      })
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1.5">
+                  Round robin and eligibility (shift/active) are bypassed entirely — rows rotate evenly across whoever's selected here, regardless of their current status. No Project Rules either.
+                </p>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Duplicate-check is per-employee here, not global — the same number can go to multiple employees (upload this same CSV again and pick someone else), as long as that employee doesn't already have it.
+                </p>
+              </div>
             ) : (
               <>
-                <FilterSelect value={targetTeamId} onChange={(e) => setTargetTeamId(e.target.value)} className="mt-2">
-                  <option value="" disabled>Select a team...</option>
-                  {teams.map((t) => (
-                    <option key={t.id} value={t.id}>{t.name}</option>
-                  ))}
-                </FilterSelect>
-                <p className="text-[11px] text-slate-400 mt-1.5">
-                  Round robin is bypassed entirely — every lead is reserved for this team, visible to its Team Leader under "Pending Leads" for manual distribution.
-                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setAssignMode("AUTO")}
+                    className={`h-11 rounded-xl text-sm font-semibold border transition ${
+                      assignMode === "AUTO"
+                        ? "bg-blue-50 border-blue-200 text-blue-700"
+                        : "bg-white border-slate-200 text-slate-500"
+                    }`}
+                  >
+                    Auto-distribute
+                  </button>
+                  <button
+                    onClick={() => setAssignMode("TEAM")}
+                    className={`h-11 rounded-xl text-sm font-semibold border transition flex items-center justify-center gap-1.5 ${
+                      assignMode === "TEAM"
+                        ? "bg-blue-50 border-blue-200 text-blue-700"
+                        : "bg-white border-slate-200 text-slate-500"
+                    }`}
+                  >
+                    <Users size={14} />
+                    Assign to a Team
+                  </button>
+                </div>
+
+                {assignMode === "AUTO" ? (
+                  <>
+                    <p className="text-[11px] text-slate-400 mt-1.5">
+                      Distributed via round-robin + Project Rules, same as a normal lead.
+                    </p>
+
+                    <div className="mt-3">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <p className="text-[11px] font-semibold text-slate-500">
+                          Exclude from this distribution (optional)
+                        </p>
+                        {excludedEmployeeIds.length > 0 && (
+                          <button
+                            onClick={() => setExcludedEmployeeIds([])}
+                            className="text-[11px] font-bold text-blue-700 hover:text-blue-800"
+                          >
+                            Clear ({excludedEmployeeIds.length})
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-2 rounded-xl border border-slate-200 bg-slate-50">
+                        {employeeNames.size === 0 ? (
+                          <p className="text-[11px] text-slate-400">No employees found.</p>
+                        ) : (
+                          Array.from(employeeNames.entries())
+                            .sort((a, b) => a[1].localeCompare(b[1]))
+                            .map(([id, name]) => {
+                              const isExcluded = excludedEmployeeIds.includes(id);
+                              return (
+                                <button
+                                  key={id}
+                                  type="button"
+                                  onClick={() => toggleExcludedEmployee(id)}
+                                  className={`h-7 px-2.5 rounded-full text-[11px] font-semibold border transition ${
+                                    isExcluded
+                                      ? "bg-red-50 border-red-200 text-red-600 line-through"
+                                      : "bg-white border-slate-200 text-slate-600 hover:border-slate-300"
+                                  }`}
+                                >
+                                  {name}
+                                </button>
+                              );
+                            })
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-1.5">
+                        Skipped for THIS import only — round robin returns to normal next time. Doesn't affect leads for a project with a fixed employee (Project Rules).
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <FilterSelect value={targetTeamId} onChange={(e) => setTargetTeamId(e.target.value)} className="mt-2">
+                      <option value="" disabled>Select a team...</option>
+                      {teams.map((t) => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </FilterSelect>
+                    <p className="text-[11px] text-slate-400 mt-1.5">
+                      Round robin is bypassed entirely — every lead is reserved for this team, visible to its Team Leader under "Pending Leads" for manual distribution.
+                    </p>
+                  </>
+                )}
               </>
             )}
           </div>
@@ -835,7 +956,7 @@ export default function ImportLeadsPage() {
             ))}
           </div>
 
-          {csvProjectValues.length > 0 && (
+          {leadType === "LEAD" && csvProjectValues.length > 0 && (
             <div className="rounded-xl bg-blue-50 border border-blue-100 p-4">
               <div className="flex items-center gap-1.5 mb-2">
                 <Building2 size={13} className="text-blue-600" />
@@ -922,13 +1043,22 @@ export default function ImportLeadsPage() {
 
       {step === "PREVIEW" && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-[24px] border border-slate-100 shadow-md p-6 space-y-4">
-          {eligibleEmployeeCount === 0 && (
-            <div className="flex items-start gap-2 rounded-xl bg-amber-50 border border-amber-100 p-3">
-              <AlertTriangle size={14} className="text-amber-600 shrink-0 mt-0.5" />
-              <p className="text-xs text-amber-800">
-                Abhi koi employee shift-started nahi hai — leads unassigned reh jayengi. Import ke baad, jab koi shift start kare, "Retry Distribution" (Import History mein) use karna hoga.
+          {leadType === "DATA" ? (
+            <div className="flex items-start gap-2 rounded-xl bg-blue-50 border border-blue-100 p-3">
+              <Users size={14} className="text-blue-600 shrink-0 mt-0.5" />
+              <p className="text-xs text-blue-800">
+                Data import — assigned directly to {manualEmployeeIds.length} selected employee{manualEmployeeIds.length === 1 ? "" : "s"}, no SLA, Cold priority, recycles after 4 unanswered attempts.
               </p>
             </div>
+          ) : (
+            eligibleEmployeeCount === 0 && (
+              <div className="flex items-start gap-2 rounded-xl bg-amber-50 border border-amber-100 p-3">
+                <AlertTriangle size={14} className="text-amber-600 shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-800">
+                  Abhi koi employee shift-started nahi hai — leads unassigned reh jayengi. Import ke baad, jab koi shift start kare, "Retry Distribution" (Import History mein) use karna hoga.
+                </p>
+              </div>
+            )
           )}
 
           <div className="grid grid-cols-3 gap-3">
@@ -1129,6 +1259,11 @@ export default function ImportLeadsPage() {
                           <p className="text-sm font-semibold text-slate-700 truncate">
                             {b.source_name} {b.filename && <span className="text-slate-400 font-normal">· {b.filename}</span>}
                           </p>
+                          {b.lead_type === "DATA" && (
+                            <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">
+                              Data
+                            </span>
+                          )}
                           {b.status === "deleted" && (
                             <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-500">
                               Deleted
@@ -1151,7 +1286,7 @@ export default function ImportLeadsPage() {
 
                     {b.status === "active" && (
                       <div className="flex items-center gap-1.5 shrink-0">
-                        {b.assigned_count < b.imported_count && (
+                        {b.assigned_count < b.imported_count && b.lead_type !== "DATA" && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();

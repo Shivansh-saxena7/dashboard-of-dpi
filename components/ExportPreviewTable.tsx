@@ -5,7 +5,7 @@ import { AdminExportLead, buildExportRows, EXPORT_COLUMNS } from "@/lib/exportLe
 
 const PAGE_SIZE = 50;
 
-// All 14 export columns render in the DOM at every screen size — no
+// All 15 export columns render in the DOM at every screen size — no
 // JS measurement, no ResizeObserver, no viewport-dependent column
 // *set* to keep in sync with. Each column instead carries a static
 // Tailwind visibility class (`hidden` below its breakpoint, then
@@ -26,6 +26,7 @@ const COLUMN_VISIBILITY: Record<(typeof EXPORT_COLUMNS)[number]["key"], string> 
   mobile: "table-cell",
   status: "table-cell",
   assignedEmployee: "table-cell",
+  type: "hidden sm:table-cell",
   project: "hidden sm:table-cell",
   assignedDate: "hidden sm:table-cell",
   source: "hidden md:table-cell",

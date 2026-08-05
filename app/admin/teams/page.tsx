@@ -450,18 +450,28 @@ export default function AdminTeamsPage() {
                 animate={{ opacity: 1, y: 0 }}
                 className="space-y-5"
               >
-                <div className="bg-white rounded-[24px] border border-slate-100 shadow-md p-6 relative">
-                  <button
-                    onClick={() => setDeleteModalOpen(true)}
-                    title="Delete Team"
-                    className="absolute top-5 right-5 h-9 w-9 rounded-full bg-red-50 border border-red-100 flex items-center justify-center text-red-500 hover:bg-red-500 hover:text-white transition"
-                  >
-                    <Trash2 size={15} />
-                  </button>
-
-                  <div className="flex items-center justify-between mb-3 pr-12">
-                    <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold">Team Name</p>
-                    <p className="text-[10px] text-slate-400">Edit and press Save to rename</p>
+                <div className="bg-white rounded-[24px] border border-slate-100 shadow-md p-6">
+                  {/* Delete button used to be absolutely positioned
+                      (top-5 right-5) with only the row directly below
+                      it reserving space (pr-12) — its own height
+                      extended slightly past that row's bottom margin,
+                      overlapping the input/Save row underneath. A
+                      normal flex sibling can't overlap anything below
+                      it by construction, so that's a permanent fix,
+                      not just a padding tweak — same pattern as the
+                      Project Rules "Delete Rule" button. */}
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <div className="min-w-0">
+                      <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold">Team Name</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Edit and press Save to rename</p>
+                    </div>
+                    <button
+                      onClick={() => setDeleteModalOpen(true)}
+                      title="Delete Team"
+                      className="shrink-0 h-9 w-9 rounded-full bg-red-50 border border-red-100 flex items-center justify-center text-red-500 hover:bg-red-500 hover:text-white transition"
+                    >
+                      <Trash2 size={15} />
+                    </button>
                   </div>
                   <div className="flex gap-2">
                     <input

@@ -11,6 +11,7 @@ import { assignedByLabel } from "@/lib/assignedByDisplay";
 interface AdminLeadHistoryModalProps {
   leadId: string;
   leadName: string;
+  leadType?: string;
   onClose: () => void;
 }
 
@@ -22,6 +23,7 @@ interface HistoryEntry {
   ended_reason: string | null;
   reassign_note: string | null;
   outcome: string | null;
+  call_count: number;
   assigned_by_type: "SYSTEM" | "ADMIN" | "TEAM_LEADER";
   employees: { name: string } | null;
   assigned_by: { name: string } | null;
@@ -69,7 +71,7 @@ type TimelineEntry =
 // the point where the {historyOpen && ...} conditional actually is —
 // portals change DOM output, not React parent/unmount timing, so
 // AnimatePresence still needs to sit there to see the removal coming.
-export default function AdminLeadHistoryModal({ leadId, leadName, onClose }: AdminLeadHistoryModalProps) {
+export default function AdminLeadHistoryModal({ leadId, leadName, leadType, onClose }: AdminLeadHistoryModalProps) {
 
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -87,7 +89,7 @@ export default function AdminLeadHistoryModal({ leadId, leadName, onClose }: Adm
           .from("lead_history")
           .select(
             `
-            id, employee_id, assigned_at, is_active, ended_reason, reassign_note, outcome,
+            id, employee_id, assigned_at, is_active, ended_reason, reassign_note, outcome, call_count,
             assigned_by_type, assigned_by_employee_id,
             employees!lead_history_employee_id_fkey(name),
             assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)
@@ -150,7 +152,7 @@ export default function AdminLeadHistoryModal({ leadId, leadName, onClose }: Adm
           </button>
 
           <p className="relative text-[10px] font-semibold tracking-[0.2em] text-cyan-200 uppercase mb-2">
-            Lead History
+            {leadType === "DATA" ? "Data History" : "Lead History"}
           </p>
           <h2 className="relative text-xl font-bold pr-10">{leadName}</h2>
           <p className="relative text-sm text-white/70 mt-1">
@@ -231,6 +233,12 @@ export default function AdminLeadHistoryModal({ leadId, leadName, onClose }: Adm
                         <p className="text-[11px] text-slate-500 mt-0.5 font-medium">
                           {assignedByLabel(item.data)}
                         </p>
+
+                        {item.data.call_count > 0 && (
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            Called {item.data.call_count}x
+                          </p>
+                        )}
 
                         {item.data.outcome && (
                           <p className="text-xs text-slate-600 mt-2">

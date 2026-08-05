@@ -23,6 +23,7 @@ interface AdminLeadCardLead {
   assignedAt: string | null;
   pendingTeamId: string | null;
   pendingTeamName: string | null;
+  leadType: string;
 }
 
 interface AdminLeadCardProps {
@@ -118,6 +119,12 @@ export default function AdminLeadCard({ lead, teams, onReserveTeam, index = 0 }:
       </div>
 
       <div className="flex items-center flex-wrap gap-1.5 mt-3.5">
+        {lead.leadType === "DATA" && (
+          <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-violet-50 text-violet-700">
+            Data
+          </span>
+        )}
+
         <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${statusDisplay.badgeClassName}`}>
           {statusDisplay.label}
         </span>
@@ -195,6 +202,7 @@ export default function AdminLeadCard({ lead, teams, onReserveTeam, index = 0 }:
             key="history-modal"
             leadId={lead.id}
             leadName={lead.name}
+            leadType={lead.leadType}
             onClose={() => setHistoryOpen(false)}
           />
         )}

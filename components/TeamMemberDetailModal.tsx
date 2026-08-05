@@ -84,6 +84,12 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
   // makes on this same shape. { count: "exact" } + .range() paginate
   // — a team member with a large book of leads no longer forces this
   // drawer to fetch (and render) all of it at once.
+  //
+  // .eq("lead_type", "LEAD") — reassign_lead_by_team_leader_atomic
+  // (below) has no concept of Data at all (built purely for the Leads
+  // SLA/round-robin model), so a Data row showing up in this list
+  // would be reassignable through machinery that isn't built to
+  // handle it correctly. Same scoping decision as LeadList.tsx.
   async function loadLeads(pageIndex: number, append: boolean) {
     if (append) {
       setLoadingMoreLeads(true);
@@ -107,6 +113,7 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
         { count: "exact" }
       )
       .eq("current_owner_id", member.id)
+      .eq("lead_type", "LEAD")
       .eq("lead_history.is_active", true)
       .order("created_at", { ascending: false })
       .range(from, to);

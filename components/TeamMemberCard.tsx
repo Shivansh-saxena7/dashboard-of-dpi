@@ -13,6 +13,7 @@ interface TeamMemberCardProps {
   };
   attendanceStatus: MemberAttendanceStatus;
   leadCount: number;
+  dataCount: number;
   points: number;
   onOpen: () => void;
   index?: number;
@@ -28,7 +29,7 @@ const ATTENDANCE_DISPLAY: Record<MemberAttendanceStatus, { label: string; classN
 // employee-side (gold), not admin-side (blue-cyan), since /team is
 // part of the employee app shell (reached via EmployeeTabBar), even
 // though a team_leader is viewing it.
-export default function TeamMemberCard({ member, attendanceStatus, leadCount, points, onOpen, index = 0 }: TeamMemberCardProps) {
+export default function TeamMemberCard({ member, attendanceStatus, leadCount, dataCount, points, onOpen, index = 0 }: TeamMemberCardProps) {
 
   const attendance = ATTENDANCE_DISPLAY[attendanceStatus];
   const initial = member.name?.charAt(0)?.toUpperCase() || "?";
@@ -60,6 +61,9 @@ export default function TeamMemberCard({ member, attendanceStatus, leadCount, po
             {attendance.label}
           </span>
           <span className="text-[11px] text-slate-400">{leadCount} leads</span>
+          {dataCount > 0 && (
+            <span className="text-[11px] font-semibold text-violet-500">· {dataCount} data</span>
+          )}
           <span className="text-[11px] text-slate-400">· {points} pts</span>
         </div>
       </div>

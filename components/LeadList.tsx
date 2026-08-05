@@ -61,6 +61,11 @@ function FilterSelect({
 // own authored rows). There is no "recycled" badge to accidentally
 // render because the query simply has no path to that data.
 //
+// .eq("lead_type", "LEAD") is what keeps Data (see app/data/page.tsx
+// + components/DataList.tsx, its own separate view) from leaking in
+// here — this board's SLA countdown/board-stage UI would be actively
+// confusing on a Data row, which has neither.
+//
 // The 5th tab (History) is a different data source entirely —
 // employee_sla_breach_history (a security_invoker view over
 // lead_history) rather than `leads`. The view's name still says
@@ -149,6 +154,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
       `
       )
       .eq("current_owner_id", employeeId)
+      .eq("lead_type", "LEAD")
       .eq("lead_history.employee_id", employeeId)
       .eq("lead_history.is_active", true)
       .order("created_at", { ascending: false });

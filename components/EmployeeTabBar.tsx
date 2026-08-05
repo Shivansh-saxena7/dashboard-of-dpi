@@ -9,16 +9,21 @@ interface EmployeeTabBarProps {
 
 const BASE_TABS = [
   { href: "/", label: "Posts" },
-  { href: "/leads", label: "Leads" }
+  { href: "/leads", label: "Leads" },
+  { href: "/data", label: "Data" }
 ];
 
 const TEAM_LEADER_TAB = { href: "/team", label: "Team" };
 
-// Nav between the V1 (Posts) and V2 (Leads) employee views, plus a
-// conditional "Team" tab for team_leader role only — this is exactly
-// the "one more array entry" extensibility this component was built
-// for. No shared layout wraps these pages yet, so this is dropped
-// into each page individually (app/page.tsx, app/leads/page.tsx,
+// Nav between the V1 (Posts) and V2 (Leads/Data) employee views, plus
+// a conditional "Team" tab for team_leader role only — this is
+// exactly the "one more array entry" extensibility this component was
+// built for. "Data" is its own tab/route (not folded into Leads)
+// because it has no board-stage workflow and shouldn't share
+// LeadList's SLA-heavy UI — every employee sees it, not just team
+// leaders, since anyone can be handed Data. No shared layout wraps
+// these pages yet, so this is dropped into each page individually
+// (app/page.tsx, app/leads/page.tsx, app/data/page.tsx,
 // app/team/page.tsx) — same as StartShiftCard.
 export default function EmployeeTabBar({ role }: EmployeeTabBarProps) {
   const pathname = usePathname();

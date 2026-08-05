@@ -8,6 +8,7 @@ export type SLAStatus =
   | "SLA_BREACHED"
   | "COOLDOWN"
   | "RECYCLE_READY"
+  | "DATA_MAX_ATTEMPTS_REACHED"
   | "JUNK_ELIGIBLE"
   | "NOT_APPLICABLE";
 
@@ -23,10 +24,20 @@ export const RECYCLE_COOLDOWN_DAYS = {
 export const MAX_RECYCLES = 3;
 export const MAX_NOT_INTERESTED = 2;
 
+// "Data" leads (lead_type='DATA') recycle on attempt-count, not time
+// — see the branch below. 4 failed contact attempts (call_count) with
+// the lead still unreached is what triggers it.
+export const MAX_DATA_ATTEMPTS = 4;
+
 interface LeadForSLA {
   status: string;
   sla_deadline: string | null;
   recycle_count: number;
+  // Both optional and omitted by every pre-existing caller — absent
+  // (or anything other than "DATA") behaves exactly like a LEAD
+  // always has, so this is fully backward-compatible.
+  lead_type?: string;
+  call_count?: number;
 }
 
 export function calculateSLAStatus(
@@ -47,6 +58,20 @@ export function calculateSLAStatus(
 
   if (lead.status === "CONNECTED") {
     return "NOT_APPLICABLE";
+  }
+
+  // DATA leads, still unreached (never made it to CONNECTED): no
+  // SLA-clock, no time-based cooldown — recycling is purely
+  // attempt-count-based here. NOT_INTERESTED is deliberately NOT
+  // included in this branch — it's a real outcome (the call
+  // connected, they just weren't interested), not a failed contact
+  // attempt, so it falls through to the same time-based cooldown
+  // logic a LEAD would use, below.
+  if (
+    lead.lead_type === "DATA" &&
+    (lead.status === "NEW" || lead.status === "NOT_CONNECTED" || lead.status === "SWITCHED_OFF")
+  ) {
+    return (lead.call_count ?? 0) >= MAX_DATA_ATTEMPTS ? "DATA_MAX_ATTEMPTS_REACHED" : "WITHIN_SLA";
   }
 
   if (lead.status === "NEW") {

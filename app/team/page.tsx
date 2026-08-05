@@ -72,6 +72,7 @@ export default function TeamPage() {
   const [members, setMembers] = useState<any[]>([]);
   const [attendanceByEmployee, setAttendanceByEmployee] = useState<Map<string, any>>(new Map());
   const [leadCountByEmployee, setLeadCountByEmployee] = useState<Map<string, number>>(new Map());
+  const [dataCountByEmployee, setDataCountByEmployee] = useState<Map<string, number>>(new Map());
   const [pointsByEmployee, setPointsByEmployee] = useState<Map<string, number>>(new Map());
   const [totalLeads, setTotalLeads] = useState(0);
   const [bookingsThisWeek, setBookingsThisWeek] = useState(0);
@@ -93,6 +94,7 @@ export default function TeamPage() {
   const [reportSourceFilter, setReportSourceFilter] = useState("");
   const [reportBoardStageFilter, setReportBoardStageFilter] = useState("");
   const [reportStatusFilter, setReportStatusFilter] = useState("");
+  const [reportTypeFilter, setReportTypeFilter] = useState("");
   const [reportDateRangeFilter, setReportDateRangeFilter] = useState<DateRangeOption>("ALL");
   const [reportCustomStart, setReportCustomStart] = useState("");
   const [reportCustomEnd, setReportCustomEnd] = useState("");
@@ -225,7 +227,7 @@ export default function TeamPage() {
       .from("leads")
       .select(
         `
-        id, name, mobile, project, source, status, priority, board_stage, recycle_count,
+        id, name, mobile, project, source, status, priority, board_stage, recycle_count, lead_type,
         current_owner_id,
         employees ( name ),
         lead_history (
@@ -286,7 +288,7 @@ export default function TeamPage() {
         .in("employee_id", memberIds),
       supabase
         .from("leads")
-        .select("id, current_owner_id")
+        .select("id, current_owner_id, lead_type")
         .in("current_owner_id", memberIds),
       supabase
         .from("site_visits")
@@ -298,12 +300,28 @@ export default function TeamPage() {
     (attendanceRows || []).forEach((a) => attendanceMap.set(a.employee_id, a));
     setAttendanceByEmployee(attendanceMap);
 
+    // BUG FIX: previously counted every row (Lead + Data) into one
+    // "leads" number per member — a member handed Data would show an
+    // inflated/mixed leadCount that was neither an accurate Leads nor
+    // Data count. Split by lead_type here instead, same rule
+    // everywhere else in the app uses (omitted/anything-but-DATA
+    // treated as LEAD).
     const leadCountMap = new Map<string, number>();
+    const dataCountMap = new Map<string, number>();
+    let totalLeadsOnly = 0;
+
     (leadsRows || []).forEach((l) => {
-      leadCountMap.set(l.current_owner_id, (leadCountMap.get(l.current_owner_id) || 0) + 1);
+      if (l.lead_type === "DATA") {
+        dataCountMap.set(l.current_owner_id, (dataCountMap.get(l.current_owner_id) || 0) + 1);
+      } else {
+        leadCountMap.set(l.current_owner_id, (leadCountMap.get(l.current_owner_id) || 0) + 1);
+        totalLeadsOnly++;
+      }
     });
+
     setLeadCountByEmployee(leadCountMap);
-    setTotalLeads((leadsRows || []).length);
+    setDataCountByEmployee(dataCountMap);
+    setTotalLeads(totalLeadsOnly);
 
     const pointsMap = new Map<string, number>();
     let bookingsCount = 0;
@@ -372,6 +390,10 @@ export default function TeamPage() {
       result = result.filter((lead) => lead.status === reportStatusFilter);
     }
 
+    if (reportTypeFilter) {
+      result = result.filter((lead) => (lead.lead_type || "LEAD") === reportTypeFilter);
+    }
+
     if (reportDateRangeFilter !== "ALL") {
       result = result.filter((lead) =>
         isWithinDateRange(
@@ -391,6 +413,7 @@ export default function TeamPage() {
     reportSourceFilter,
     reportBoardStageFilter,
     reportStatusFilter,
+    reportTypeFilter,
     reportDateRangeFilter,
     reportCustomStart,
     reportCustomEnd
@@ -425,6 +448,10 @@ export default function TeamPage() {
       });
     }
 
+    if (reportTypeFilter) {
+      otherFilters.push({ label: "Type", value: reportTypeFilter === "DATA" ? "Data" : "Leads" });
+    }
+
     const dateLabel = dateRangeFilterLabel(reportDateRangeFilter, reportCustomStart, reportCustomEnd);
     if (dateLabel) {
       otherFilters.push({ label: "Date", value: dateLabel });
@@ -437,6 +464,7 @@ export default function TeamPage() {
     reportSourceFilter,
     reportBoardStageFilter,
     reportStatusFilter,
+    reportTypeFilter,
     reportDateRangeFilter,
     reportCustomStart,
     reportCustomEnd,
@@ -628,6 +656,7 @@ export default function TeamPage() {
                 index={index}
                 attendanceStatus={getAttendanceStatus(member.id)}
                 leadCount={leadCountByEmployee.get(member.id) || 0}
+                dataCount={dataCountByEmployee.get(member.id) || 0}
                 points={pointsByEmployee.get(member.id) || 0}
                 onOpen={() => setSelectedMemberId(member.id)}
               />
@@ -676,6 +705,12 @@ export default function TeamPage() {
               {ALL_STATUSES.map((status) => (
                 <option key={status} value={status}>{LEAD_STATUS_DISPLAY[status as keyof typeof LEAD_STATUS_DISPLAY].label}</option>
               ))}
+            </FilterSelect>
+
+            <FilterSelect value={reportTypeFilter} onChange={(e) => setReportTypeFilter(e.target.value)}>
+              <option value="">All Types</option>
+              <option value="LEAD">Leads</option>
+              <option value="DATA">Data</option>
             </FilterSelect>
 
             <FilterSelect

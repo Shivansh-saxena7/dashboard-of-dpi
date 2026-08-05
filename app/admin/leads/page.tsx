@@ -67,6 +67,7 @@ export default function AdminLeadsPage() {
   const [sourceFilter, setSourceFilter] = useState("");
   const [boardStageFilter, setBoardStageFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
   const [dateRangeFilter, setDateRangeFilter] = useState<DateRangeOption>("ALL");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
@@ -120,6 +121,7 @@ export default function AdminLeadsPage() {
         created_at,
         current_owner_id,
         pending_team_id,
+        lead_type,
         employees ( name ),
         pending_team:teams ( name ),
         lead_history (
@@ -243,6 +245,10 @@ export default function AdminLeadsPage() {
       result = result.filter((lead) => lead.status === statusFilter);
     }
 
+    if (typeFilter) {
+      result = result.filter((lead) => (lead.lead_type || "LEAD") === typeFilter);
+    }
+
     if (dateRangeFilter !== "ALL") {
       result = result.filter((lead) =>
         isWithinDateRange(lead.lead_history?.[0]?.assigned_at, dateRangeFilter, customStart, customEnd)
@@ -273,6 +279,7 @@ export default function AdminLeadsPage() {
     sourceFilter,
     boardStageFilter,
     statusFilter,
+    typeFilter,
     dateRangeFilter,
     customStart,
     customEnd,
@@ -313,6 +320,10 @@ export default function AdminLeadsPage() {
       });
     }
 
+    if (typeFilter) {
+      otherFilters.push({ label: "Type", value: typeFilter === "DATA" ? "Data" : "Leads" });
+    }
+
     const dateLabel = dateRangeFilterLabel(dateRangeFilter, customStart, customEnd);
     if (dateLabel) {
       otherFilters.push({ label: "Date", value: dateLabel });
@@ -325,6 +336,7 @@ export default function AdminLeadsPage() {
     sourceFilter,
     boardStageFilter,
     statusFilter,
+    typeFilter,
     dateRangeFilter,
     customStart,
     customEnd,
@@ -431,6 +443,12 @@ export default function AdminLeadsPage() {
             {ALL_STATUSES.map((status) => (
               <option key={status} value={status}>{LEAD_STATUS_DISPLAY[status as keyof typeof LEAD_STATUS_DISPLAY].label}</option>
             ))}
+          </FilterSelect>
+
+          <FilterSelect value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+            <option value="">All Types</option>
+            <option value="LEAD">Leads</option>
+            <option value="DATA">Data</option>
           </FilterSelect>
 
           <FilterSelect
@@ -546,7 +564,8 @@ export default function AdminLeadsPage() {
                 ownerName: lead.employees?.name ?? null,
                 assignedAt: lead.lead_history?.[0]?.assigned_at ?? null,
                 pendingTeamId: lead.pending_team_id ?? null,
-                pendingTeamName: lead.pending_team?.name ?? null
+                pendingTeamName: lead.pending_team?.name ?? null,
+                leadType: lead.lead_type || "LEAD"
               }}
             />
           ))}

@@ -155,3 +155,63 @@ export async function distributeLeadsBatch(supabase, leadsToDistribute, settings
 
   return { assignedCount, distributionSummary, diagnostics };
 }
+
+// Data-type distribution — Admin has manually picked one or more
+// specific employees at CSV-import time (import-leads-csv's DATA
+// branch). Deliberately bypasses round robin AND Project Rules
+// entirely (this is an explicit Admin override, same "authoritative
+// choice" precedent Project Rules themselves already established),
+// and bypasses is_active/rr_eligible/shift-started too — Admin's pick
+// is trusted regardless of current eligibility, per the approved
+// design. No SLA (p_sla_deadline always null — Data leads recycle on
+// attempt-count, not time, see calculateSLAStatus) and always
+// attributed to the calling Admin (assigned_by_type='ADMIN'), so the
+// audit trail correctly shows this was a deliberate manual pick, not
+// a system decision.
+//
+// No fairness-pointer is persisted across separate imports — each
+// call just rotates evenly through manualEmployeeIds for the rows in
+// THIS batch (lead[i] -> manualEmployeeIds[i % length]), starting
+// fresh at index 0 every time. Data's distribution has no stated
+// cross-import fairness requirement (unlike the company-wide/project-
+// rule pointers, which explicitly do), so no extra pointer table is
+// needed for it.
+//
+// currentPointerEmployeeId must be the caller's CURRENT (unchanged)
+// lead_engine_settings.round_robin_pointer_employee_id — passed
+// straight through to assign_lead_atomic on every call so the
+// company-wide pointer is left exactly where it was. This lead was
+// never part of that rotation to begin with, same "pass through
+// unchanged" rule PROJECT_RULE assignments already follow.
+export async function distributeDataLeadsManually(supabase, leadsToDistribute, manualEmployeeIds, adminEmployeeId, currentPointerEmployeeId) {
+
+  const distributionSummary = {};
+  let assignedCount = 0;
+  const diagnostics = [];
+
+  for (let i = 0; i < leadsToDistribute.length; i++) {
+
+    const lead = leadsToDistribute[i];
+    const employeeId = manualEmployeeIds[i % manualEmployeeIds.length];
+
+    const { error: assignError } = await supabase.rpc("assign_lead_atomic", {
+      p_lead_id: lead.id,
+      p_employee_id: employeeId,
+      p_sla_deadline: null,
+      p_next_pointer_employee_id: currentPointerEmployeeId,
+      p_assigned_by_type: "ADMIN",
+      p_assigned_by_employee_id: adminEmployeeId
+    });
+
+    if (assignError) {
+      diagnostics.push({ leadId: lead.id, action: "ASSIGN_FAILED", error: assignError.message });
+      continue;
+    }
+
+    assignedCount++;
+    distributionSummary[employeeId] = (distributionSummary[employeeId] || 0) + 1;
+
+  }
+
+  return { assignedCount, distributionSummary, diagnostics };
+}
