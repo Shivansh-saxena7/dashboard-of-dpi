@@ -24,6 +24,11 @@ export interface LeadDetailLead {
   assignedByType: AssignedBySource["assigned_by_type"] | null;
   assignedBy: { name: string } | null;
   reassignNote: string | null;
+  pausedUntil: string | null;
+  pauseReason: "SNOOZE" | "VISIT_LOCK" | "VISIT_PENDING_VERIFICATION" | null;
+  pauseNote: string | null;
+  pauseVerifiedByName: string | null;
+  pauseVerifiedAt: string | null;
 }
 
 interface LeadNote {
@@ -37,6 +42,7 @@ interface LeadDetailModalProps {
   onClose: () => void;
   onUpdated: (updates: { status?: LeadStatus; callCount: number }) => void;
   onBoardStageChanged: (boardStage: BoardStage) => void;
+  onPauseChanged: (pause: { pausedUntil: string | null; pauseReason: string | null; pauseNote: string | null }) => void;
 }
 
 // The write-side counterpart to LeadCard. Two independent action
@@ -50,7 +56,7 @@ interface LeadDetailModalProps {
 // status and board_stage are deliberately independent state, per the
 // approved design — Log Update never touches board_stage, and Move
 // Lead never touches status except the one explicit case (Booking).
-export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStageChanged }: LeadDetailModalProps) {
+export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStageChanged, onPauseChanged }: LeadDetailModalProps) {
 
   const [notes, setNotes] = useState<LeadNote[]>([]);
   const [loadingNotes, setLoadingNotes] = useState(true);
@@ -63,6 +69,19 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
   const [visitPromptOpen, setVisitPromptOpen] = useState(false);
   const [bookingConfirmOpen, setBookingConfirmOpen] = useState(false);
   const [moving, setMoving] = useState(false);
+
+  // Snooze — see the "Pause" card below the Move Lead section. A
+  // planned client-hold, employee-initiated, always requires a reason
+  // (snooze_lead_atomic rejects without one — this isn't just a UI
+  // nicety, it's genuinely enforced server-side, same "structurally
+  // impossible to skip" posture the rest of this app uses). Distinct
+  // from VISIT_LOCK, which is never started from here — that's set
+  // automatically once a Sales Coordinator/Admin verifies a visit.
+  const [snoozeFormOpen, setSnoozeFormOpen] = useState(false);
+  const [snoozeMonths, setSnoozeMonths] = useState("3");
+  const [snoozeReason, setSnoozeReason] = useState("");
+  const [snoozing, setSnoozing] = useState(false);
+  const [cancellingSnooze, setCancellingSnooze] = useState(false);
 
   useEffect(() => {
     loadNotes();
@@ -158,7 +177,7 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
 
       const { error } = await supabase
         .from("leads")
-        .update({ board_stage: "FOLLOW_UP" })
+        .update({ board_stage: "FOLLOW_UP", board_stage_changed_at: new Date().toISOString() })
         .eq("id", lead.id);
 
       if (error) {
@@ -233,6 +252,75 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
       setMoving(false);
     }
   }
+
+  async function submitSnooze() {
+
+    if (!snoozeReason.trim()) {
+      toast.error("A reason is required to snooze this lead.");
+      return;
+    }
+
+    setSnoozing(true);
+
+    try {
+
+      const { error } = await supabase.rpc("snooze_lead_atomic", {
+        p_lead_history_id: lead.leadHistoryId,
+        p_duration_months: parseInt(snoozeMonths, 10),
+        p_reason: snoozeReason.trim()
+      });
+
+      if (error) {
+        toast.error(error.message || "Could not snooze this lead.");
+        return;
+      }
+
+      const snoozedUntil = new Date();
+      snoozedUntil.setMonth(snoozedUntil.getMonth() + parseInt(snoozeMonths, 10));
+
+      toast.success("Lead snoozed.");
+      setSnoozeFormOpen(false);
+      setSnoozeReason("");
+      onPauseChanged({
+        pausedUntil: snoozedUntil.toISOString(),
+        pauseReason: "SNOOZE",
+        pauseNote: snoozeReason.trim()
+      });
+
+    } catch (err) {
+      console.log(err);
+      toast.error("Something went wrong snoozing this lead.");
+    } finally {
+      setSnoozing(false);
+    }
+  }
+
+  async function cancelSnooze() {
+    setCancellingSnooze(true);
+
+    try {
+
+      const { error } = await supabase.rpc("cancel_snooze_atomic", {
+        p_lead_history_id: lead.leadHistoryId
+      });
+
+      if (error) {
+        toast.error(error.message || "Could not cancel the snooze.");
+        return;
+      }
+
+      toast.success("Snooze cancelled.");
+      onPauseChanged({ pausedUntil: null, pauseReason: null, pauseNote: null });
+
+    } catch (err) {
+      console.log(err);
+      toast.error("Something went wrong.");
+    } finally {
+      setCancellingSnooze(false);
+    }
+  }
+
+  const isPaused = Boolean(lead.pausedUntil && new Date(lead.pausedUntil) > new Date());
 
   return (
     <>
@@ -392,6 +480,160 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
                 </div>
               )}
             </div>
+          )}
+
+          {!isTerminal && (
+            isPaused ? (
+              <div
+                className={`rounded-2xl border p-5 ${
+                  lead.pauseReason === "VISIT_LOCK"
+                    ? "bg-emerald-50 border-emerald-100"
+                    : lead.pauseReason === "VISIT_PENDING_VERIFICATION"
+                    ? "bg-amber-50 border-amber-100"
+                    : "bg-indigo-50 border-indigo-100"
+                }`}
+              >
+                <p className="text-sm font-bold text-slate-800">
+                  {lead.pauseReason === "VISIT_LOCK"
+                    ? "🔒 Visit-Locked"
+                    : lead.pauseReason === "VISIT_PENDING_VERIFICATION"
+                    ? "⏳ Visit Pending Verification"
+                    : "😴 Snoozed"}
+                </p>
+                <p className="text-sm text-slate-700 mt-1.5 leading-relaxed">
+                  {lead.pauseReason === "VISIT_LOCK" ? (
+                    <>
+                      {lead.pauseVerifiedByName && (
+                        <>
+                          Your visit was verified by{" "}
+                          <span className="font-semibold">{lead.pauseVerifiedByName}</span>
+                          {lead.pauseVerifiedAt && (
+                            <>
+                              {" "}on{" "}
+                              <span className="font-semibold">
+                                {new Date(lead.pauseVerifiedAt).toLocaleDateString([], {
+                                  month: "long",
+                                  day: "numeric",
+                                  year: "numeric"
+                                })}
+                              </span>
+                            </>
+                          )}
+                          .{" "}
+                        </>
+                      )}
+                      This lead is locked to you until{" "}
+                      <span className="font-semibold">
+                        {new Date(lead.pausedUntil!).toLocaleDateString([], {
+                          month: "long",
+                          day: "numeric",
+                          year: "numeric"
+                        })}
+                      </span>
+                      . If you don&apos;t bring them back for a revisit before then, this lead may be
+                      reassigned to another team member.
+                    </>
+                  ) : lead.pauseReason === "VISIT_PENDING_VERIFICATION" ? (
+                    <>
+                      Your visit is being reviewed by the Sales Coordinator — once verified, this lead
+                      will be locked to you for 1 month. No action needed, check back soon. (Review
+                      window ends{" "}
+                      <span className="font-semibold">
+                        {new Date(lead.pausedUntil!).toLocaleDateString([], {
+                          month: "long",
+                          day: "numeric",
+                          year: "numeric"
+                        })}
+                      </span>
+                      .)
+                    </>
+                  ) : (
+                    <>
+                      Snoozed until{" "}
+                      <span className="font-semibold">
+                        {new Date(lead.pausedUntil!).toLocaleDateString([], {
+                          month: "long",
+                          day: "numeric",
+                          year: "numeric"
+                        })}
+                      </span>
+                      . This lead won&apos;t be reassigned while snoozed.
+                      {lead.pauseNote && (
+                        <>
+                          {" "}— <span className="italic">&ldquo;{lead.pauseNote}&rdquo;</span>
+                        </>
+                      )}
+                    </>
+                  )}
+                </p>
+
+                {lead.pauseReason === "SNOOZE" && (
+                  <button
+                    disabled={cancellingSnooze}
+                    onClick={cancelSnooze}
+                    className="mt-3 text-xs font-semibold text-indigo-700 hover:text-indigo-900 disabled:opacity-60"
+                  >
+                    {cancellingSnooze ? "Cancelling..." : "Cancel snooze"}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-2xl bg-white border border-slate-100 shadow-md p-5">
+                {snoozeFormOpen ? (
+                  <div>
+                    <p className="text-sm font-bold text-slate-800 mb-3">Snooze this lead</p>
+
+                    <div className="flex items-center gap-2 mb-3">
+                      <label className="text-xs text-slate-500 shrink-0">For</label>
+                      <select
+                        value={snoozeMonths}
+                        onChange={(e) => setSnoozeMonths(e.target.value)}
+                        className="h-9 rounded-lg bg-slate-50 border border-slate-200 px-2 text-sm outline-none"
+                      >
+                        <option value="1">1 month</option>
+                        <option value="3">3 months</option>
+                        <option value="6">6 months</option>
+                      </select>
+                    </div>
+
+                    <textarea
+                      value={snoozeReason}
+                      onChange={(e) => setSnoozeReason(e.target.value)}
+                      placeholder="Reason (required) — e.g. Client asked to be contacted after 3 months"
+                      rows={2}
+                      className="w-full rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-sm outline-none resize-none"
+                    />
+
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        disabled={snoozing}
+                        onClick={submitSnooze}
+                        className="flex-1 h-10 rounded-xl text-sm font-semibold bg-slate-800 text-white disabled:opacity-60"
+                      >
+                        {snoozing ? "Snoozing..." : "Confirm Snooze"}
+                      </button>
+                      <button
+                        disabled={snoozing}
+                        onClick={() => {
+                          setSnoozeFormOpen(false);
+                          setSnoozeReason("");
+                        }}
+                        className="flex-1 h-10 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 disabled:opacity-60"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setSnoozeFormOpen(true)}
+                    className="w-full flex items-center justify-center gap-2 h-10 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200"
+                  >
+                    😴 Snooze this lead
+                  </button>
+                )}
+              </div>
+            )
           )}
 
           {isTerminal ? (

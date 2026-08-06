@@ -10,6 +10,9 @@ export type SLAStatus =
   | "RECYCLE_READY"
   | "DATA_MAX_ATTEMPTS_REACHED"
   | "JUNK_ELIGIBLE"
+  | "PAUSED"
+  | "FOLLOWUP_INACTIVITY_WARNING"
+  | "FOLLOWUP_INACTIVITY_RECYCLE_READY"
   | "NOT_APPLICABLE";
 
 // Cooldown windows from V2_MASTER_BLUEPRINT.md Section 4.4.
@@ -29,6 +32,15 @@ export const MAX_NOT_INTERESTED = 2;
 // the lead still unreached is what triggers it.
 export const MAX_DATA_ATTEMPTS = 4;
 
+// Follow-up-Stale-Recycling: once a lead has left the LEADS board
+// column (Follow-up/Visit), first contact has already happened and
+// the employee has manually moved it forward — the fixed-clock SLA/
+// cooldown machinery below stops meaning anything for it (see the
+// board_stage branch). Genuine neglect from that point on is measured
+// by actual inactivity (last_activity_at) instead of a timer.
+export const FOLLOWUP_INACTIVITY_WARNING_DAYS = 3;
+export const FOLLOWUP_INACTIVITY_RECYCLE_DAYS = 6;
+
 interface LeadForSLA {
   status: string;
   sla_deadline: string | null;
@@ -38,6 +50,14 @@ interface LeadForSLA {
   // always has, so this is fully backward-compatible.
   lead_type?: string;
   call_count?: number;
+  // Follow-up-Stale-Recycling additions — all optional/omitted
+  // behaves exactly like before (board_stage absent = treated as
+  // "LEADS", paused_until absent = never paused), so every
+  // pre-existing caller stays correct without passing these.
+  board_stage?: string | null;
+  paused_until?: string | null;
+  last_activity_at?: string | null;
+  pause_reason?: string | null;
 }
 
 export function calculateSLAStatus(
@@ -54,6 +74,57 @@ export function calculateSLAStatus(
 
   if (lead.recycle_count >= MAX_RECYCLES || notInterestedCount >= MAX_NOT_INTERESTED) {
     return "JUNK_ELIGIBLE";
+  }
+
+  // Pending Coordinator verification of a just-marked visit — stays
+  // PAUSED for as long as this reason holds, EVEN PAST its 3-day
+  // paused_until (that date only drives the "nudge the Coordinator"
+  // notification in recycle-stale-leads, not this gate). Ending this
+  // state is entirely on Admin/Sales Coordinator verifying or denying
+  // it — there's no time-based auto-resolution, since the employee
+  // has nothing left to do here and shouldn't be nudged as if they do.
+  if (lead.pause_reason === "VISIT_PENDING_VERIFICATION") {
+    return "PAUSED";
+  }
+
+  // Client-hold (Snooze) or post-visit company-policy lock
+  // (VISIT_LOCK) — an absolute override, checked before anything
+  // status/board_stage-based below. A planned pause is not neglect;
+  // nothing else in this function ever fires while it's active,
+  // regardless of what board_stage or status says.
+  if (lead.paused_until && now < new Date(lead.paused_until)) {
+    return "PAUSED";
+  }
+
+  // Once a lead has left the LEADS column, the old fixed-clock SLA/
+  // cooldown logic below (keyed on `status`) no longer applies to it
+  // — it stays here, keyed on real activity, for as long as it
+  // remains in Follow-up/Visit. (BOOKING is unreachable here — a
+  // Booked lead is status=CONVERTED, already returned above.)
+  if (lead.board_stage && lead.board_stage !== "LEADS") {
+
+    const lastActivity = lead.last_activity_at ? new Date(lead.last_activity_at) : null;
+
+    if (!lastActivity) {
+      // Shouldn't happen — last_activity_at defaults to now() at
+      // lead_history insert time and is bumped by every activity-
+      // producing action from then on. Fail safe by not recycling on
+      // missing data rather than guessing.
+      return "WITHIN_SLA";
+    }
+
+    const daysSinceActivity = (now.getTime() - lastActivity.getTime()) / (1000 * 60 * 60 * 24);
+
+    if (daysSinceActivity >= FOLLOWUP_INACTIVITY_RECYCLE_DAYS) {
+      return "FOLLOWUP_INACTIVITY_RECYCLE_READY";
+    }
+
+    if (daysSinceActivity >= FOLLOWUP_INACTIVITY_WARNING_DAYS) {
+      return "FOLLOWUP_INACTIVITY_WARNING";
+    }
+
+    return "WITHIN_SLA";
+
   }
 
   if (lead.status === "CONNECTED") {

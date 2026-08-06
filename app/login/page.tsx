@@ -43,6 +43,8 @@ export default function LoginPage() {
 
     if (employee?.role === "admin") {
       router.replace("/admin");
+    } else if (employee?.role === "sales_coordinator") {
+      router.replace("/coordinator");
     } else {
       router.replace("/");
     }
@@ -79,6 +81,11 @@ export default function LoginPage() {
         toast.success("Welcome back, Admin!");
         setTimeout(() => {
           router.replace("/admin");
+        }, 600);
+      } else if (employee?.role === "sales_coordinator") {
+        toast.success("Welcome back!");
+        setTimeout(() => {
+          router.replace("/coordinator");
         }, 600);
       } else {
         toast.success("Login Successful!");

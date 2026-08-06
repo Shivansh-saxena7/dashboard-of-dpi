@@ -2,7 +2,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
-import { calculateSLAStatus } from "../../../lib/calculateSLAStatus.ts";
+import { calculateSLAStatus, FOLLOWUP_INACTIVITY_WARNING_DAYS } from "../../../lib/calculateSLAStatus.ts";
 import { calculateLeadAssignment } from "../../../lib/calculateLeadAssignment.ts";
 
 // Scheduled sweep (pg_cron, every 15 min — modeled on
@@ -193,6 +193,18 @@ serve(async () => {
       .eq("role", "admin")
       .eq("is_active", true);
 
+    // Separate from activeAdmins on purpose — this is the
+    // Follow-up-Stale-Recycling oversight roster (Admin + Sales
+    // Coordinator both need to see a stuck-in-verification visit),
+    // not the Project-Rule-stale-alert target above. Keeping them
+    // apart means extending this one never silently changes who gets
+    // the unrelated Project Rule notification.
+    const { data: oversightStaff } = await supabase
+      .from("employees")
+      .select("id, name")
+      .in("role", ["admin", "sales_coordinator"])
+      .eq("is_active", true);
+
     const { data: leads, error: leadsError } = await supabase
       .from("leads")
       .select(
@@ -204,13 +216,19 @@ serve(async () => {
         recycle_count,
         current_owner_id,
         lead_type,
+        board_stage,
         lead_history!inner (
           id,
           outcome_at,
           is_active,
           sla_warning_sent_at,
           assigned_by_type,
-          call_count
+          call_count,
+          last_activity_at,
+          paused_until,
+          pause_reason,
+          pause_expiry_warning_sent_at,
+          pause_expired_notified_at
         )
       `
       )
@@ -239,6 +257,131 @@ serve(async () => {
         continue;
       }
 
+      // Pause-expiry notifications (Snooze / Visit-Lock /
+      // Visit-Pending-Verification) — runs independently of the
+      // slaStatus branching below. A lead that's still PAUSED
+      // (paused_until in the future) still needs its heads-up here,
+      // and a lead whose pause just lapsed needs its expired-notice
+      // regardless of what the rest of this sweep decides to do with
+      // it.
+      if (activeHistory.paused_until) {
+
+        const pausedUntilDate = new Date(activeHistory.paused_until);
+        const isVisitLock = activeHistory.pause_reason === "VISIT_LOCK";
+        const isPendingVerification = activeHistory.pause_reason === "VISIT_PENDING_VERIFICATION";
+        const reasonLabel = isVisitLock ? "Visit-lock" : "Snooze";
+        const msUntilExpiry = pausedUntilDate.getTime() - Date.now();
+        const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
+
+        // The "3 days before" heads-up doesn't make sense for
+        // Pending-Verification — its whole window IS 3 days, so
+        // "3 days before expiry" is effectively "right now, at
+        // creation." Only the SNOOZE/VISIT_LOCK reasons get a
+        // heads-up; Pending-Verification only ever fires its
+        // "expired, go act on it" notice below.
+        if (
+          !isPendingVerification &&
+          msUntilExpiry > 0 &&
+          msUntilExpiry <= threeDaysMs &&
+          !activeHistory.pause_expiry_warning_sent_at
+        ) {
+
+          const { data: employee } = await supabase
+            .from("employees")
+            .select("name")
+            .eq("id", lead.current_owner_id)
+            .single();
+
+          await supabase.from("notification").insert({
+            employee_id: lead.current_owner_id,
+            employee_name: employee?.name || "",
+            title: `${reasonLabel} ending soon`,
+            message: isVisitLock
+              ? `Your Visit-lock on a lead is ending soon (${pausedUntilDate.toDateString()}) — schedule a revisit before then or it may be reassigned to another team member.`
+              : `Your Snooze on a lead is ending soon (${pausedUntilDate.toDateString()}) — follow up before then.`,
+            type: "PAUSE_EXPIRY_WARNING",
+            is_read: false
+          });
+
+          await supabase
+            .from("lead_history")
+            .update({ pause_expiry_warning_sent_at: new Date().toISOString() })
+            .eq("id", activeHistory.id);
+
+          diagnostics.push({ leadId: lead.id, action: "PAUSE_EXPIRY_WARNED", pauseReason: activeHistory.pause_reason });
+
+        } else if (msUntilExpiry <= 0 && !activeHistory.pause_expired_notified_at) {
+
+          if (isPendingVerification) {
+
+            // The employee already did their part (marked the visit)
+            // — nudging them again would be the wrong signal. The
+            // actionable party here is Admin/Sales Coordinator, who
+            // haven't verified (or denied) it in 3 days.
+            const { data: owner } = await supabase
+              .from("employees")
+              .select("name")
+              .eq("id", lead.current_owner_id)
+              .single();
+
+            for (const staff of oversightStaff || []) {
+              await supabase.from("notification").insert({
+                employee_id: staff.id,
+                employee_name: staff.name || "",
+                title: "Visit pending verification",
+                message: `A visit for "${lead.project || lead.id}" by ${owner?.name || "an employee"} has been pending verification for 3+ days — please verify or deny it.`,
+                type: "VISIT_VERIFICATION_OVERDUE",
+                is_read: false
+              });
+            }
+
+          } else {
+
+            const { data: employee } = await supabase
+              .from("employees")
+              .select("name")
+              .eq("id", lead.current_owner_id)
+              .single();
+
+            await supabase.from("notification").insert({
+              employee_id: lead.current_owner_id,
+              employee_name: employee?.name || "",
+              title: `${reasonLabel} ended`,
+              message: isVisitLock
+                ? "Your Visit-lock on a lead has ended — follow up today or it may be reassigned to another team member."
+                : "Your Snooze on a lead has ended — follow up today.",
+              type: "PAUSE_EXPIRED",
+              is_read: false
+            });
+
+          }
+
+          // last_activity_at reset right here, at the exact moment a
+          // pause's expiry is first noticed — without this, a
+          // VISIT_LOCK/SNOOZE that ran its full duration with zero
+          // further employee activity (the normal case — that's the
+          // whole point of a pause) would carry a last_activity_at
+          // from whenever the pause STARTED, weeks/months stale by
+          // the time it ends. calculateSLAStatus would then see that
+          // huge gap the instant PAUSED stops applying and jump
+          // straight to FOLLOWUP_INACTIVITY_RECYCLE_READY, skipping
+          // the 3-day warning phase entirely. Resetting here gives
+          // the inactivity clock a fresh, fair start from the actual
+          // expiry moment instead.
+          await supabase
+            .from("lead_history")
+            .update({
+              pause_expired_notified_at: new Date().toISOString(),
+              last_activity_at: new Date().toISOString()
+            })
+            .eq("id", activeHistory.id);
+
+          diagnostics.push({ leadId: lead.id, action: "PAUSE_EXPIRED_NOTIFIED", pauseReason: activeHistory.pause_reason });
+
+        }
+
+      }
+
       const { count: notInterestedCount } = await supabase
         .from("lead_history")
         .select("*", { count: "exact", head: true })
@@ -251,7 +394,11 @@ serve(async () => {
           sla_deadline: lead.sla_deadline,
           recycle_count: lead.recycle_count,
           lead_type: lead.lead_type,
-          call_count: activeHistory.call_count
+          call_count: activeHistory.call_count,
+          board_stage: lead.board_stage,
+          paused_until: activeHistory.paused_until,
+          last_activity_at: activeHistory.last_activity_at,
+          pause_reason: activeHistory.pause_reason
         },
         activeHistory.outcome_at,
         notInterestedCount || 0
@@ -287,10 +434,66 @@ serve(async () => {
 
       }
 
+      if (slaStatus === "PAUSED") {
+        diagnostics.push({
+          leadId: lead.id,
+          action: "SKIPPED",
+          reason: "paused",
+          pauseReason: activeHistory.pause_reason,
+          pausedUntil: activeHistory.paused_until
+        });
+        continue;
+      }
+
+      // Follow-up-Stale-Recycling day-3 mark — a flat notify-only
+      // step, deliberately NOT routed through the project-rule/
+      // round-robin branches below (those only matter for the actual
+      // day-6 RECYCLE decision). Applies uniformly regardless of how
+      // this lead was assigned. Reuses sla_warning_sent_at — safe
+      // because a lead only ever reaches exactly one of this branch,
+      // the single-fixed-Project-Rule branch, or neither, per sweep
+      // (mutually exclusive via `continue`), so there's no double
+      // meaning collision on the same lead_history row.
+      if (slaStatus === "FOLLOWUP_INACTIVITY_WARNING") {
+
+        if (!activeHistory.sla_warning_sent_at) {
+
+          const { data: employee } = await supabase
+            .from("employees")
+            .select("name")
+            .eq("id", lead.current_owner_id)
+            .single();
+
+          await supabase.from("notification").insert({
+            employee_id: lead.current_owner_id,
+            employee_name: employee?.name || "",
+            title: "Follow-up needs attention",
+            message: `A lead in your Follow-up/Visit list hasn't had any activity in ${FOLLOWUP_INACTIVITY_WARNING_DAYS} days — follow up soon or it may be reassigned to another team member.`,
+            type: "SLA_WARNING",
+            is_read: false
+          });
+
+          await supabase
+            .from("lead_history")
+            .update({ sla_warning_sent_at: new Date().toISOString() })
+            .eq("id", activeHistory.id);
+
+          warnedCount++;
+          diagnostics.push({ leadId: lead.id, action: "WARNED", slaStatus, scope: "FOLLOWUP_INACTIVITY" });
+
+        } else {
+          diagnostics.push({ leadId: lead.id, action: "SKIPPED", reason: "follow-up inactivity, already warned" });
+        }
+
+        continue;
+
+      }
+
       if (
         slaStatus !== "SLA_BREACHED" &&
         slaStatus !== "RECYCLE_READY" &&
-        slaStatus !== "DATA_MAX_ATTEMPTS_REACHED"
+        slaStatus !== "DATA_MAX_ATTEMPTS_REACHED" &&
+        slaStatus !== "FOLLOWUP_INACTIVITY_RECYCLE_READY"
       ) {
         diagnostics.push({ leadId: lead.id, action: "SKIPPED", reason: `slaStatus=${slaStatus}` });
         continue;
@@ -303,6 +506,14 @@ serve(async () => {
       // start with no sla_deadline too, same as their very first
       // assignment did.
       const isDataLead = lead.lead_type === "DATA";
+
+      // Follow-up-Stale-Recycling: board_stage doesn't reset on a
+      // recycle, so a lead reassigned here from FOLLOW_UP/VISIT stays
+      // in that same column for its new owner too — the fixed-clock
+      // sla_deadline is meaningless for it going forward (this
+      // lead's calculateSLAStatus checks board_stage first, before
+      // ever looking at sla_deadline), same reasoning as isDataLead.
+      const isBeyondLeadsStage = Boolean(lead.board_stage) && lead.board_stage !== "LEADS";
 
       const normalizedProject = String(lead.project || "").trim().toLowerCase();
 
@@ -424,7 +635,7 @@ serve(async () => {
         const nextIndex = lastIndex === -1 ? 0 : (lastIndex + 1) % groupPoolEmployees.length;
         const nextEmployeeId = groupPoolEmployees[nextIndex];
 
-        const newSlaDeadline = isDataLead
+        const newSlaDeadline = isDataLead || isBeyondLeadsStage
           ? null
           : new Date(Date.now() + settings.sla_first_contact_minutes * 60 * 1000).toISOString();
 

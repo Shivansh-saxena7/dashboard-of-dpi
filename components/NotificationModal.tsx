@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
+import { useState } from "react";
 import {
   Bell,
   X,
@@ -8,6 +9,7 @@ import {
   Sparkles,
   Clock3,
 } from "lucide-react";
+import { classifyNotificationSystem, notificationTypeLabel, NotificationSystem } from "@/lib/notificationSystem";
 
 type Notification = {
   id: string | number;
@@ -15,6 +17,7 @@ type Notification = {
   message: string;
   created_at: string;
   is_read?: boolean;
+  type?: string;
 };
 
 type Props = {
@@ -34,10 +37,25 @@ function formatDate(date: string) {
   });
 }
 
+// Two systems' notifications used to render in one mixed, hardcoded-
+// "POST ASSIGNED"-labeled list — confusing (V1 Posts vs V2 Lead
+// Engine, no way to tell them apart) and actively wrong (every card
+// said "POST ASSIGNED" regardless of what it actually was). Split
+// into tabs instead of just fixing the label in place, since Posts
+// notifications are high-volume and would otherwise still bury Leads
+// ones in the same scroll. Defaults to the Leads tab — the actively-
+// evolving system this work is on.
 export default function NotificationModal({
   notifications,
   onClose,
 }: Props) {
+
+  const [activeTab, setActiveTab] = useState<NotificationSystem>("LEADS");
+
+  const leadsNotifications = notifications.filter((n) => classifyNotificationSystem(n.type) === "LEADS");
+  const postsNotifications = notifications.filter((n) => classifyNotificationSystem(n.type) === "POSTS");
+  const visibleNotifications = activeTab === "LEADS" ? leadsNotifications : postsNotifications;
+
   return (
     <AnimatePresence>
 
@@ -214,6 +232,37 @@ export default function NotificationModal({
 
           </div>
 
+          {/* SYSTEM TABS */}
+
+          <div className="sticky top-[86px] z-10 px-5 sm:px-7 pt-4 bg-white/90 backdrop-blur-xl border-b border-gray-200 flex gap-2">
+            <button
+              onClick={() => setActiveTab("LEADS")}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-t-xl text-sm font-bold transition ${
+                activeTab === "LEADS"
+                  ? "bg-blue-50 text-blue-700 border-b-2 border-blue-600"
+                  : "text-gray-400 hover:text-gray-600"
+              }`}
+            >
+              Leads
+              <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === "LEADS" ? "bg-blue-100" : "bg-gray-100"}`}>
+                {leadsNotifications.length}
+              </span>
+            </button>
+            <button
+              onClick={() => setActiveTab("POSTS")}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-t-xl text-sm font-bold transition ${
+                activeTab === "POSTS"
+                  ? "bg-blue-50 text-blue-700 border-b-2 border-blue-600"
+                  : "text-gray-400 hover:text-gray-600"
+              }`}
+            >
+              Posts
+              <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === "POSTS" ? "bg-blue-100" : "bg-gray-100"}`}>
+                {postsNotifications.length}
+              </span>
+            </button>
+          </div>
+
           {/* BODY */}
 
           <div
@@ -228,7 +277,7 @@ export default function NotificationModal({
             py-5
             "
           >
-            {notifications.length === 0 ? (
+            {visibleNotifications.length === 0 ? (
 
               <div className="h-full flex flex-col items-center justify-center text-center px-6">
 
@@ -263,9 +312,9 @@ export default function NotificationModal({
                 </h3>
 
                 <p className="mt-3 text-gray-500 max-w-sm leading-7">
-                  No notifications available.
-                  Whenever admin assigns a new post,
-                  it will instantly appear here.
+                  {activeTab === "LEADS"
+                    ? "No Lead Engine notifications yet — assignments, reminders, and alerts will appear here."
+                    : "No Post notifications yet — whenever admin assigns a new post, it will instantly appear here."}
                 </p>
 
               </div>
@@ -274,7 +323,7 @@ export default function NotificationModal({
 
               <div className="space-y-4">
 
-                {notifications.map((item, index) => (
+                {visibleNotifications.map((item, index) => (
 
                   <motion.div
                     key={item.id}
@@ -435,7 +484,7 @@ export default function NotificationModal({
 
                         <Bell size={14} />
 
-                        POST ASSIGNED
+                        {notificationTypeLabel(item.type).toUpperCase()}
 
                       </div>
 

@@ -87,6 +87,30 @@ const toggleRREligible = async (
   }
 
 };
+// Sales Coordinator role toggle (V2 Follow-up-Stale-Recycling module).
+// Deliberately only offered for employees currently "employee" or
+// "sales_coordinator" — never shown for "admin"/"team_leader" rows,
+// so this simple toggle can never be used to accidentally strip an
+// Admin's access or a Team Leader's role (that one has its own
+// dedicated, more careful flow on the Teams page already).
+const toggleSalesCoordinator = async (
+  id: string,
+  currentRole: string
+) => {
+
+  const newRole = currentRole === "sales_coordinator" ? "employee" : "sales_coordinator";
+
+  const { error } = await supabase
+    .from("employees")
+    .update({ role: newRole })
+    .eq("id", id);
+
+  if (!error) {
+    fetchEmployees();
+  }
+
+};
+
 const deleteEmployee=async()=>{
 
 const res = await fetch("/api/delete-employee", {
@@ -698,7 +722,21 @@ employee.rr_eligible
 
 </button>
 
-
+{(employee.role === "employee" || employee.role === "sales_coordinator") && (
+  <button
+    onClick={async (e) => {
+      e.stopPropagation();
+      await toggleSalesCoordinator(employee.id, employee.role);
+    }}
+    className={`px-4 py-2 rounded-xl text-xs font-semibold transition ${
+      employee.role === "sales_coordinator"
+        ? "bg-blue-100 text-blue-700 hover:bg-blue-200"
+        : "bg-cyan-50 text-cyan-700 hover:bg-cyan-100"
+    }`}
+  >
+    {employee.role === "sales_coordinator" ? "Remove Coordinator role" : "Make Sales Coordinator"}
+  </button>
+)}
 
 <button
 

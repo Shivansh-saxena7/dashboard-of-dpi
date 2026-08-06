@@ -81,6 +81,14 @@ if (data.role === "admin") {
 
 }
 
+if (data.role === "sales_coordinator") {
+
+  router.replace("/coordinator");
+
+  return;
+
+}
+
 setEmployee(data);
 
 setSelectedEmployee(data.id);

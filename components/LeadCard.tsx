@@ -19,6 +19,7 @@ interface LeadCardLead {
   source: string | null;
   status: LeadStatus;
   priority: LeadPriority;
+  board_stage?: string | null;
   sla_deadline: string | null;
   recycle_count: number;
   call_count: number;
@@ -27,6 +28,9 @@ interface LeadCardLead {
   assigned_by_type: AssignedBySource["assigned_by_type"] | null;
   assigned_by: { name: string } | null;
   reassign_note: string | null;
+  last_activity_at?: string | null;
+  paused_until?: string | null;
+  pause_reason?: string | null;
 }
 
 interface LeadCardProps {
@@ -67,7 +71,11 @@ export default function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps
     {
       status: lead.status,
       sla_deadline: lead.sla_deadline,
-      recycle_count: lead.recycle_count
+      recycle_count: lead.recycle_count,
+      board_stage: lead.board_stage,
+      paused_until: lead.paused_until,
+      last_activity_at: lead.last_activity_at,
+      pause_reason: lead.pause_reason
     },
     lead.outcome_at,
     // NOT_INTERESTED repeat-count isn't tracked at list-view
@@ -93,6 +101,18 @@ export default function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps
     slaBadge = { label: "Cooling down", className: "bg-slate-100 text-slate-500" };
   } else if (slaStatus === "RECYCLE_READY" || slaStatus === "JUNK_ELIGIBLE") {
     slaBadge = { label: "Awaiting follow-up", className: "bg-amber-50 text-amber-600" };
+  } else if (slaStatus === "PAUSED" && lead.paused_until) {
+    const untilLabel = new Date(lead.paused_until).toLocaleDateString([], { month: "short", day: "numeric" });
+    slaBadge =
+      lead.pause_reason === "VISIT_LOCK"
+        ? { label: `🔒 Locked until ${untilLabel}`, className: "bg-emerald-50 text-emerald-700" }
+        : lead.pause_reason === "VISIT_PENDING_VERIFICATION"
+        ? { label: "⏳ Pending verification", className: "bg-amber-50 text-amber-700" }
+        : { label: `😴 Snoozed until ${untilLabel}`, className: "bg-indigo-50 text-indigo-700" };
+  } else if (slaStatus === "FOLLOWUP_INACTIVITY_WARNING") {
+    slaBadge = { label: "Needs follow-up", className: "bg-amber-50 text-amber-600" };
+  } else if (slaStatus === "FOLLOWUP_INACTIVITY_RECYCLE_READY") {
+    slaBadge = { label: "Going stale", className: "bg-red-100 text-red-700", pulse: true };
   }
 
   const initial = lead.name?.charAt(0)?.toUpperCase() || "?";

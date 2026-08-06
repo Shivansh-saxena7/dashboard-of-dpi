@@ -7,6 +7,7 @@ import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
+import { FOLLOWUP_INACTIVITY_WARNING_DAYS, FOLLOWUP_INACTIVITY_RECYCLE_DAYS } from "@/lib/calculateSLAStatus";
 import AdminLeadHistoryModal from "./AdminLeadHistoryModal";
 
 interface AdminLeadCardLead {
@@ -25,6 +26,9 @@ interface AdminLeadCardLead {
   pendingTeamName: string | null;
   leadType: string;
   callCount: number;
+  pausedUntil: string | null;
+  pauseReason: string | null;
+  lastActivityAt: string | null;
 }
 
 interface AdminLeadCardProps {
@@ -32,6 +36,14 @@ interface AdminLeadCardProps {
   teams: { id: string; name: string }[];
   onReserveTeam: (leadId: string, teamId: string | null) => void;
   index?: number;
+  // Sales Coordinator reuses this exact card for full-visibility
+  // reporting (Golden Rule — one card, not a forked copy), but per
+  // the approved scope ("Aankhen aur Reports," never "Haath"),
+  // Coordinator must never see anything that LOOKS actionable, not
+  // just be functionally blocked from it — the team-reserve <select>
+  // below is a real decision-making control, so this replaces it with
+  // plain read-only text instead of merely no-op'ing onReserveTeam.
+  readOnly?: boolean;
 }
 
 // Read-only — Admin never logs updates or moves a lead through the
@@ -70,7 +82,7 @@ interface AdminLeadCardProps {
 // drawer resolve against the viewport, not this card's transformed
 // (animated) box — that was the cause of the drawer sometimes
 // rendering as if it were a small centered card.
-export default function AdminLeadCard({ lead, teams, onReserveTeam, index = 0 }: AdminLeadCardProps) {
+export default function AdminLeadCard({ lead, teams, onReserveTeam, index = 0, readOnly = false }: AdminLeadCardProps) {
 
   const [historyOpen, setHistoryOpen] = useState(false);
 
@@ -79,6 +91,28 @@ export default function AdminLeadCard({ lead, teams, onReserveTeam, index = 0 }:
   const boardStageDisplay = BOARD_STAGES.find((b) => b.stage === lead.boardStage);
 
   const initial = lead.name?.charAt(0)?.toUpperCase() || "?";
+
+  // Follow-up-Stale-Recycling visibility — Admin-only badge, purely
+  // informational (this card never writes anything). Mirrors the
+  // employee-side LeadCard badge logic but computed inline here
+  // rather than via the full calculateSLAStatus (this card doesn't
+  // carry sla_deadline/outcome_at, which that function also needs for
+  // its pre-Follow-up branches — not relevant to what this badge is
+  // for). Reuses the same threshold constants so "stale" means
+  // exactly the same thing here as it does to the recycling engine.
+  // Pending-verification stays "paused" even past its own
+  // pausedUntil — same reasoning as calculateSLAStatus's dedicated
+  // check: it only ends when Admin/Sales Coordinator verifies or
+  // denies it, never just by the 3-day date passing.
+  const isPaused =
+    lead.pauseReason === "VISIT_PENDING_VERIFICATION" ||
+    Boolean(lead.pausedUntil && new Date(lead.pausedUntil) > new Date());
+  const daysSinceActivity = lead.lastActivityAt
+    ? (Date.now() - new Date(lead.lastActivityAt).getTime()) / (1000 * 60 * 60 * 24)
+    : null;
+  const isBeyondLeadsStage = lead.leadType !== "DATA" && lead.boardStage !== "LEADS";
+  const isStale = !isPaused && isBeyondLeadsStage && daysSinceActivity !== null && daysSinceActivity >= FOLLOWUP_INACTIVITY_WARNING_DAYS;
+  const isGoingStale = isStale && daysSinceActivity !== null && daysSinceActivity >= FOLLOWUP_INACTIVITY_RECYCLE_DAYS;
 
   return (
     <motion.div
@@ -147,6 +181,37 @@ export default function AdminLeadCard({ lead, teams, onReserveTeam, index = 0 }:
           </span>
         )}
 
+        {isPaused && (
+          <span
+            className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
+              lead.pauseReason === "VISIT_LOCK"
+                ? "bg-emerald-50 text-emerald-700"
+                : lead.pauseReason === "VISIT_PENDING_VERIFICATION"
+                ? "bg-amber-50 text-amber-700"
+                : "bg-indigo-50 text-indigo-700"
+            }`}
+          >
+            {lead.pauseReason === "VISIT_LOCK"
+              ? "🔒 Locked"
+              : lead.pauseReason === "VISIT_PENDING_VERIFICATION"
+              ? "⏳ Pending verification"
+              : "😴 Snoozed"}
+            {lead.pauseReason !== "VISIT_PENDING_VERIFICATION" && (
+              <> until {new Date(lead.pausedUntil!).toLocaleDateString([], { month: "short", day: "numeric" })}</>
+            )}
+          </span>
+        )}
+
+        {isStale && (
+          <span
+            className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
+              isGoingStale ? "bg-red-100 text-red-700 animate-pulse" : "bg-amber-50 text-amber-600"
+            }`}
+          >
+            {isGoingStale ? "⚠️ Going stale" : "⏳ Needs follow-up"}
+          </span>
+        )}
+
         {lead.recycleCount > 0 && (
           <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-orange-50 text-orange-600">
             Recycled {lead.recycleCount}x
@@ -171,16 +236,18 @@ export default function AdminLeadCard({ lead, teams, onReserveTeam, index = 0 }:
                 </span>
               )}
 
-              <select
-                value={lead.pendingTeamId || ""}
-                onChange={(e) => onReserveTeam(lead.id, e.target.value || null)}
-                className="block h-7 rounded-md bg-slate-50 border border-slate-200 px-1.5 text-[10px] font-semibold text-slate-600 outline-none"
-              >
-                <option value="">No team reserved</option>
-                {teams.map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))}
-              </select>
+              {!readOnly && (
+                <select
+                  value={lead.pendingTeamId || ""}
+                  onChange={(e) => onReserveTeam(lead.id, e.target.value || null)}
+                  className="block h-7 rounded-md bg-slate-50 border border-slate-200 px-1.5 text-[10px] font-semibold text-slate-600 outline-none"
+                >
+                  <option value="">No team reserved</option>
+                  {teams.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              )}
             </div>
           )}
         </div>

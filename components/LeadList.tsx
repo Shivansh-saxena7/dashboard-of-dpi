@@ -115,6 +115,58 @@ export default function LeadList({ employeeId }: LeadListProps) {
     loadSlaBreachHistory();
   }, [employeeId]);
 
+  // Realtime — same proven pattern already used by Header.tsx
+  // (notification bell) and SessionGuard.tsx (live deactivation),
+  // extended here so this screen itself live-updates too: a new
+  // assignment, a Coordinator's Verify/Deny, a recycle-away, a Snooze
+  // lapsing — none of these should need a manual page refresh to
+  // show up. Two tables are watched (not just `leads`) because a
+  // Coordinator's Verify/Deny writes to `lead_history` (paused_until,
+  // pause_reason, pause_verified_by) without necessarily touching
+  // `leads` beyond board_stage — either table changing means this
+  // employee's view is stale. A full refetch (not a partial-payload
+  // patch) is deliberate: the realtime payload is the raw changed
+  // row only, missing the joins (assigned_by name, etc.) the list
+  // actually renders — same reasoning recycle-stale-leads and every
+  // other consumer of this data already has to re-derive it via a
+  // real query, not reconstruct it from a bare row.
+  useEffect(() => {
+    if (!employeeId) return;
+
+    let cancelled = false;
+
+    const existing = supabase.getChannels().find((ch) => ch.topic === `realtime:lead-list-${employeeId}`);
+    if (existing) {
+      supabase.removeChannel(existing);
+    }
+
+    const channel = supabase
+      .channel(`lead-list-${employeeId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "leads", filter: `current_owner_id=eq.${employeeId}` },
+        () => {
+          if (cancelled) return;
+          loadLeads();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "lead_history", filter: `employee_id=eq.${employeeId}` },
+        () => {
+          if (cancelled) return;
+          loadLeads();
+          loadSlaBreachHistory();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, [employeeId]);
+
   // Single shared clock for all cards' SLA countdowns, rather than
   // each LeadCard running its own interval.
   useEffect(() => {
@@ -149,7 +201,13 @@ export default function LeadList({ employeeId }: LeadListProps) {
           first_whatsapp_at,
           assigned_by_type,
           reassign_note,
-          assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)
+          last_activity_at,
+          paused_until,
+          pause_reason,
+          pause_note,
+          pause_verified_at,
+          assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name),
+          pause_verified_by:employees!lead_history_pause_verified_by_fkey(name)
         )
       `
       )
@@ -217,6 +275,42 @@ export default function LeadList({ employeeId }: LeadListProps) {
             }
           : lead
       )
+    );
+  }
+
+  // Optimistic local patch after a successful snooze_lead_atomic /
+  // cancel_snooze_atomic call — same idea as handleLeadUpdated/
+  // handleBoardStageChanged, no full refetch needed since the caller
+  // already knows exactly what changed.
+  function handlePauseChanged(
+    leadId: string,
+    pause: { pausedUntil: string | null; pauseReason: string | null; pauseNote: string | null }
+  ) {
+    setLeads((prev) =>
+      prev.map((lead) => {
+        if (lead.id !== leadId) return lead;
+
+        const currentHistory = lead.lead_history[0] ?? {};
+
+        return {
+          ...lead,
+          lead_history: [
+            {
+              ...currentHistory,
+              paused_until: pause.pausedUntil,
+              pause_reason: pause.pauseReason,
+              pause_note: pause.pauseNote,
+              // Both callers (snooze_lead_atomic / cancel_snooze_atomic)
+              // always result in a state with no verify-stamp — a fresh
+              // Snooze clears it server-side, cancelling clears the
+              // pause entirely. Kept in sync here so a stale VISIT_LOCK
+              // verifier name never lingers into a new pause state.
+              pause_verified_by: null,
+              pause_verified_at: null
+            }
+          ]
+        };
+      })
     );
   }
 
@@ -499,6 +593,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
                 source: lead.source,
                 status: lead.status,
                 priority: lead.priority,
+                board_stage: lead.board_stage,
                 sla_deadline: lead.sla_deadline,
                 recycle_count: lead.recycle_count,
                 call_count: lead.lead_history[0]?.call_count ?? 0,
@@ -506,7 +601,10 @@ export default function LeadList({ employeeId }: LeadListProps) {
                 assigned_at: lead.lead_history[0]?.assigned_at ?? null,
                 assigned_by_type: lead.lead_history[0]?.assigned_by_type ?? null,
                 assigned_by: lead.lead_history[0]?.assigned_by ?? null,
-                reassign_note: lead.lead_history[0]?.reassign_note ?? null
+                reassign_note: lead.lead_history[0]?.reassign_note ?? null,
+                last_activity_at: lead.lead_history[0]?.last_activity_at ?? null,
+                paused_until: lead.lead_history[0]?.paused_until ?? null,
+                pause_reason: lead.lead_history[0]?.pause_reason ?? null
               }}
             />
           ))}
@@ -526,11 +624,17 @@ export default function LeadList({ employeeId }: LeadListProps) {
             boardStage: (selectedLead.board_stage as BoardStage) || "LEADS",
             assignedByType: selectedLead.lead_history[0]?.assigned_by_type ?? null,
             assignedBy: selectedLead.lead_history[0]?.assigned_by ?? null,
-            reassignNote: selectedLead.lead_history[0]?.reassign_note ?? null
+            reassignNote: selectedLead.lead_history[0]?.reassign_note ?? null,
+            pausedUntil: selectedLead.lead_history[0]?.paused_until ?? null,
+            pauseReason: selectedLead.lead_history[0]?.pause_reason ?? null,
+            pauseNote: selectedLead.lead_history[0]?.pause_note ?? null,
+            pauseVerifiedByName: selectedLead.lead_history[0]?.pause_verified_by?.name ?? null,
+            pauseVerifiedAt: selectedLead.lead_history[0]?.pause_verified_at ?? null
           }}
           onClose={() => setSelectedLeadId(null)}
           onUpdated={(updates) => handleLeadUpdated(selectedLead.id, updates)}
           onBoardStageChanged={(stage) => handleBoardStageChanged(selectedLead.id, stage)}
+          onPauseChanged={(pause) => handlePauseChanged(selectedLead.id, pause)}
         />
       )}
     </>

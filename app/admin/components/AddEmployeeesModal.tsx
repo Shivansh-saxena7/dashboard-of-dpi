@@ -208,6 +208,10 @@ Employee
 Admin
 </option>
 
+<option value="sales_coordinator">
+Sales Coordinator
+</option>
+
 </select>
 
 
