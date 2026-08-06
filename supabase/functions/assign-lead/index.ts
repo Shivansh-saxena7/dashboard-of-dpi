@@ -120,6 +120,25 @@ serve(async (req) => {
       projectPointers[row.project] = row.last_assigned_employee_id;
     });
 
+    // "This employee should never get round-robin leads for this
+    // project" — the opposite of project_assignment_rules, only ever
+    // consulted by calculateLeadAssignment when NO include-rule
+    // matches the project.
+    const { data: projectExclusions, error: exclusionsError } = await supabase
+      .from("project_exclusion_rules")
+      .select("project, excluded_employee_id");
+
+    if (exclusionsError) {
+      return respond(
+        {
+          success: false,
+          step: "FETCH_PROJECT_EXCLUSIONS",
+          error: exclusionsError.message
+        },
+        500
+      );
+    }
+
     // Round-robin pool = active + rr_eligible employees who have
     // started today's shift AND not yet ended it (Phase 2 attendance
     // gate). Ending shift re-locks new lead assignment for the rest
@@ -196,7 +215,8 @@ serve(async (req) => {
       projectRules || [],
       eligibleEmployees || [],
       settings.round_robin_pointer_employee_id,
-      projectPointers
+      projectPointers,
+      projectExclusions || []
     );
 
     if (!result.assignedEmployeeId) {
@@ -265,6 +285,8 @@ serve(async (req) => {
     });
 
   } catch (err) {
+
+    console.error("assign-lead: unhandled error:", err.message, err.stack);
 
     return respond(
       {

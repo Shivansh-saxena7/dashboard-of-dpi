@@ -123,7 +123,9 @@ serve(async (req) => {
       inputs.settings,
       inputs.projectRules,
       inputs.eligibleEmployees,
-      inputs.projectPointers
+      inputs.projectPointers,
+      [],
+      inputs.projectExclusions
     );
 
     const mergedSummary = { ...(batchRow.distribution_summary || {}) };
@@ -148,6 +150,8 @@ serve(async (req) => {
     });
 
   } catch (err) {
+
+    console.error("retry-lead-distribution: unhandled error:", err.message, err.stack);
 
     return respond({ success: false, error: err.message }, 500);
 

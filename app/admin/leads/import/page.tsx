@@ -21,6 +21,7 @@ interface MappedRow {
   email: string | null;
   project: string | null;
   source: string | null;
+  priority: string | null;
   extra_data: Record<string, string> | null;
   isValid: boolean;
   isDuplicate: boolean;
@@ -130,12 +131,19 @@ export default function ImportLeadsPage() {
   const [newRuleEmployeeId, setNewRuleEmployeeId] = useState("");
   const [creatingRule, setCreatingRule] = useState(false);
 
+  // Read-only awareness here (no create/remove UI — that's the
+  // Project Rules page's job) — just lets Admin see, right at
+  // upload-time, who's blocked from this CSV's projects before
+  // distribution runs.
+  const [projectExclusions, setProjectExclusions] = useState<{ project: string; excluded_employee_id: string }[]>([]);
+
   useEffect(() => {
     loadSourceOptions();
     loadEmployeeNames();
     loadBatches();
     loadTeams();
     loadProjectRules();
+    loadProjectExclusions();
   }, []);
 
   async function loadTeams() {
@@ -146,6 +154,11 @@ export default function ImportLeadsPage() {
   async function loadProjectRules() {
     const { data } = await supabase.from("project_assignment_rules").select("project, assigned_employee_id");
     setProjectRules(data || []);
+  }
+
+  async function loadProjectExclusions() {
+    const { data } = await supabase.from("project_exclusion_rules").select("project, excluded_employee_id");
+    setProjectExclusions(data || []);
   }
 
   // Distinct project values from whatever column is currently mapped
@@ -451,6 +464,7 @@ export default function ImportLeadsPage() {
       let email: string | null = null;
       let project: string | null = null;
       let source: string | null = null;
+      let priority: string | null = null;
       const extra: Record<string, string> = {};
 
       Object.entries(mapping).forEach(([header, field]) => {
@@ -462,6 +476,7 @@ export default function ImportLeadsPage() {
         else if (field === "email") email = value;
         else if (field === "project") project = value;
         else if (field === "source") source = value;
+        else if (field === "priority") priority = value;
         else if (field === "lead_time") extra.original_lead_time = value;
         else if (field === "extra") extra[header] = value;
       });
@@ -470,12 +485,17 @@ export default function ImportLeadsPage() {
       // actually lets an employee call the lead. Name missing is a
       // data-quality gap, not a reason to drop the row entirely, so
       // it defaults to "Unknown" rather than blocking import.
+      // priority is sent RAW (unrecognized text and all) — the server
+      // is the sole authority on turning it into hot/warm/cold or
+      // falling back, same reasoning duplicate-detection already
+      // follows for this wizard.
       return {
         name: name || "Unknown",
         mobile,
         email,
         project,
         source,
+        priority,
         extra_data: Object.keys(extra).length > 0 ? extra : null,
         isValid: Boolean(mobile)
       };
@@ -577,6 +597,7 @@ export default function ImportLeadsPage() {
           email: r.email,
           project: r.project,
           source: r.source,
+          priority: r.priority,
           extra_data: r.extra_data
         }));
 
@@ -974,6 +995,20 @@ export default function ImportLeadsPage() {
                     )
                   );
 
+                  // Only worth showing when there's no Fixed-employee
+                  // rule — same precedence calculateLeadAssignment
+                  // itself follows (INCLUDE always wins, EXCLUDE is
+                  // never even consulted once one exists).
+                  const excludedEmployeeIds = matchedEmployeeIds.length === 0
+                    ? Array.from(
+                        new Set(
+                          projectExclusions
+                            .filter((r) => r.project.trim().toLowerCase() === project.trim().toLowerCase())
+                            .map((r) => r.excluded_employee_id)
+                        )
+                      )
+                    : [];
+
                   return (
                     <div key={project} className="text-xs">
                       <div className="flex items-center justify-between gap-2">
@@ -1012,6 +1047,11 @@ export default function ImportLeadsPage() {
                           </button>
                         )}
                       </div>
+                      {excludedEmployeeIds.length > 0 && (
+                        <p className="text-[11px] text-red-600 mt-0.5">
+                          Excluded: {excludedEmployeeIds.map((id) => employeeNames.get(id) || "Unknown").join(", ")}
+                        </p>
+                      )}
                     </div>
                   );
                 })}

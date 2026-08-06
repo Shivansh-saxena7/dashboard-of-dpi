@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Building2, Plus, X, ArrowRightLeft, Trash2, ChevronDown } from "lucide-react";
+import { Building2, Plus, X, ArrowRightLeft, Trash2, ChevronDown, Ban } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import toast from "react-hot-toast";
 import DeleteModal from "../components/DeleteModal";
@@ -15,16 +15,38 @@ interface Rule {
   assigned_employee_id: string;
 }
 
+interface ExclusionRule {
+  id: string;
+  project: string;
+  excluded_employee_id: string;
+}
+
 interface Employee {
   id: string;
   name: string;
 }
 
-// Admin-only management for project_assignment_rules — a project
-// listed here bypasses round robin entirely (lib/calculateLeadAssignment.ts
-// checks this before anything else). One project can now have MULTIPLE
-// fixed employees (Phase 7B) — new leads for it round-robin among just
-// that group, scoped separately via project_rule_pointers.
+// Admin-only management for project_assignment_rules (INCLUDE — a
+// project listed here bypasses round robin entirely,
+// lib/calculateLeadAssignment.ts checks this before anything else)
+// AND project_exclusion_rules (EXCLUDE — the opposite: one employee
+// blocked from round-robin leads for a project, everyone else stays
+// in the normal pool). Two separate tables, not one with a
+// rule_type discriminator — every existing INCLUDE consumer assumes
+// every row it reads IS a fixed-employee rule with zero filtering;
+// a shared table would need each of those retrofitted correctly, and
+// a missed one would silently treat an excluded employee as a fixed
+// one. EXCLUDE only ever matters for a project with NO INCLUDE rule
+// — calculateLeadAssignment's INCLUDE branch returns before EXCLUDE
+// is ever consulted, so that precedence just falls out of existing
+// control flow, nothing enforced here in the UI either (a project can
+// have both rows present; the INCLUDE one simply wins, per that
+// function's control flow — an "Exclude has no effect" note is shown
+// instead of hard-blocking the combination).
+//
+// One project can now have MULTIPLE fixed employees (Phase 7B) — new
+// leads for it round-robin among just that group, scoped separately
+// via project_rule_pointers.
 //
 // Plain sequential Supabase calls throughout (no RPC needed for CRUD
 // here) — same "trusted Admin action on data Admin already has RLS
@@ -32,10 +54,13 @@ interface Employee {
 // migrating EXISTING active leads (reassign_project_leads_atomic) —
 // that's a multi-row, multi-table write across leads + lead_history,
 // exactly the kind of thing that needs an atomic transaction, unlike
-// simply adding/removing a rule row.
+// simply adding/removing a rule row. EXCLUDE rules never migrate
+// existing leads either — same "only affects future distribution"
+// posture INCLUDE rules already have.
 export default function ProjectRulesPage() {
 
   const [rules, setRules] = useState<Rule[]>([]);
+  const [exclusions, setExclusions] = useState<ExclusionRule[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [projectOptions, setProjectOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,9 +70,18 @@ export default function ProjectRulesPage() {
   const [newProjectEmployeeId, setNewProjectEmployeeId] = useState("");
   const [creatingProject, setCreatingProject] = useState(false);
 
+  const [newExcludeProjectSelect, setNewExcludeProjectSelect] = useState("");
+  const [newExcludeProjectFreeText, setNewExcludeProjectFreeText] = useState("");
+  const [newExcludeEmployeeId, setNewExcludeEmployeeId] = useState("");
+  const [creatingExclusion, setCreatingExclusion] = useState(false);
+
   const [addEmployeeProject, setAddEmployeeProject] = useState<string | null>(null);
   const [addEmployeeId, setAddEmployeeId] = useState("");
   const [addingEmployee, setAddingEmployee] = useState(false);
+
+  const [addExcludeProject, setAddExcludeProject] = useState<string | null>(null);
+  const [addExcludeId, setAddExcludeId] = useState("");
+  const [addingExclude, setAddingExclude] = useState(false);
 
   const [migrateTarget, setMigrateTarget] = useState<{ project: string; fromEmployeeId: string } | null>(null);
   const [migrateToEmployeeId, setMigrateToEmployeeId] = useState("");
@@ -63,13 +97,16 @@ export default function ProjectRulesPage() {
   async function loadData() {
     setLoading(true);
 
-    const [{ data: rulesData }, { data: employeesData }, { data: leadsData }] = await Promise.all([
-      supabase.from("project_assignment_rules").select("id, project, assigned_employee_id").order("project"),
-      supabase.from("employees").select("id, name").order("name"),
-      supabase.from("leads").select("project")
-    ]);
+    const [{ data: rulesData }, { data: exclusionsData }, { data: employeesData }, { data: leadsData }] =
+      await Promise.all([
+        supabase.from("project_assignment_rules").select("id, project, assigned_employee_id").order("project"),
+        supabase.from("project_exclusion_rules").select("id, project, excluded_employee_id").order("project"),
+        supabase.from("employees").select("id, name").order("name"),
+        supabase.from("leads").select("project")
+      ]);
 
     setRules(rulesData || []);
+    setExclusions(exclusionsData || []);
     setEmployees(employeesData || []);
     setProjectOptions(
       Array.from(new Set((leadsData || []).map((l) => l.project).filter(Boolean))).sort() as string[]
@@ -83,14 +120,32 @@ export default function ProjectRulesPage() {
     return map;
   }, [employees]);
 
-  const groupedRules = useMemo(() => {
+  const includesByProject = useMemo(() => {
     const map = new Map<string, Rule[]>();
     rules.forEach((r) => {
       if (!map.has(r.project)) map.set(r.project, []);
       map.get(r.project)!.push(r);
     });
-    return Array.from(map.entries()).map(([project, members]) => ({ project, members }));
+    return map;
   }, [rules]);
+
+  const excludesByProject = useMemo(() => {
+    const map = new Map<string, ExclusionRule[]>();
+    exclusions.forEach((r) => {
+      if (!map.has(r.project)) map.set(r.project, []);
+      map.get(r.project)!.push(r);
+    });
+    return map;
+  }, [exclusions]);
+
+  // Every project with EITHER kind of rule gets a card — a project
+  // with only EXCLUDE rows (the common case: no fixed employees,
+  // just one person blocked) needs to show up just as much as one
+  // with only INCLUDE rows.
+  const allProjectsWithRules = useMemo(() => {
+    const projects = new Set<string>([...includesByProject.keys(), ...excludesByProject.keys()]);
+    return Array.from(projects).sort();
+  }, [includesByProject, excludesByProject]);
 
   async function handleCreateNewProject() {
     const finalProject = newProjectSelect === NEW_PROJECT_SENTINEL
@@ -122,6 +177,36 @@ export default function ProjectRulesPage() {
     setCreatingProject(false);
   }
 
+  async function handleCreateExclusion() {
+    const finalProject = newExcludeProjectSelect === NEW_PROJECT_SENTINEL
+      ? newExcludeProjectFreeText.trim()
+      : newExcludeProjectSelect;
+
+    if (!finalProject || !newExcludeEmployeeId) {
+      toast.error("Select or enter a project name, and select an employee.");
+      return;
+    }
+
+    setCreatingExclusion(true);
+
+    const { error } = await supabase.from("project_exclusion_rules").insert({
+      project: finalProject,
+      excluded_employee_id: newExcludeEmployeeId
+    });
+
+    if (error) {
+      toast.error(error.message || "Could not create exclusion.");
+    } else {
+      toast.success("Employee excluded from this project.");
+      setNewExcludeProjectSelect("");
+      setNewExcludeProjectFreeText("");
+      setNewExcludeEmployeeId("");
+      loadData();
+    }
+
+    setCreatingExclusion(false);
+  }
+
   async function handleAddEmployeeToProject(project: string) {
     if (!addEmployeeId) return;
 
@@ -144,6 +229,28 @@ export default function ProjectRulesPage() {
     setAddingEmployee(false);
   }
 
+  async function handleAddExclusion(project: string) {
+    if (!addExcludeId) return;
+
+    setAddingExclude(true);
+
+    const { error } = await supabase.from("project_exclusion_rules").insert({
+      project,
+      excluded_employee_id: addExcludeId
+    });
+
+    if (error) {
+      toast.error(error.message || "Could not exclude this employee.");
+    } else {
+      toast.success("Employee excluded from this project.");
+      setAddExcludeProject(null);
+      setAddExcludeId("");
+      loadData();
+    }
+
+    setAddingExclude(false);
+  }
+
   async function handleRemoveEmployee(ruleId: string) {
     const { error } = await supabase.from("project_assignment_rules").delete().eq("id", ruleId);
 
@@ -156,15 +263,34 @@ export default function ProjectRulesPage() {
     loadData();
   }
 
+  async function handleRemoveExclusion(exclusionId: string) {
+    const { error } = await supabase.from("project_exclusion_rules").delete().eq("id", exclusionId);
+
+    if (error) {
+      toast.error(error.message || "Could not remove exclusion.");
+      return;
+    }
+
+    toast.success("Exclusion removed.");
+    loadData();
+  }
+
+  // Clears BOTH tables for this project — "Delete Rule" is meant to
+  // read as "delete this project's whole rule-configuration," not
+  // just the INCLUDE half. Leaving EXCLUDE rows behind would silently
+  // resurrect the card after the next loadData() (allProjectsWithRules
+  // still finds it via excludesByProject).
   async function handleDeleteProjectRule() {
     if (!deleteProjectTarget) return;
 
     setDeletingProject(true);
 
-    const { error } = await supabase
-      .from("project_assignment_rules")
-      .delete()
-      .eq("project", deleteProjectTarget);
+    const [{ error: includeError }, { error: excludeError }] = await Promise.all([
+      supabase.from("project_assignment_rules").delete().eq("project", deleteProjectTarget),
+      supabase.from("project_exclusion_rules").delete().eq("project", deleteProjectTarget)
+    ]);
+
+    const error = includeError || excludeError;
 
     if (error) {
       toast.error(error.message || "Could not delete this rule.");
@@ -207,7 +333,7 @@ export default function ProjectRulesPage() {
       <div>
         <h1 className="text-3xl font-bold text-slate-800">Project Rules</h1>
         <p className="text-slate-500 mt-1">
-          Projects listed here bypass round robin — leads always go to their fixed employee(s).
+          Fixed employees bypass round robin entirely. Excluded employees stay in normal round robin for every other project — just not this one.
         </p>
       </div>
 
@@ -259,149 +385,279 @@ export default function ProjectRulesPage() {
         </div>
       </div>
 
+      <div className="bg-white rounded-[24px] border border-slate-100 shadow-md p-6">
+        <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold mb-3">New Excluded Employee</p>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <div className="relative flex-1">
+            <select
+              value={newExcludeProjectSelect}
+              onChange={(e) => setNewExcludeProjectSelect(e.target.value)}
+              className="appearance-none w-full h-11 rounded-xl bg-slate-50 border border-slate-200 pl-3 pr-8 text-sm outline-none focus:ring-2 focus:ring-red-200"
+            >
+              <option value="" disabled>Select a project...</option>
+              {projectOptions.map((p) => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+              <option value={NEW_PROJECT_SENTINEL}>+ Add new project</option>
+            </select>
+            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+          </div>
+
+          {newExcludeProjectSelect === NEW_PROJECT_SENTINEL && (
+            <input
+              value={newExcludeProjectFreeText}
+              onChange={(e) => setNewExcludeProjectFreeText(e.target.value)}
+              placeholder="New project name..."
+              className="flex-1 h-11 rounded-xl bg-slate-50 border border-slate-200 px-3 text-sm outline-none focus:ring-2 focus:ring-red-200"
+            />
+          )}
+
+          <select
+            value={newExcludeEmployeeId}
+            onChange={(e) => setNewExcludeEmployeeId(e.target.value)}
+            className="h-11 rounded-xl bg-slate-50 border border-slate-200 px-3 text-sm outline-none focus:ring-2 focus:ring-red-200"
+          >
+            <option value="">Select employee...</option>
+            {employees.map((e) => (
+              <option key={e.id} value={e.id}>{e.name}</option>
+            ))}
+          </select>
+          <button
+            onClick={handleCreateExclusion}
+            disabled={creatingExclusion}
+            className="h-11 px-5 rounded-xl font-semibold text-white bg-gradient-to-r from-red-500 to-rose-500 disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            <Ban size={16} />
+            Exclude
+          </button>
+        </div>
+        <p className="text-[11px] text-slate-400 mt-2">
+          Blocks this employee from round-robin leads for this project — everyone else keeps getting them normally. Has no effect on a project that already has Fixed Employees below.
+        </p>
+      </div>
+
       {loading ? (
         <div className="text-center text-sm text-slate-400 py-10">Loading...</div>
-      ) : groupedRules.length === 0 ? (
+      ) : allProjectsWithRules.length === 0 ? (
         <div className="bg-white rounded-[24px] border border-slate-100 shadow-md p-10 text-center text-sm text-slate-400">
           No project rules yet — all leads go through normal round robin.
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {groupedRules.map(({ project, members }) => (
-            <motion.div
-              key={project}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-white rounded-[24px] border border-slate-100 shadow-md p-5"
-            >
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className="h-9 w-9 rounded-xl bg-blue-50 flex items-center justify-center shrink-0">
-                    <Building2 size={16} className="text-blue-600" />
-                  </div>
-                  <p className="text-sm font-bold text-slate-800 truncate">{project}</p>
-                </div>
-                {/* Icon-only + hover-title was too easy to miss (title
-                    tooltips don't even show on touch) — visible text
-                    label makes this discoverable without relying on
-                    hover. Same handler/modal as before, just clearer. */}
-                <button
-                  onClick={() => setDeleteProjectTarget(project)}
-                  title="Delete this project's rule entirely"
-                  className="shrink-0 flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-red-50 border border-red-100 text-red-500 text-xs font-bold hover:bg-red-100 transition"
-                >
-                  <Trash2 size={13} />
-                  Delete Rule
-                </button>
-              </div>
+          {allProjectsWithRules.map((project) => {
+            const members = includesByProject.get(project) || [];
+            const excludedMembers = excludesByProject.get(project) || [];
 
-              <div className="space-y-1.5">
-                {members.map((m) => (
-                  <div key={m.id} className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50">
-                    <span className="text-sm text-slate-700">{employeeNameById.get(m.assigned_employee_id) || "Unknown"}</span>
-                    <div className="flex items-center gap-1">
+            return (
+              <motion.div
+                key={project}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-white rounded-[24px] border border-slate-100 shadow-md p-5"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="h-9 w-9 rounded-xl bg-blue-50 flex items-center justify-center shrink-0">
+                      <Building2 size={16} className="text-blue-600" />
+                    </div>
+                    <p className="text-sm font-bold text-slate-800 truncate">{project}</p>
+                  </div>
+                  {/* Icon-only + hover-title was too easy to miss (title
+                      tooltips don't even show on touch) — visible text
+                      label makes this discoverable without relying on
+                      hover. Same handler/modal as before, just clearer. */}
+                  <button
+                    onClick={() => setDeleteProjectTarget(project)}
+                    title="Delete every rule (fixed + excluded) for this project"
+                    className="shrink-0 flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-red-50 border border-red-100 text-red-500 text-xs font-bold hover:bg-red-100 transition"
+                  >
+                    <Trash2 size={13} />
+                    Delete Rule
+                  </button>
+                </div>
+
+                {members.length > 0 && (
+                  <>
+                    <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold mb-1.5">
+                      Fixed Employees
+                    </p>
+                    <div className="space-y-1.5">
+                      {members.map((m) => (
+                        <div key={m.id} className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50">
+                          <span className="text-sm text-slate-700">{employeeNameById.get(m.assigned_employee_id) || "Unknown"}</span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => {
+                                setMigrateTarget({ project, fromEmployeeId: m.assigned_employee_id });
+                                setMigrateToEmployeeId("");
+                              }}
+                              title="Migrate their active leads for this project to someone else"
+                              className="h-7 w-7 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 hover:bg-blue-100 transition"
+                            >
+                              <ArrowRightLeft size={12} />
+                            </button>
+                            <button
+                              onClick={() => handleRemoveEmployee(m.id)}
+                              title="Remove from this project's rule"
+                              className="h-7 w-7 rounded-lg bg-red-50 flex items-center justify-center text-red-500 hover:bg-red-100 transition"
+                            >
+                              <X size={12} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {members.length > 1 && (
+                      <p className="text-[11px] text-slate-400 mt-2">
+                        {members.length} fixed employees — new leads round-robin among just this group.
+                      </p>
+                    )}
+
+                    {addEmployeeProject === project ? (
+                      <div className="flex items-center gap-2 mt-3">
+                        <select
+                          value={addEmployeeId}
+                          onChange={(e) => setAddEmployeeId(e.target.value)}
+                          className="flex-1 h-9 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs outline-none"
+                        >
+                          <option value="">Select employee...</option>
+                          {employees
+                            .filter((e) => !members.some((m) => m.assigned_employee_id === e.id))
+                            .map((e) => (
+                              <option key={e.id} value={e.id}>{e.name}</option>
+                            ))}
+                        </select>
+                        <button
+                          onClick={() => handleAddEmployeeToProject(project)}
+                          disabled={addingEmployee || !addEmployeeId}
+                          className="h-9 px-3 rounded-lg bg-blue-600 text-white text-xs font-bold disabled:opacity-50"
+                        >
+                          Add
+                        </button>
+                        <button
+                          onClick={() => { setAddEmployeeProject(null); setAddEmployeeId(""); }}
+                          className="h-9 px-2 text-xs text-slate-400"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
                       <button
-                        onClick={() => {
-                          setMigrateTarget({ project, fromEmployeeId: m.assigned_employee_id });
-                          setMigrateToEmployeeId("");
-                        }}
-                        title="Migrate their active leads for this project to someone else"
-                        className="h-7 w-7 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 hover:bg-blue-100 transition"
+                        onClick={() => setAddEmployeeProject(project)}
+                        className="flex items-center gap-1 mt-3 text-xs font-bold text-blue-700 hover:text-blue-800"
                       >
-                        <ArrowRightLeft size={12} />
+                        <Plus size={12} />
+                        Add Employee
+                      </button>
+                    )}
+                  </>
+                )}
+
+                <div className={members.length > 0 ? "mt-4 pt-4 border-t border-slate-100" : ""}>
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold mb-1.5">
+                    Excluded Employees
+                  </p>
+
+                  {members.length > 0 && (
+                    <p className="text-[11px] text-amber-600 mb-2">
+                      Fixed Employees are set for this project — Exclude rules have no effect until those are removed.
+                    </p>
+                  )}
+
+                  {excludedMembers.length > 0 && (
+                    <div className="space-y-1.5 mb-2">
+                      {excludedMembers.map((ex) => (
+                        <div key={ex.id} className="flex items-center justify-between px-3 py-2 rounded-xl bg-red-50/60">
+                          <span className="text-sm text-slate-700">{employeeNameById.get(ex.excluded_employee_id) || "Unknown"}</span>
+                          <button
+                            onClick={() => handleRemoveExclusion(ex.id)}
+                            title="Remove this exclusion"
+                            className="h-7 w-7 rounded-lg bg-red-50 flex items-center justify-center text-red-500 hover:bg-red-100 transition"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {addExcludeProject === project ? (
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={addExcludeId}
+                        onChange={(e) => setAddExcludeId(e.target.value)}
+                        className="flex-1 h-9 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs outline-none"
+                      >
+                        <option value="">Select employee...</option>
+                        {employees
+                          .filter((e) => !excludedMembers.some((ex) => ex.excluded_employee_id === e.id))
+                          .map((e) => (
+                            <option key={e.id} value={e.id}>{e.name}</option>
+                          ))}
+                      </select>
+                      <button
+                        onClick={() => handleAddExclusion(project)}
+                        disabled={addingExclude || !addExcludeId}
+                        className="h-9 px-3 rounded-lg bg-red-500 text-white text-xs font-bold disabled:opacity-50"
+                      >
+                        Add
                       </button>
                       <button
-                        onClick={() => handleRemoveEmployee(m.id)}
-                        title="Remove from this project's rule"
-                        className="h-7 w-7 rounded-lg bg-red-50 flex items-center justify-center text-red-500 hover:bg-red-100 transition"
+                        onClick={() => { setAddExcludeProject(null); setAddExcludeId(""); }}
+                        className="h-9 px-2 text-xs text-slate-400"
                       >
-                        <X size={12} />
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setAddExcludeProject(project)}
+                      className="flex items-center gap-1 text-xs font-bold text-red-600 hover:text-red-700"
+                    >
+                      <Plus size={12} />
+                      Exclude Employee
+                    </button>
+                  )}
+                </div>
+
+                {migrateTarget?.project === project && (
+                  <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
+                    <p className="text-[11px] text-slate-500">
+                      Migrate {employeeNameById.get(migrateTarget.fromEmployeeId) || "this employee"}'s active leads for "{project}" to:
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={migrateToEmployeeId}
+                        onChange={(e) => setMigrateToEmployeeId(e.target.value)}
+                        className="flex-1 h-9 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs outline-none"
+                      >
+                        <option value="">Select employee...</option>
+                        {employees
+                          .filter((e) => e.id !== migrateTarget.fromEmployeeId)
+                          .map((e) => (
+                            <option key={e.id} value={e.id}>{e.name}</option>
+                          ))}
+                      </select>
+                      <button
+                        onClick={handleMigrateLeads}
+                        disabled={migrating || !migrateToEmployeeId}
+                        className="h-9 px-3 rounded-lg bg-blue-600 text-white text-xs font-bold disabled:opacity-50"
+                      >
+                        {migrating ? "..." : "Migrate"}
+                      </button>
+                      <button
+                        onClick={() => { setMigrateTarget(null); setMigrateToEmployeeId(""); }}
+                        className="h-9 px-2 text-xs text-slate-400"
+                      >
+                        Cancel
                       </button>
                     </div>
                   </div>
-                ))}
-              </div>
-
-              {members.length > 1 && (
-                <p className="text-[11px] text-slate-400 mt-2">
-                  {members.length} fixed employees — new leads round-robin among just this group.
-                </p>
-              )}
-
-              {addEmployeeProject === project ? (
-                <div className="flex items-center gap-2 mt-3">
-                  <select
-                    value={addEmployeeId}
-                    onChange={(e) => setAddEmployeeId(e.target.value)}
-                    className="flex-1 h-9 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs outline-none"
-                  >
-                    <option value="">Select employee...</option>
-                    {employees
-                      .filter((e) => !members.some((m) => m.assigned_employee_id === e.id))
-                      .map((e) => (
-                        <option key={e.id} value={e.id}>{e.name}</option>
-                      ))}
-                  </select>
-                  <button
-                    onClick={() => handleAddEmployeeToProject(project)}
-                    disabled={addingEmployee || !addEmployeeId}
-                    className="h-9 px-3 rounded-lg bg-blue-600 text-white text-xs font-bold disabled:opacity-50"
-                  >
-                    Add
-                  </button>
-                  <button
-                    onClick={() => { setAddEmployeeProject(null); setAddEmployeeId(""); }}
-                    className="h-9 px-2 text-xs text-slate-400"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setAddEmployeeProject(project)}
-                  className="flex items-center gap-1 mt-3 text-xs font-bold text-blue-700 hover:text-blue-800"
-                >
-                  <Plus size={12} />
-                  Add Employee
-                </button>
-              )}
-
-              {migrateTarget?.project === project && (
-                <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
-                  <p className="text-[11px] text-slate-500">
-                    Migrate {employeeNameById.get(migrateTarget.fromEmployeeId) || "this employee"}'s active leads for "{project}" to:
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={migrateToEmployeeId}
-                      onChange={(e) => setMigrateToEmployeeId(e.target.value)}
-                      className="flex-1 h-9 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs outline-none"
-                    >
-                      <option value="">Select employee...</option>
-                      {employees
-                        .filter((e) => e.id !== migrateTarget.fromEmployeeId)
-                        .map((e) => (
-                          <option key={e.id} value={e.id}>{e.name}</option>
-                        ))}
-                    </select>
-                    <button
-                      onClick={handleMigrateLeads}
-                      disabled={migrating || !migrateToEmployeeId}
-                      className="h-9 px-3 rounded-lg bg-blue-600 text-white text-xs font-bold disabled:opacity-50"
-                    >
-                      {migrating ? "..." : "Migrate"}
-                    </button>
-                    <button
-                      onClick={() => { setMigrateTarget(null); setMigrateToEmployeeId(""); }}
-                      className="h-9 px-2 text-xs text-slate-400"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
-            </motion.div>
-          ))}
+                )}
+              </motion.div>
+            );
+          })}
         </div>
       )}
 
@@ -413,7 +669,7 @@ export default function ProjectRulesPage() {
         message={
           deletingProject
             ? "Deleting..."
-            : `This removes ALL fixed employees for "${deleteProjectTarget}" — future leads for this project will go through normal round robin instead. Existing active leads are untouched (use Migrate on each employee first if you want to move them too).`
+            : `This removes ALL fixed employees AND all excluded employees for "${deleteProjectTarget}" — future leads for this project will go through normal round robin instead, open to everyone. Existing active leads are untouched (use Migrate on each fixed employee first if you want to move them too).`
         }
       />
     </div>

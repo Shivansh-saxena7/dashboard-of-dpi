@@ -26,6 +26,18 @@ export interface EligibleEmployee {
   id: string;
 }
 
+// The opposite of ProjectAssignmentRule — "this employee should never
+// get round-robin leads for this project," while everyone else stays
+// in the normal pool. Only ever consulted in the ROUND_ROBIN branch
+// below; a project WITH an INCLUDE rule (ProjectAssignmentRule) never
+// reaches that branch at all (it returns earlier), which is exactly
+// how "INCLUDE makes EXCLUDE irrelevant" falls out of the existing
+// control flow with no extra branching needed.
+export interface ProjectExclusionRule {
+  project: string;
+  excluded_employee_id: string;
+}
+
 // project -> last-assigned-employee-id within that project's own
 // fixed-employee pool. Keyed by the SAME normalization this function
 // applies internally (trim + lowercase) — callers read/write
@@ -64,7 +76,8 @@ export function calculateLeadAssignment(
   projectRules: ProjectAssignmentRule[],
   eligibleEmployees: EligibleEmployee[],
   lastGlobalAssignedEmployeeId: string | null,
-  projectPointers: ProjectRulePointers = {}
+  projectPointers: ProjectRulePointers = {},
+  projectExclusions: ProjectExclusionRule[] = []
 ): LeadAssignmentResult {
 
   const normalizedProject = String(project || "").trim().toLowerCase();
@@ -136,7 +149,24 @@ export function calculateLeadAssignment(
 
   }
 
-  if (eligibleEmployees.length === 0) {
+  // Only reached when no INCLUDE rule matched this project (both
+  // branches above return early) — narrow the pool by any EXCLUDE
+  // rule scoped to it. A pool narrowed this way can shift where
+  // "next" lands relative to lastGlobalAssignedEmployeeId (the
+  // excluded employee's own position no longer exists to search for),
+  // same accepted quirk as an employee going off-shift/rr_eligible=
+  // false mid-rotation, or CSV Import's one-time exclude — not new.
+  const excludedIds = new Set(
+    projectExclusions
+      .filter((rule) => String(rule.project || "").trim().toLowerCase() === normalizedProject)
+      .map((rule) => rule.excluded_employee_id)
+  );
+
+  const roundRobinPool = excludedIds.size > 0
+    ? eligibleEmployees.filter((employee) => !excludedIds.has(employee.id))
+    : eligibleEmployees;
+
+  if (roundRobinPool.length === 0) {
     return {
       assignedEmployeeId: null,
       reason: "NO_ELIGIBLE_EMPLOYEE",
@@ -145,13 +175,13 @@ export function calculateLeadAssignment(
     };
   }
 
-  const lastIndex = eligibleEmployees.findIndex(
+  const lastIndex = roundRobinPool.findIndex(
     (employee) => employee.id === lastGlobalAssignedEmployeeId
   );
 
-  const nextIndex = lastIndex === -1 ? 0 : (lastIndex + 1) % eligibleEmployees.length;
+  const nextIndex = lastIndex === -1 ? 0 : (lastIndex + 1) % roundRobinPool.length;
 
-  const nextEmployee = eligibleEmployees[nextIndex];
+  const nextEmployee = roundRobinPool[nextIndex];
 
   return {
     assignedEmployeeId: nextEmployee.id,

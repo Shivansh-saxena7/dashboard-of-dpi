@@ -46,6 +46,14 @@ export async function fetchDistributionInputs(supabase) {
     projectPointers[row.project] = row.last_assigned_employee_id;
   });
 
+  // "This employee should never get round-robin leads for this
+  // project" — the opposite of project_assignment_rules, only ever
+  // consulted by calculateLeadAssignment when NO include-rule matches
+  // the project (see that function's own comment for why).
+  const { data: projectExclusions } = await supabase
+    .from("project_exclusion_rules")
+    .select("project, excluded_employee_id");
+
   const today = new Date().toISOString().split("T")[0];
 
   const { data: todaysAttendance } = await supabase
@@ -67,7 +75,7 @@ export async function fetchDistributionInputs(supabase) {
     shiftStartedEmployeeIds.has(e.id)
   );
 
-  return { settings, projectRules, eligibleEmployees, projectPointers };
+  return { settings, projectRules, eligibleEmployees, projectPointers, projectExclusions: projectExclusions || [] };
 }
 
 // Callers own fetching the leads list and writing back whatever
@@ -91,7 +99,7 @@ export async function fetchDistributionInputs(supabase) {
 // ends this batch pointing at a non-excluded employee, and the next
 // unrelated call (which won't pass excludedEmployeeIds) resumes fair
 // rotation across everyone automatically.
-export async function distributeLeadsBatch(supabase, leadsToDistribute, settings, projectRules, eligibleEmployees, projectPointers, excludedEmployeeIds = []) {
+export async function distributeLeadsBatch(supabase, leadsToDistribute, settings, projectRules, eligibleEmployees, projectPointers, excludedEmployeeIds = [], projectExclusions = []) {
 
   const pool = excludedEmployeeIds && excludedEmployeeIds.length > 0
     ? eligibleEmployees.filter((e) => !excludedEmployeeIds.includes(e.id))
@@ -110,7 +118,8 @@ export async function distributeLeadsBatch(supabase, leadsToDistribute, settings
       projectRules || [],
       pool,
       pointerEmployeeId,
-      workingProjectPointers
+      workingProjectPointers,
+      projectExclusions
     );
 
     if (!result.assignedEmployeeId) {
@@ -161,6 +170,18 @@ export async function distributeLeadsBatch(supabase, leadsToDistribute, settings
     }
 
   }
+
+  // Previously computed but never printed anywhere — only reached
+  // whoever called this function via the HTTP response body, not
+  // Runtime Logs. Logging it here (rather than making every caller
+  // remember to) benefits both import-leads-csv and
+  // retry-lead-distribution for free.
+  console.log("distributeLeadsBatch: done", {
+    leadCount: leadsToDistribute.length,
+    assignedCount,
+    distributionSummary,
+    diagnostics
+  });
 
   return { assignedCount, distributionSummary, diagnostics };
 }

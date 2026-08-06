@@ -92,6 +92,8 @@ serve(async () => {
 
   } catch (err) {
 
+    console.error("check-lead-reminders: unhandled error:", err.message, err.stack);
+
     return new Response(
       JSON.stringify({ success: false, error: err.message }),
       { headers: { "Content-Type": "application/json" }, status: 500 }

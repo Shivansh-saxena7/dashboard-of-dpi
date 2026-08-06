@@ -5,6 +5,7 @@ export type MappedField =
   | "project"
   | "source"
   | "lead_time"
+  | "priority"
   | "ignore"
   | "extra";
 
@@ -15,6 +16,7 @@ export const MAPPED_FIELD_OPTIONS: { value: MappedField; label: string }[] = [
   { value: "project", label: "Project" },
   { value: "source", label: "Source" },
   { value: "lead_time", label: "Lead Time" },
+  { value: "priority", label: "Priority (Hot/Warm/Cold)" },
   { value: "extra", label: "Keep as Extra Data" },
   { value: "ignore", label: "Ignore" }
 ];
@@ -31,7 +33,8 @@ const SYNONYMS: Record<Exclude<MappedField, "ignore" | "extra">, string[]> = {
   email: ["email", "emailaddress", "mail", "mailid"],
   project: ["project", "projectname", "property", "propertyname"],
   source: ["source", "leadsource", "platform", "channel"],
-  lead_time: ["leadtime", "date", "createdat", "receivedon", "enquirydate", "timestamp", "leaddate"]
+  lead_time: ["leadtime", "date", "createdat", "receivedon", "enquirydate", "timestamp", "leaddate"],
+  priority: ["priority", "leadpriority", "temperature", "hotwarmcold", "leadtemp"]
 };
 
 function normalizeHeader(header: string): string {

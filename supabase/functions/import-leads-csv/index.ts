@@ -3,6 +3,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 import { normalizeMobile } from "../../../lib/normalizeMobile.ts";
+import { normalizeLeadPriority } from "../../../lib/normalizeLeadPriority.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { resolveCallingEmployeeId } from "../_shared/auth.ts";
 import { fetchDistributionInputs, distributeLeadsBatch, distributeDataLeadsManually } from "../_shared/distributeLeads.ts";
@@ -93,6 +94,15 @@ serve(async (req) => {
       ? manual_employee_ids.filter((id) => typeof id === "string")
       : [];
 
+    console.log("import-leads-csv: request received", {
+      rowCount: Array.isArray(rows) ? rows.length : 0,
+      sourceName: source_name,
+      leadType,
+      hasTargetTeam: Boolean(target_team_id),
+      manualEmployeeCount: manualEmployeeIds.length,
+      excludedEmployeeCount: excludedEmployeeIds.length
+    });
+
     if (!Array.isArray(rows) || rows.length === 0) {
       return respond({ success: false, message: "No rows to import" }, 400);
     }
@@ -179,11 +189,17 @@ serve(async (req) => {
         status: "NEW",
         extra_data: row.extra_data || null,
         lead_type: leadType,
-        // Explicit rather than relying on the column's own DB default
-        // (which happens to also be 'cold' today) — Data's priority
-        // is a deliberate, self-documented rule of this feature, not
-        // an accident of what the table default currently is.
-        ...(leadType === "DATA" ? { priority: "cold" } : {})
+        // Always explicit, for BOTH types — never omitted/left to the
+        // leads.priority column's own DB default again. That default
+        // happens to be 'cold', which is exactly right for Data but
+        // was silently making every Lead "Cold" too (a real bug this
+        // fixes, not just a Data-specific rule) — a mapped CSV
+        // Priority column wins if recognized (hot/warm/cold and a few
+        // synonyms), otherwise Leads default to "warm" (genuinely
+        // fresh, unworked leads), never "cold". Data ignores whatever
+        // the CSV says here entirely — its priority is always "cold"
+        // by design, regardless of any mapped column.
+        priority: leadType === "DATA" ? "cold" : (normalizeLeadPriority(row.priority) || "warm")
       });
 
     }
@@ -239,6 +255,12 @@ serve(async (req) => {
       return respond({ success: false, step: "TAG_LEADS_WITH_BATCH", error: tagError.message }, 500);
     }
 
+    console.log("import-leads-csv: leads inserted and tagged", {
+      batchId: batchRow.id,
+      importedCount: insertedLeads.length,
+      duplicateCount
+    });
+
     // --- Data: manual per-employee distribution. Checked before
     // target_team_id below (mutually exclusive in practice — the
     // wizard never sends both — but Data takes precedence if it ever
@@ -268,6 +290,12 @@ serve(async (req) => {
         });
       }
 
+      console.log("import-leads-csv: starting Data manual distribution", {
+        batchId: batchRow.id,
+        leadCount: insertedLeads.length,
+        manualEmployeeIds
+      });
+
       const { assignedCount, distributionSummary, diagnostics } = await distributeDataLeadsManually(
         supabase,
         insertedLeads,
@@ -275,6 +303,12 @@ serve(async (req) => {
         auth.employeeId,
         settingsRow.round_robin_pointer_employee_id
       );
+
+      console.log("import-leads-csv: Data manual distribution complete", {
+        batchId: batchRow.id,
+        assignedCount,
+        diagnostics
+      });
 
       await supabase
         .from("csv_import_batches")
@@ -343,9 +377,16 @@ serve(async (req) => {
     }
 
     // --- Distribution pass ---
+    console.log("import-leads-csv: starting fetchDistributionInputs", { batchId: batchRow.id });
+
     const inputs = await fetchDistributionInputs(supabase);
 
     if (inputs.error) {
+      console.error("import-leads-csv: fetchDistributionInputs returned an error", {
+        batchId: batchRow.id,
+        error: inputs.error
+      });
+
       return respond({
         success: true,
         batchId: batchRow.id,
@@ -358,6 +399,14 @@ serve(async (req) => {
       });
     }
 
+    console.log("import-leads-csv: fetchDistributionInputs complete, starting distributeLeadsBatch", {
+      batchId: batchRow.id,
+      eligibleEmployeeCount: inputs.eligibleEmployees.length,
+      projectRuleCount: inputs.projectRules.length,
+      projectExclusionCount: inputs.projectExclusions.length,
+      excludedEmployeeCount: excludedEmployeeIds.length
+    });
+
     const { assignedCount, distributionSummary, diagnostics } = await distributeLeadsBatch(
       supabase,
       insertedLeads,
@@ -365,8 +414,16 @@ serve(async (req) => {
       inputs.projectRules,
       inputs.eligibleEmployees,
       inputs.projectPointers,
-      excludedEmployeeIds
+      excludedEmployeeIds,
+      inputs.projectExclusions
     );
+
+    console.log("import-leads-csv: distributeLeadsBatch complete", {
+      batchId: batchRow.id,
+      assignedCount,
+      distributionSummary,
+      diagnostics
+    });
 
     await supabase
       .from("csv_import_batches")
@@ -385,6 +442,15 @@ serve(async (req) => {
     });
 
   } catch (err) {
+
+    // Previously missing — any exception anywhere in this function
+    // (e.g. a throw inside the distribution pass) went straight into
+    // the HTTP response body with nothing printed to Runtime Logs,
+    // which is exactly what made a real production failure
+    // indistinguishable from "nothing happened" when checking logs
+    // after the fact. err.stack (not just .message) so the actual
+    // throw-site is visible, not just the error text.
+    console.error("import-leads-csv: unhandled error:", err.message, err.stack);
 
     return respond({ success: false, error: err.message }, 500);
 

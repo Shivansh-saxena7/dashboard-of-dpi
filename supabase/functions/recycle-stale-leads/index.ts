@@ -78,6 +78,24 @@ serve(async () => {
       employee_is_active: row.employees?.is_active ?? false
     }));
 
+    // "This employee should never get round-robin leads for this
+    // project" — consulted below only in the general (non-Project-
+    // Rule) recycle branch, which is the ROUND_ROBIN half of
+    // calculateLeadAssignment. The INCLUDE-rule matching this file
+    // does inline (allMatchedEmployeeIds, further down) is entirely
+    // separate and unaffected — exclusions never apply to a project
+    // that already has a fixed-employee rule.
+    const { data: projectExclusions, error: exclusionsError } = await supabase
+      .from("project_exclusion_rules")
+      .select("project, excluded_employee_id");
+
+    if (exclusionsError) {
+      return new Response(
+        JSON.stringify({ success: false, step: "FETCH_PROJECT_EXCLUSIONS", error: exclusionsError.message }),
+        { headers: { "Content-Type": "application/json" }, status: 500 }
+      );
+    }
+
     // For multi-employee project rules — round robin position within
     // just that project's fixed-employee group, entirely separate
     // from the company-wide pointer.
@@ -492,7 +510,9 @@ serve(async () => {
         lead.project,
         [], // Project Rules already ruled out for this lead above
         eligibleEmployees,
-        pointerEmployeeId
+        pointerEmployeeId,
+        {},
+        projectExclusions || []
       );
 
       if (!result.assignedEmployeeId) {
@@ -561,6 +581,8 @@ serve(async () => {
     );
 
   } catch (err) {
+
+    console.error("recycle-stale-leads: unhandled error:", err.message, err.stack);
 
     return new Response(
       JSON.stringify({ success: false, error: err.message }),
