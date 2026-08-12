@@ -8,6 +8,7 @@ import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
 import AdminLeadCard from "@/components/AdminLeadCard";
 import ExportPreviewTable from "@/components/ExportPreviewTable";
+import ManualLeadEntryModal from "@/components/ManualLeadEntryModal";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES } from "@/lib/leadBoardStageDisplay";
 import { exportLeadsToExcel, exportLeadsToPDF } from "@/lib/exportLeadsReport";
@@ -58,8 +59,15 @@ export default function AdminLeadsPage() {
   const [leads, setLeads] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
+  // Full active-employee roster — separate from employeeOptions below
+  // (which only lists employees who currently OWN a lead, fine for
+  // filtering but useless as a JUNK-recovery reassign-target picker,
+  // since the whole point is picking someone who doesn't own this
+  // lead yet).
+  const [employees, setEmployees] = useState<{ id: string; name: string; is_active: boolean }[]>([]);
   const [adminEmployeeId, setAdminEmployeeId] = useState<string | null>(null);
   const [showPreviewTable, setShowPreviewTable] = useState(false);
+  const [manualEntryOpen, setManualEntryOpen] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [employeeFilter, setEmployeeFilter] = useState("");
@@ -77,6 +85,7 @@ export default function AdminLeadsPage() {
   useEffect(() => {
     loadLeads();
     loadTeams();
+    loadEmployees();
     loadAdminEmployeeId();
   }, []);
 
@@ -113,6 +122,7 @@ export default function AdminLeadsPage() {
         mobile,
         project,
         source,
+        catcher_name,
         status,
         priority,
         board_stage,
@@ -146,6 +156,38 @@ export default function AdminLeadsPage() {
     if (!error && data) {
       setTeams(data);
     }
+  }
+
+  async function loadEmployees() {
+    const { data, error } = await supabase
+      .from("employees")
+      .select("id, name, is_active")
+      .order("name");
+    if (!error && data) {
+      setEmployees(data);
+    }
+  }
+
+  // JUNK-recovery — Admin manually decides a specific JUNK lead is
+  // worth another shot and hands it to a specific employee.
+  // unjunk_and_reassign_lead_atomic does the actual work (fresh NEW/
+  // LEADS status, recycle_count reset, working-hours-aware SLA
+  // deadline, full lead_history audit trail preserved) — this just
+  // calls it and refetches so the card reflects the new state.
+  async function handleUnjunkReassign(leadId: string, employeeId: string, reason: string) {
+    const { error } = await supabase.rpc("unjunk_and_reassign_lead_atomic", {
+      p_lead_id: leadId,
+      p_new_employee_id: employeeId,
+      p_reason: reason
+    });
+
+    if (error) {
+      toast.error(error.message || "Could not reassign this lead.");
+      return;
+    }
+
+    toast.success("Lead recovered and reassigned.");
+    loadLeads();
   }
 
   // Reserving a lead for a team is a plain client-side update (not an
@@ -377,7 +419,7 @@ export default function AdminLeadsPage() {
         <div className="absolute top-[-60px] right-[-60px] w-[150px] h-[150px] rounded-full bg-white/10 blur-3xl" />
         <Target size={140} strokeWidth={1} className="absolute -bottom-8 -right-4 text-white/10 pointer-events-none" />
 
-        <div className="relative flex items-start justify-between gap-3">
+        <div className="relative flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
           <div>
             <h1 className="text-3xl font-bold">Leads</h1>
             <p className="mt-2 text-white/80 text-sm">
@@ -385,15 +427,37 @@ export default function AdminLeadsPage() {
             </p>
           </div>
 
-          <Link
-            href="/admin/leads/import"
-            className="shrink-0 flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition"
-          >
-            <Upload size={14} />
-            Import CSV
-          </Link>
+          {/* Two buttons now (was one, before Manual-Lead-Entry) —
+              flex-wrap is the safety net on the narrowest phones where
+              even a stacked-below row can't fit both side-by-side;
+              sm:shrink-0 stops them competing with the title for width
+              once the row goes horizontal again at sm+. */}
+          <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
+            <button
+              onClick={() => setManualEntryOpen(true)}
+              className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition"
+            >
+              🎣 Add Manual Lead
+            </button>
+
+            <Link
+              href="/admin/leads/import"
+              className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition"
+            >
+              <Upload size={14} />
+              Import CSV
+            </Link>
+          </div>
         </div>
       </motion.div>
+
+      {manualEntryOpen && (
+        <ManualLeadEntryModal
+          employees={employees}
+          onClose={() => setManualEntryOpen(false)}
+          onCreated={loadLeads}
+        />
+      )}
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -462,7 +526,7 @@ export default function AdminLeadsPage() {
             <option value="CUSTOM">Custom</option>
           </FilterSelect>
 
-          <FilterSelect value={sortBy} onChange={(e) => setSortBy(e.target.value as SortOption)} className="sm:ml-auto">
+          <FilterSelect value={sortBy} onChange={(e) => setSortBy(e.target.value as SortOption)}>
             <option value="NEWEST">Newest First</option>
             <option value="OLDEST">Oldest First</option>
             <option value="SLA_URGENCY">SLA Urgency</option>
@@ -551,7 +615,9 @@ export default function AdminLeadsPage() {
               key={lead.id}
               index={index}
               teams={teams}
+              employees={employees}
               onReserveTeam={handleReserveTeam}
+              onUnjunkReassign={handleUnjunkReassign}
               lead={{
                 id: lead.id,
                 name: lead.name,
@@ -563,6 +629,8 @@ export default function AdminLeadsPage() {
                 boardStage: lead.board_stage || "LEADS",
                 recycleCount: lead.recycle_count,
                 ownerName: lead.employees?.name ?? null,
+                currentOwnerId: lead.current_owner_id ?? null,
+                catcherName: lead.catcher_name ?? null,
                 assignedAt: lead.lead_history?.[0]?.assigned_at ?? null,
                 pendingTeamId: lead.pending_team_id ?? null,
                 pendingTeamName: lead.pending_team?.name ?? null,

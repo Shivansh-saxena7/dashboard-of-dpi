@@ -127,14 +127,13 @@ export async function distributeLeadsBatch(supabase, leadsToDistribute, settings
       continue;
     }
 
-    const slaDeadline = new Date(
-      Date.now() + settings.sla_first_contact_minutes * 60 * 1000
-    ).toISOString();
-
+    // sla_deadline is computed inside assign_lead_atomic now
+    // (working-hours-aware, via compute_working_hours_sla_deadline)
+    // — this function no longer touches it, same reasoning as
+    // assign-lead/index.ts.
     const { error: assignError } = await supabase.rpc("assign_lead_atomic", {
       p_lead_id: lead.id,
       p_employee_id: result.assignedEmployeeId,
-      p_sla_deadline: slaDeadline,
       p_next_pointer_employee_id: result.nextGlobalPointerEmployeeId
     });
 
@@ -193,8 +192,9 @@ export async function distributeLeadsBatch(supabase, leadsToDistribute, settings
 // choice" precedent Project Rules themselves already established),
 // and bypasses is_active/rr_eligible/shift-started too — Admin's pick
 // is trusted regardless of current eligibility, per the approved
-// design. No SLA (p_sla_deadline always null — Data leads recycle on
-// attempt-count, not time, see calculateSLAStatus) and always
+// design. No SLA (assign_lead_atomic keeps sla_deadline null for
+// lead_type='DATA' internally — Data leads recycle on attempt-count,
+// not time, see calculateSLAStatus) and always
 // attributed to the calling Admin (assigned_by_type='ADMIN'), so the
 // audit trail correctly shows this was a deliberate manual pick, not
 // a system decision.
@@ -227,7 +227,6 @@ export async function distributeDataLeadsManually(supabase, leadsToDistribute, m
     const { error: assignError } = await supabase.rpc("assign_lead_atomic", {
       p_lead_id: lead.id,
       p_employee_id: employeeId,
-      p_sla_deadline: null,
       p_next_pointer_employee_id: currentPointerEmployeeId,
       p_assigned_by_type: "ADMIN",
       p_assigned_by_employee_id: adminEmployeeId

@@ -186,6 +186,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
         mobile,
         project,
         source,
+        catcher_name,
         status,
         priority,
         board_stage,
@@ -227,7 +228,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
   async function loadSlaBreachHistory() {
     const { data, error } = await supabase
       .from("employee_sla_breach_history")
-      .select("lead_history_id, assigned_at, ended_reason, reassign_note, project, source")
+      .select("lead_history_id, assigned_at, ended_reason, reassign_note, project, source, name, mobile_last4")
       .order("assigned_at", { ascending: false });
 
     if (!error && data) {
@@ -591,6 +592,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
                 mobile: lead.mobile,
                 project: lead.project,
                 source: lead.source,
+                catcher_name: lead.catcher_name,
                 status: lead.status,
                 priority: lead.priority,
                 board_stage: lead.board_stage,
@@ -619,6 +621,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
             name: selectedLead.name,
             mobile: selectedLead.mobile,
             project: selectedLead.project,
+            catcherName: selectedLead.catcher_name ?? null,
             status: selectedLead.status,
             callCount: selectedLead.lead_history[0]?.call_count ?? 0,
             boardStage: (selectedLead.board_stage as BoardStage) || "LEADS",

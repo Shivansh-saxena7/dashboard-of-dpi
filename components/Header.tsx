@@ -9,14 +9,82 @@ import { Playfair_Display } from "next/font/google";
 import { Bell, Globe, MapPin, Phone, LogOut, X, ChevronRight } from "lucide-react";
 import { FaInstagram, FaFacebookF, FaYoutube } from "react-icons/fa";
 import NotificationModal from "./NotificationModal";
+import BookingCelebrationModal from "./BookingCelebrationModal";
+import LeaderboardPopupModal from "./LeaderboardPopupModal";
 
 const playfair = Playfair_Display({ subsets: ["latin"], weight: ["600", "700"] });
+
+// IST wall-clock parts, independent of the device's own timezone —
+// same reasoning as the working-hours SLA-timer work (a phone set to
+// a different timezone shouldn't shift when these popups fire).
+// toLocaleString(..., {timeZone}) renders the IST wall-clock as a
+// string; re-parsing it via `new Date()` interprets that string in
+// the BROWSER's local zone, which is exactly the trick that makes
+// the resulting getHours()/getDay()/etc. reflect IST regardless of
+// device settings.
+function getISTParts() {
+  const now = new Date();
+  const ist = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+  return {
+    year: ist.getFullYear(),
+    month: ist.getMonth(),
+    dayOfMonth: ist.getDate(),
+    dayOfWeek: ist.getDay(),
+    hour: ist.getHours(),
+    minute: ist.getMinutes()
+  };
+}
+
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+// year/month(0-indexed)/day -> "YYYY-MM-DD", built from plain
+// integers rather than a Date's own toISOString() — that goes
+// through a UTC round-trip that can silently shift the date by a day
+// depending on the device's timezone, exactly the kind of bug this
+// whole IST-explicit approach exists to avoid.
+function ymd(year: number, month: number, day: number) {
+  return `${year}-${pad2(month + 1)}-${pad2(day)}`;
+}
+
+const POPUP_WINDOWS_MINUTES = [11 * 60, 14 * 60, 17 * 60]; // 11:00, 14:00, 17:00 IST
+const POPUP_WINDOW_LENGTH_MINUTES = 10;
+
+function isWithinPopupWindow(hour: number, minute: number): boolean {
+  const total = hour * 60 + minute;
+  return POPUP_WINDOWS_MINUTES.some((start) => total >= start && total < start + POPUP_WINDOW_LENGTH_MINUTES);
+}
+
+function formatShortDate(year: number, month: number, day: number): string {
+  return new Date(year, month, day).toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+interface CelebrationQueueItem {
+  id: string;
+  message: string;
+}
+
+interface LeaderboardPopupState {
+  title: string;
+  subtitle: string;
+  countLabel: string;
+  rows: { employeeId: string; employeeName: string; count: number }[];
+}
 
 export default function Header() {
   const [open, setOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
+
+  // --- Booking Celebration (Feature 3) ---
+  const [celebrationQueue, setCelebrationQueue] = useState<CelebrationQueueItem[]>([]);
+  const [currentCelebration, setCurrentCelebration] = useState<CelebrationQueueItem | null>(null);
+
+  // --- Weekly/Monthly Leaderboards (Features 1 & 2) ---
+  const [leaderboardPopup, setLeaderboardPopup] = useState<LeaderboardPopupState | null>(null);
+  const [myEmployeeId, setMyEmployeeId] = useState<string | null>(null);
 
   const router = useRouter();
 
@@ -64,6 +132,8 @@ useEffect(() => {
 
       if (!employee || cancelled) return;
 
+      setMyEmployeeId(employee.id);
+
       const existing = supabase.getChannels().find((ch) => ch.topic === `realtime:employee-${employee.id}`);
 
       if (existing) {
@@ -86,6 +156,18 @@ useEffect(() => {
             if (payload.new?.employee_id !== employee.id) return;
             setUnreadCount((prev) => prev + 1);
             await loadNotifications();
+
+            // Booking Celebration — reuses this same subscription
+            // rather than opening a second one (this already fires
+            // for every notification INSERT of this employee's,
+            // filtering to the one type here is enough). Queued, not
+            // shown directly — the queue-draining effect below is the
+            // single place that marks celebration_shown_at, so a live
+            // one and a catch-up one (found on mount) can never race
+            // on which "owns" that update.
+            if (payload.new?.type === "BOOKING_CELEBRATION") {
+              setCelebrationQueue((prev) => [...prev, { id: payload.new.id, message: payload.new.message }]);
+            }
           }
         )
         .subscribe();
@@ -98,6 +180,216 @@ useEffect(() => {
       if (channel) supabase.removeChannel(channel);
     };
   }, []);
+
+  // Drains celebrationQueue one at a time — the single place
+  // celebration_shown_at gets set, for both the live (realtime) path
+  // and the catch-up (missed-while-offline) path below, so there's
+  // exactly one owner for "has this celebration's popup been shown"
+  // regardless of which path queued it.
+  useEffect(() => {
+    if (!currentCelebration && celebrationQueue.length > 0) {
+      const [next, ...rest] = celebrationQueue;
+      setCurrentCelebration(next);
+      setCelebrationQueue(rest);
+
+      supabase
+        .from("notification")
+        .update({ celebration_shown_at: new Date().toISOString() })
+        .eq("id", next.id)
+        .then(({ error }) => {
+          if (error) console.error("mark celebration_shown_at failed:", error.message);
+        });
+    }
+  }, [currentCelebration, celebrationQueue]);
+
+  // Catch-up — an employee who was offline when a booking happened
+  // still gets the full celebration popup once they open the app,
+  // not just a bell-icon badge (a booking is a genuine team
+  // achievement, worth more than a silent unread count). Bounded to
+  // the last 48h / 5 most recent so a long absence doesn't turn into
+  // a wall of stale popups — anything older just gets silently marked
+  // shown (it still stays visible in the bell/notification list
+  // forever either way, only the POPUP is skipped).
+  //
+  // Runs on mount AND every 2 minutes thereafter (not just once) —
+  // a tab that was already open before a booking happened only ran
+  // this ONE time, before the celebration row existed, so it relied
+  // entirely on realtime staying live for the rest of that session.
+  // Realtime websockets do go quietly stale (backgrounded tab, sleep/
+  // wake, a network blip) without necessarily reconnecting cleanly,
+  // and postgres_changes has no "replay what I missed" semantics on
+  // reconnect — so a single mount-time check is not a reliable enough
+  // safety net on its own. The 2-minute poll is what actually
+  // guarantees "everyone eventually sees it," realtime is just the
+  // fast path when it's working. shownOrQueuedIdsRef guards against
+  // the same row being queued twice if a poll lands in the brief
+  // window between a row being queued and celebration_shown_at
+  // actually landing in the database.
+  useEffect(() => {
+    let cancelled = false;
+    const shownOrQueuedIds = new Set<string>();
+
+    const checkCelebrationCatchup = async () => {
+      const {
+        data: { user }
+      } = await supabase.auth.getUser();
+
+      if (!user || cancelled) return;
+
+      const { data: employee } = await supabase
+        .from("employees")
+        .select("id")
+        .eq("auth_user_id", user.id)
+        .single();
+
+      if (!employee || cancelled) return;
+
+      const cutoffIso = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+
+      await supabase
+        .from("notification")
+        .update({ celebration_shown_at: new Date().toISOString() })
+        .eq("employee_id", employee.id)
+        .eq("type", "BOOKING_CELEBRATION")
+        .is("celebration_shown_at", null)
+        .lt("created_at", cutoffIso);
+
+      if (cancelled) return;
+
+      const { data } = await supabase
+        .from("notification")
+        .select("id, message")
+        .eq("employee_id", employee.id)
+        .eq("type", "BOOKING_CELEBRATION")
+        .is("celebration_shown_at", null)
+        .gte("created_at", cutoffIso)
+        .order("created_at", { ascending: true })
+        .limit(5);
+
+      if (cancelled || !data || data.length === 0) return;
+
+      const fresh = data.filter((n) => !shownOrQueuedIds.has(n.id));
+      if (fresh.length === 0) return;
+
+      fresh.forEach((n) => shownOrQueuedIds.add(n.id));
+      setCelebrationQueue((prev) => [...prev, ...fresh.map((n) => ({ id: n.id, message: n.message }))]);
+    };
+
+    checkCelebrationCatchup();
+    const interval = setInterval(checkCelebrationCatchup, 2 * 60 * 1000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Weekly Visits / Monthly Bookings leaderboard popups — Tuesday
+  // (weekly) and the first working day of the month (monthly), each
+  // with 3 daily catch-windows (11/2/5, IST) rather than one instant
+  // — an employee who isn't looking at the app at exactly 11:00:00
+  // still gets caught by 2 or 5. Each employee sees a given week's/
+  // month's popup at most once (leaderboard_popup_views), whichever
+  // window catches them first — not three times.
+  useEffect(() => {
+    if (!myEmployeeId) return;
+
+    let cancelled = false;
+
+    const checkLeaderboardPopups = async () => {
+      if (cancelled || leaderboardPopup) return; // one at a time
+
+      const parts = getISTParts();
+      if (!isWithinPopupWindow(parts.hour, parts.minute)) return;
+
+      if (parts.dayOfWeek === 2) {
+        const weekStartDate = new Date(parts.year, parts.month, parts.dayOfMonth - 8);
+        const periodKey = ymd(weekStartDate.getFullYear(), weekStartDate.getMonth(), weekStartDate.getDate());
+
+        const { data: seen } = await supabase
+          .from("leaderboard_popup_views")
+          .select("id")
+          .eq("employee_id", myEmployeeId)
+          .eq("popup_type", "WEEKLY_VISITS")
+          .eq("period_key", periodKey)
+          .maybeSingle();
+
+        if (!cancelled && !seen) {
+          const { data: rows } = await supabase.rpc("weekly_visits_leaderboard", { p_week_start: periodKey });
+
+          if (!cancelled && rows && rows.length > 0) {
+            const { error: insertError } = await supabase
+              .from("leaderboard_popup_views")
+              .insert({ employee_id: myEmployeeId, popup_type: "WEEKLY_VISITS", period_key: periodKey });
+
+            if (!insertError && !cancelled) {
+              const weekEndDate = new Date(weekStartDate);
+              weekEndDate.setDate(weekEndDate.getDate() + 6);
+              setLeaderboardPopup({
+                title: "🏆 Weekly Visits Leaderboard",
+                subtitle: `Week of ${formatShortDate(weekStartDate.getFullYear(), weekStartDate.getMonth(), weekStartDate.getDate())} – ${formatShortDate(weekEndDate.getFullYear(), weekEndDate.getMonth(), weekEndDate.getDate())}`,
+                countLabel: "visits",
+                rows: rows.map((r: any) => ({ employeeId: r.employee_id, employeeName: r.employee_name, count: r.visit_count }))
+              });
+              return;
+            }
+          }
+        }
+      }
+
+      if (cancelled || leaderboardPopup) return;
+
+      const { data: settings } = await supabase
+        .from("lead_engine_settings")
+        .select("sla_weekly_off_day")
+        .eq("id", 1)
+        .single();
+
+      const offDay = settings?.sla_weekly_off_day ?? 1;
+      const dowOf1st = new Date(parts.year, parts.month, 1).getDay();
+      const firstWorkingDay = dowOf1st === offDay ? 2 : 1;
+
+      if (parts.dayOfMonth !== firstWorkingDay) return;
+
+      const prevMonthDate = new Date(parts.year, parts.month - 1, 1);
+      const periodKey = ymd(prevMonthDate.getFullYear(), prevMonthDate.getMonth(), 1);
+
+      const { data: seen } = await supabase
+        .from("leaderboard_popup_views")
+        .select("id")
+        .eq("employee_id", myEmployeeId)
+        .eq("popup_type", "MONTHLY_BOOKINGS")
+        .eq("period_key", periodKey)
+        .maybeSingle();
+
+      if (cancelled || seen) return;
+
+      const { data: rows } = await supabase.rpc("monthly_bookings_leaderboard", { p_month_start: periodKey });
+
+      if (cancelled || !rows || rows.length === 0) return;
+
+      const { error: insertError } = await supabase
+        .from("leaderboard_popup_views")
+        .insert({ employee_id: myEmployeeId, popup_type: "MONTHLY_BOOKINGS", period_key: periodKey });
+
+      if (!insertError && !cancelled) {
+        setLeaderboardPopup({
+          title: "🏆 Monthly Bookings Leaderboard",
+          subtitle: prevMonthDate.toLocaleDateString([], { month: "long", year: "numeric" }),
+          countLabel: "bookings",
+          rows: rows.map((r: any) => ({ employeeId: r.employee_id, employeeName: r.employee_name, count: r.booking_count }))
+        });
+      }
+    };
+
+    checkLeaderboardPopups();
+    const interval = setInterval(checkLeaderboardPopups, 60000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [myEmployeeId, leaderboardPopup]);
 
   const loadNotifications = async () => {
     const {
@@ -200,6 +492,24 @@ useEffect(() => {
 
       {showNotifications && (
         <NotificationModal notifications={notifications} onClose={() => setShowNotifications(false)} />
+      )}
+
+      {currentCelebration && (
+        <BookingCelebrationModal
+          message={currentCelebration.message}
+          onClose={() => setCurrentCelebration(null)}
+        />
+      )}
+
+      {leaderboardPopup && (
+        <LeaderboardPopupModal
+          title={leaderboardPopup.title}
+          subtitle={leaderboardPopup.subtitle}
+          countLabel={leaderboardPopup.countLabel}
+          rows={leaderboardPopup.rows}
+          myEmployeeId={myEmployeeId}
+          onClose={() => setLeaderboardPopup(null)}
+        />
       )}
 
       {/* DRAWER */}

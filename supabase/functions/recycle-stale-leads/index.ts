@@ -96,6 +96,33 @@ serve(async () => {
       );
     }
 
+    // Admin's force_reassign_lead_atomic permanently bans a
+    // (lead, employee) pairing from ever coming back together via
+    // automatic recycling — fetched once here, consulted below in
+    // both the project-rule-group and general round-robin branches.
+    // Deliberately does NOT apply to manual assignment paths
+    // (Team-Leader assign/reassign, Admin Data-assign) — a human
+    // consciously re-picking that employee is a different thing from
+    // this lead silently cycling back to them on its own.
+    const { data: forcedRemovalsRaw, error: forcedRemovalsError } = await supabase
+      .from("lead_forced_removals")
+      .select("lead_id, removed_employee_id");
+
+    if (forcedRemovalsError) {
+      return new Response(
+        JSON.stringify({ success: false, step: "FETCH_FORCED_REMOVALS", error: forcedRemovalsError.message }),
+        { headers: { "Content-Type": "application/json" }, status: 500 }
+      );
+    }
+
+    const forcedRemovalsByLead = new Map<string, Set<string>>();
+    (forcedRemovalsRaw || []).forEach((row) => {
+      if (!forcedRemovalsByLead.has(row.lead_id)) {
+        forcedRemovalsByLead.set(row.lead_id, new Set());
+      }
+      forcedRemovalsByLead.get(row.lead_id)!.add(row.removed_employee_id);
+    });
+
     // For multi-employee project rules — round robin position within
     // just that project's fixed-employee group, entirely separate
     // from the company-wide pointer.
@@ -217,8 +244,10 @@ serve(async () => {
         current_owner_id,
         lead_type,
         board_stage,
+        last_unjunked_at,
         lead_history!inner (
           id,
+          assigned_at,
           outcome_at,
           is_active,
           sla_warning_sent_at,
@@ -382,11 +411,26 @@ serve(async () => {
 
       }
 
-      const { count: notInterestedCount } = await supabase
+      // Bounded to lead_history rows created at-or-after the lead's
+      // most recent unjunk_and_reassign_lead_atomic recovery (if
+      // any) — a manual recovery is a deliberate "this deserves a
+      // genuine fresh start" decision, and without this bound, a
+      // lead junked partly for repeat-NOT_INTERESTED would just
+      // immediately re-trigger JUNK_ELIGIBLE on the very next sweep,
+      // defeating the whole recovery feature. Nothing in lead_history
+      // itself is altered or deleted — the full audit trail (including
+      // pre-recovery NOT_INTERESTED outcomes) stays exactly as it was.
+      let notInterestedQuery = supabase
         .from("lead_history")
         .select("*", { count: "exact", head: true })
         .eq("lead_id", lead.id)
         .eq("outcome", "NOT_INTERESTED");
+
+      if (lead.last_unjunked_at) {
+        notInterestedQuery = notInterestedQuery.gt("assigned_at", lead.last_unjunked_at);
+      }
+
+      const { count: notInterestedCount } = await notInterestedQuery;
 
       const slaStatus = calculateSLAStatus(
         {
@@ -398,7 +442,8 @@ serve(async () => {
           board_stage: lead.board_stage,
           paused_until: activeHistory.paused_until,
           last_activity_at: activeHistory.last_activity_at,
-          pause_reason: activeHistory.pause_reason
+          pause_reason: activeHistory.pause_reason,
+          assigned_at: activeHistory.assigned_at
         },
         activeHistory.outcome_at,
         notInterestedCount || 0
@@ -499,21 +544,11 @@ serve(async () => {
         continue;
       }
 
-      // DATA leads carry no SLA-clock at all — even after this
-      // recycle lands them with a new owner, per the approved design
-      // they stay attempt-count-based (not time-based) for as long as
-      // they remain unreached, so the new lead_history row should
-      // start with no sla_deadline too, same as their very first
-      // assignment did.
-      const isDataLead = lead.lead_type === "DATA";
-
-      // Follow-up-Stale-Recycling: board_stage doesn't reset on a
-      // recycle, so a lead reassigned here from FOLLOW_UP/VISIT stays
-      // in that same column for its new owner too — the fixed-clock
-      // sla_deadline is meaningless for it going forward (this
-      // lead's calculateSLAStatus checks board_stage first, before
-      // ever looking at sla_deadline), same reasoning as isDataLead.
-      const isBeyondLeadsStage = Boolean(lead.board_stage) && lead.board_stage !== "LEADS";
+      // sla_deadline itself is computed inside recycle_lead_atomic now
+      // (working-hours-aware, via compute_working_hours_sla_deadline;
+      // stays null for lead_type='DATA', same as before — DATA leads
+      // recycle on attempt-count, not time, see calculateSLAStatus) —
+      // this Edge Function doesn't compute or pass it anymore.
 
       const normalizedProject = String(lead.project || "").trim().toLowerCase();
 
@@ -616,7 +651,8 @@ serve(async () => {
           (id) =>
             id !== lead.current_owner_id &&
             shiftStartedEmployeeIds.has(id) &&
-            (isActiveByEmployeeId.get(id) ?? false)
+            (isActiveByEmployeeId.get(id) ?? false) &&
+            !(forcedRemovalsByLead.get(lead.id)?.has(id))
         );
 
         if (groupPoolEmployees.length === 0) {
@@ -635,15 +671,10 @@ serve(async () => {
         const nextIndex = lastIndex === -1 ? 0 : (lastIndex + 1) % groupPoolEmployees.length;
         const nextEmployeeId = groupPoolEmployees[nextIndex];
 
-        const newSlaDeadline = isDataLead || isBeyondLeadsStage
-          ? null
-          : new Date(Date.now() + settings.sla_first_contact_minutes * 60 * 1000).toISOString();
-
         const { error: projectRecycleError } = await supabase.rpc("recycle_lead_atomic", {
           p_lead_id: lead.id,
           p_old_lead_history_id: activeHistory.id,
           p_new_employee_id: nextEmployeeId,
-          p_new_sla_deadline: newSlaDeadline,
           // Global pointer untouched — this lead was never part of the
           // company-wide rotation to begin with.
           p_next_pointer_employee_id: pointerEmployeeId,
@@ -684,9 +715,13 @@ serve(async () => {
       }
 
       // Round robin: exclude the current owner so a non-responsive
-      // employee doesn't just get the same lead back.
+      // employee doesn't just get the same lead back — and exclude
+      // anyone Admin has permanently force-removed from this specific
+      // lead (see forcedRemovalsByLead above).
       let eligibleEmployees = shiftActiveEmployees.filter(
-        (employee) => employee.id !== lead.current_owner_id
+        (employee) =>
+          employee.id !== lead.current_owner_id &&
+          !(forcedRemovalsByLead.get(lead.id)?.has(employee.id))
       );
 
       // A Team-Leader-assigned lead was that team's own resource, not
@@ -738,15 +773,10 @@ serve(async () => {
         continue;
       }
 
-      const newSlaDeadline = isDataLead
-        ? null
-        : new Date(Date.now() + settings.sla_first_contact_minutes * 60 * 1000).toISOString();
-
       const { error: recycleError } = await supabase.rpc("recycle_lead_atomic", {
         p_lead_id: lead.id,
         p_old_lead_history_id: activeHistory.id,
         p_new_employee_id: result.assignedEmployeeId,
-        p_new_sla_deadline: newSlaDeadline,
         // Team-scoped recycles never advance the system-wide pointer
         // — that pointer tracks company-wide rotation, which this
         // lead was never part of (same "bypasses round-robin"

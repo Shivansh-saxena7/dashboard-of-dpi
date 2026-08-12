@@ -11,6 +11,8 @@ interface SLABreachHistoryEntry {
   reassign_note: string | null;
   project: string | null;
   source: string | null;
+  name: string | null;
+  mobile_last4: string | null;
 }
 
 interface SLABreachHistoryCardProps {
@@ -38,14 +40,17 @@ const REASON_ICON_GRADIENT: Record<string, string> = {
   TEAM_LEADER_REASSIGNED: "from-amber-400 to-orange-500 shadow-[0_4px_12px_rgba(217,119,6,0.3)]"
 };
 
-// Client name and mobile number are deliberately absent — not
-// because this component chooses to hide them, but because
-// employee_sla_breach_history never has access to those columns in
-// the first place: project/source come through lead_project_source(),
-// a function whose return signature only has room for those two
-// fields, so there is no code path here that could leak name/mobile
-// even by mistake. Non-interactive (no onClick) — there is nothing
-// further to drill into.
+// Name and a masked last-4-digits are shown now (a deliberate, bounded
+// relaxation of the original fully-masked design — approved
+// explicitly) so a past lead is actually recognizable ("oh, that
+// one") without re-identifying it: the FULL mobile number, current
+// status/board_stage, and current owner are still never exposed —
+// employee_sla_breach_history has no columns for any of those, and
+// lead_project_source() (the one function allowed to reach into
+// `leads` on an ex-owner's behalf) only ever returns project/source/
+// name/mobile_last4, nothing else, so there's no code path here that
+// could leak more even by mistake. Non-interactive (no onClick) —
+// there is nothing further to drill into.
 export default function SLABreachHistoryCard({ entry, index = 0 }: SLABreachHistoryCardProps) {
 
   const reasonText = ENDED_REASON_TEXT[entry.ended_reason] || "This lead was reassigned.";
@@ -68,18 +73,30 @@ export default function SLABreachHistoryCard({ entry, index = 0 }: SLABreachHist
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              {entry.project ? (
-                <p className="text-[15px] font-bold text-slate-800 truncate">{entry.project}</p>
+              {entry.name ? (
+                <p className="text-[15px] font-bold text-slate-800 truncate">{entry.name}</p>
               ) : (
-                <p className="text-[15px] font-bold text-slate-400 italic">Project unavailable</p>
+                <p className="text-[15px] font-bold text-slate-400 italic">Name unavailable</p>
+              )}
+              {entry.project ? (
+                <p className="text-xs text-slate-500 mt-0.5 truncate">{entry.project}</p>
+              ) : (
+                <p className="text-xs text-slate-400 italic mt-0.5">Project unavailable</p>
               )}
             </div>
 
-            {entry.source && (
-              <span className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">
-                {entry.source}
-              </span>
-            )}
+            <div className="shrink-0 flex flex-col items-end gap-1">
+              {entry.source && (
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">
+                  {entry.source}
+                </span>
+              )}
+              {entry.mobile_last4 && (
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">
+                  •••• {entry.mobile_last4}
+                </span>
+              )}
+            </div>
           </div>
 
           <span className={`inline-block mt-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full ${badge.className}`}>

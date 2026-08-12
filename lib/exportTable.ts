@@ -29,6 +29,31 @@ export type ExportRow = Record<string, string | number>;
 const COMPANY_NAME = "Divya Padma Infosystem LLP";
 const BRAND_BLUE: [number, number, number] = [29, 78, 216];
 const SLATE_500: [number, number, number] = [100, 116, 139];
+const SLATE_200: [number, number, number] = [226, 232, 240];
+
+// Shared by exportTableToPDF and exportMultiSectionToPDF's autoTable
+// calls — light grid-lines (theme:"grid" without this looks the same
+// as jspdf-autotable's default striped theme but with heavy black
+// 1pt borders, not the subtle look the rest of the app uses).
+// lineWidth 0.5pt + slate-200 matches the on-screen tables' own
+// divide-slate-100/200 borders as closely as jsPDF's units allow.
+const PDF_TABLE_STYLES = {
+  fontSize: 7,
+  cellPadding: 4,
+  overflow: "linebreak" as const,
+  valign: "middle" as const,
+  lineColor: SLATE_200,
+  lineWidth: 0.5
+};
+
+const PDF_HEAD_STYLES = {
+  fillColor: BRAND_BLUE,
+  textColor: 255,
+  fontStyle: "bold" as const,
+  halign: "left" as const,
+  lineColor: SLATE_200,
+  lineWidth: 0.5
+};
 
 export function formatDateTime(iso: string | null): string {
   if (!iso) return "—";
@@ -89,17 +114,18 @@ export interface ExportTableOptions {
   pdfExcludedKeys?: string[];
 }
 
-export async function exportTableToExcel(opts: ExportTableOptions) {
-  const { reportTitle, sheetName, filenamePrefix, columns, rows, meta } = opts;
-  const colCount = columns.length;
-
-  const ExcelJS = await import("exceljs");
-  const workbook = new ExcelJS.Workbook();
-  workbook.creator = COMPANY_NAME;
-  workbook.created = new Date();
-
-  const sheet = workbook.addWorksheet(sheetName);
-
+// Shared by exportTableToExcel and exportMultiSectionToExcel — writes
+// the confidential-banner + title + meta-info block at the top of a
+// worksheet and returns the row index the actual data table should
+// start at. Every sheet gets this (not just the first) so a sheet is
+// self-contained/understandable even if someone jumps straight to it
+// without reading the first one.
+function writeExcelSheetHeader(
+  sheet: import("exceljs").Worksheet,
+  colCount: number,
+  title: string,
+  meta: ExportReportMeta
+): number {
   function mergedTextRow(rowIndex: number, text: string, font: Partial<import("exceljs").Font>) {
     sheet.mergeCells(rowIndex, 1, rowIndex, colCount);
     const cell = sheet.getCell(rowIndex, 1);
@@ -115,7 +141,7 @@ export async function exportTableToExcel(opts: ExportTableOptions) {
   });
   sheet.getRow(1).height = 30;
 
-  mergedTextRow(2, reportTitle, { size: 13, bold: true, color: { argb: "FF0F172A" } });
+  mergedTextRow(2, title, { size: 13, bold: true, color: { argb: "FF0F172A" } });
 
   let row = 3;
 
@@ -148,7 +174,18 @@ export async function exportTableToExcel(opts: ExportTableOptions) {
 
   row++; // blank spacer before the table
 
-  const headerRowIndex = row;
+  return row;
+}
+
+// Shared by exportTableToExcel and exportMultiSectionToExcel — draws
+// the header row + data rows + column widths + frozen pane for one
+// table, starting at headerRowIndex.
+function writeExcelTable(
+  sheet: import("exceljs").Worksheet,
+  headerRowIndex: number,
+  columns: readonly ExportColumn[],
+  rows: ExportRow[]
+) {
   columns.forEach((col, i) => {
     const cell = sheet.getCell(headerRowIndex, i + 1);
     cell.value = col.header;
@@ -175,6 +212,20 @@ export async function exportTableToExcel(opts: ExportTableOptions) {
   });
 
   sheet.views = [{ state: "frozen", ySplit: headerRowIndex }];
+}
+
+export async function exportTableToExcel(opts: ExportTableOptions) {
+  const { reportTitle, sheetName, filenamePrefix, columns, rows, meta } = opts;
+  const colCount = columns.length;
+
+  const ExcelJS = await import("exceljs");
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = COMPANY_NAME;
+  workbook.created = new Date();
+
+  const sheet = workbook.addWorksheet(sheetName);
+  const headerRowIndex = writeExcelSheetHeader(sheet, colCount, reportTitle, meta);
+  writeExcelTable(sheet, headerRowIndex, columns, rows);
 
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], {
@@ -183,22 +234,108 @@ export async function exportTableToExcel(opts: ExportTableOptions) {
   downloadBlob(blob, buildExportFilename(filenamePrefix, "xlsx"));
 }
 
-export async function exportTableToPDF(opts: ExportTableOptions) {
-  const { reportTitle, filenamePrefix, rows, meta, pdfExcludedKeys = [] } = opts;
-  const columns = opts.columns.filter((col) => !pdfExcludedKeys.includes(col.key));
+// One table per section, e.g. an Employee Summary + its supporting
+// per-lead Detail — genuinely different column shapes, so they can't
+// share one table (neither ExcelJS nor jsPDF-autotable support mixed-
+// column nested rows within a single table well). Excel gets one
+// worksheet per section (the standard, familiar way spreadsheet users
+// already expect "summary + backing detail" to be organized); PDF
+// gets one section per page. Both share the exact same styling/
+// header/watermark machinery as the single-table functions above —
+// this is purely a "more than one table in the same file" capability,
+// not a second export system.
+export interface ExportSection {
+  sectionTitle: string;
+  sheetName: string;
+  columns: readonly ExportColumn[];
+  rows: ExportRow[];
+}
 
-  const { jsPDF, GState } = await import("jspdf");
-  const { default: autoTable } = await import("jspdf-autotable");
+export interface ExportMultiSectionOptions {
+  reportTitle: string;
+  filenamePrefix: string;
+  sections: ExportSection[];
+  meta: ExportReportMeta;
+  pdfExcludedKeys?: string[];
+}
 
-  const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+export async function exportMultiSectionToExcel(opts: ExportMultiSectionOptions) {
+  const { reportTitle, filenamePrefix, sections, meta } = opts;
 
+  const ExcelJS = await import("exceljs");
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = COMPANY_NAME;
+  workbook.created = new Date();
+
+  sections.forEach((section) => {
+    const sheet = workbook.addWorksheet(section.sheetName);
+    const headerRowIndex = writeExcelSheetHeader(sheet, section.columns.length, section.sectionTitle || reportTitle, meta);
+    writeExcelTable(sheet, headerRowIndex, section.columns, section.rows);
+  });
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  });
+  downloadBlob(blob, buildExportFilename(filenamePrefix, "xlsx"));
+}
+
+// Shared by exportTableToPDF and exportMultiSectionToPDF's
+// didDrawPage callback — the diagonal watermark + page-number footer
+// drawn on every page.
+function drawPdfWatermarkAndPageNumber(doc: import("jspdf").jsPDF, GState: any, pageNumber: number) {
+  const pw = doc.internal.pageSize.getWidth();
+  const ph = doc.internal.pageSize.getHeight();
+  const angleDeg = 45;
+  const angleRad = (angleDeg * Math.PI) / 180;
+  const watermarkText = COMPANY_NAME.toUpperCase();
+
+  doc.saveGraphicsState();
+  doc.setGState(new GState({ opacity: 0.15 }));
+  doc.setFont("helvetica", "bold");
+
+  // jsPDF's align:"center" doesn't compute the anchor correctly once
+  // a rotation angle is involved (verified: it shifted the text
+  // hundreds of points off — the actual cause of it landing in a
+  // corner). Centering is done manually instead: measure the text at
+  // a 60pt reference size, then scale the font down so the full
+  // diagonal run fits within 85% of the page's shorter dimension —
+  // the un-scaled 60pt text was ~940pt wide, wider than the page
+  // itself, so no amount of correct centering math could have kept it
+  // from running off the edges.
+  doc.setFontSize(60);
+  const referenceWidth = doc.getTextWidth(watermarkText);
+  const maxWidth = (Math.min(pw, ph) * 0.85) / Math.sin(angleRad);
+  const fontSize = Math.min(60, 60 * (maxWidth / referenceWidth));
+  doc.setFontSize(fontSize);
+
+  const textWidth = doc.getTextWidth(watermarkText);
+  const cx = pw / 2;
+  const cy = ph / 2;
+  const startX = cx - (textWidth / 2) * Math.cos(angleRad);
+  const startY = cy + (textWidth / 2) * Math.sin(angleRad);
+
+  doc.setTextColor(...SLATE_500);
+  doc.text(watermarkText, startX, startY, { angle: angleDeg });
+  doc.restoreGraphicsState();
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7);
+  doc.setTextColor(148, 163, 184);
+  doc.text(`Page ${pageNumber}`, pw - 20, ph - 15, { align: "right" });
+}
+
+// Shared by exportTableToPDF and exportMultiSectionToPDF — draws the
+// title/company banner + meta-info block at the top of the current
+// page and returns the Y position the table should start at.
+function drawPdfPageHeader(doc: import("jspdf").jsPDF, title: string, meta: ExportReportMeta): number {
   const generatedAt = formatDateTime(new Date().toISOString());
   const filtersLine = buildFiltersLine(meta.otherFilters);
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(16);
   doc.setTextColor(15, 23, 42);
-  doc.text(reportTitle, 20, 28);
+  doc.text(title, 20, 28);
 
   doc.setFontSize(11);
   doc.setTextColor(...BRAND_BLUE);
@@ -228,56 +365,61 @@ export async function exportTableToPDF(opts: ExportTableOptions) {
   headerY += 12;
   doc.text(filtersLine, 20, headerY);
 
+  return headerY;
+}
+
+export async function exportTableToPDF(opts: ExportTableOptions) {
+  const { reportTitle, filenamePrefix, rows, meta, pdfExcludedKeys = [] } = opts;
+  const columns = opts.columns.filter((col) => !pdfExcludedKeys.includes(col.key));
+
+  const { jsPDF, GState } = await import("jspdf");
+  const { default: autoTable } = await import("jspdf-autotable");
+
+  const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+  const headerY = drawPdfPageHeader(doc, reportTitle, meta);
+
   autoTable(doc, {
     startY: headerY + 14,
+    theme: "grid",
     head: [columns.map((c) => c.header)],
     body: rows.map((row) => columns.map((c) => String(row[c.key]))),
-    styles: { fontSize: 7, cellPadding: 4, overflow: "linebreak", valign: "middle" },
-    headStyles: { fillColor: BRAND_BLUE, textColor: 255, fontStyle: "bold", halign: "left" },
+    styles: PDF_TABLE_STYLES,
+    headStyles: PDF_HEAD_STYLES,
     alternateRowStyles: { fillColor: [248, 250, 252] },
     columnStyles: Object.fromEntries(columns.map((c, i) => [i, { halign: c.align }])),
     margin: { left: 20, right: 20, top: 40 },
-    didDrawPage: (data) => {
-      const pw = doc.internal.pageSize.getWidth();
-      const ph = doc.internal.pageSize.getHeight();
-      const angleDeg = 45;
-      const angleRad = (angleDeg * Math.PI) / 180;
-      const watermarkText = COMPANY_NAME.toUpperCase();
+    didDrawPage: (data) => drawPdfWatermarkAndPageNumber(doc, GState, data.pageNumber)
+  });
 
-      doc.saveGraphicsState();
-      doc.setGState(new GState({ opacity: 0.15 }));
-      doc.setFont("helvetica", "bold");
+  doc.save(buildExportFilename(filenamePrefix, "pdf"));
+}
 
-      // jsPDF's align:"center" doesn't compute the anchor correctly
-      // once a rotation angle is involved (verified: it shifted the
-      // text hundreds of points off — the actual cause of it landing
-      // in a corner). Centering is done manually instead: measure the
-      // text at a 60pt reference size, then scale the font down so
-      // the full diagonal run fits within 85% of the page's shorter
-      // dimension — the un-scaled 60pt text was ~940pt wide, wider
-      // than the page itself, so no amount of correct centering math
-      // could have kept it from running off the edges.
-      doc.setFontSize(60);
-      const referenceWidth = doc.getTextWidth(watermarkText);
-      const maxWidth = (Math.min(pw, ph) * 0.85) / Math.sin(angleRad);
-      const fontSize = Math.min(60, 60 * (maxWidth / referenceWidth));
-      doc.setFontSize(fontSize);
+export async function exportMultiSectionToPDF(opts: ExportMultiSectionOptions) {
+  const { reportTitle, filenamePrefix, sections, meta, pdfExcludedKeys = [] } = opts;
 
-      const textWidth = doc.getTextWidth(watermarkText);
-      const cx = pw / 2;
-      const cy = ph / 2;
-      const startX = cx - (textWidth / 2) * Math.cos(angleRad);
-      const startY = cy + (textWidth / 2) * Math.sin(angleRad);
+  const { jsPDF, GState } = await import("jspdf");
+  const { default: autoTable } = await import("jspdf-autotable");
 
-      doc.setTextColor(...SLATE_500);
-      doc.text(watermarkText, startX, startY, { angle: angleDeg });
-      doc.restoreGraphicsState();
+  const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
 
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(7);
-      doc.setTextColor(148, 163, 184);
-      doc.text(`Page ${data.pageNumber}`, pw - 20, ph - 15, { align: "right" });
-    }
+  sections.forEach((section, index) => {
+    if (index > 0) doc.addPage();
+
+    const headerY = drawPdfPageHeader(doc, section.sectionTitle || reportTitle, meta);
+    const columns = section.columns.filter((col) => !pdfExcludedKeys.includes(col.key));
+
+    autoTable(doc, {
+      startY: headerY + 14,
+      theme: "grid",
+      head: [columns.map((c) => c.header)],
+      body: section.rows.map((row) => columns.map((c) => String(row[c.key]))),
+      styles: PDF_TABLE_STYLES,
+      headStyles: PDF_HEAD_STYLES,
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+      columnStyles: Object.fromEntries(columns.map((c, i) => [i, { halign: c.align }])),
+      margin: { left: 20, right: 20, top: 40 },
+      didDrawPage: (data) => drawPdfWatermarkAndPageNumber(doc, GState, data.pageNumber)
+    });
   });
 
   doc.save(buildExportFilename(filenamePrefix, "pdf"));

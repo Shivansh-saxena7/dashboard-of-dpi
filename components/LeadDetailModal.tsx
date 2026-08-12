@@ -18,6 +18,7 @@ export interface LeadDetailLead {
   name: string;
   mobile: string;
   project: string | null;
+  catcherName: string | null;
   status: LeadStatus;
   callCount: number;
   boardStage: BoardStage;
@@ -175,10 +176,15 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
 
     try {
 
-      const { error } = await supabase
-        .from("leads")
-        .update({ board_stage: "FOLLOW_UP", board_stage_changed_at: new Date().toISOString() })
-        .eq("id", lead.id);
+      // RPC, not a raw table update — the RLS policy that used to
+      // allow this (leads_owner_update) was column-unrestricted, so
+      // an employee could in principle have directly PATCHed any
+      // column on their own owned lead (status, sla_deadline, etc.)
+      // via a raw API call, not just board_stage. This RPC only ever
+      // touches board_stage/board_stage_changed_at server-side.
+      const { error } = await supabase.rpc("move_lead_to_followup_atomic", {
+        p_lead_id: lead.id
+      });
 
       if (error) {
         toast.error(error.message || "Could not move this lead.");
@@ -352,6 +358,9 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
           </p>
           <h2 className="text-xl font-bold text-slate-800 pr-10">{lead.name}</h2>
           {lead.project && <p className="text-sm text-slate-500 mt-0.5">{lead.project}</p>}
+          {lead.catcherName && (
+            <p className="text-sm text-amber-700 font-semibold mt-1">🎣 Caught by: {lead.catcherName}</p>
+          )}
 
           <span
             className={`inline-block mt-3 text-[11px] font-semibold px-2.5 py-1 rounded-full ${LEAD_STATUS_DISPLAY[lead.status].badgeClassName}`}
@@ -461,13 +470,30 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
                       📞 Move to Follow-up
                     </button>
                   )}
-                  {lead.boardStage !== "VISIT" && (
+                  {lead.boardStage !== "VISIT" ? (
                     <button
                       disabled={moving}
                       onClick={() => setVisitPromptOpen(true)}
                       className="text-xs font-semibold px-3 py-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-60"
                     >
                       🏠 Move to Visit
+                    </button>
+                  ) : (
+                    // Once already in the Visit column, "Move to
+                    // Visit" (which asks First Visit vs Revisit) no
+                    // longer applies — every further visit here IS a
+                    // revisit by definition, so this logs it directly
+                    // rather than via a button that would otherwise
+                    // never reappear. Without this, Revisit was
+                    // structurally unreachable after the first visit —
+                    // the whole point of a revisit resetting the
+                    // Client-Lock could never actually be triggered.
+                    <button
+                      disabled={moving}
+                      onClick={() => moveToVisit("REVISIT")}
+                      className="text-xs font-semibold px-3 py-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-60"
+                    >
+                      🔄 Log Revisit
                     </button>
                   )}
                   <button

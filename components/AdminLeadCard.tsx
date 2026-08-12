@@ -21,6 +21,8 @@ interface AdminLeadCardLead {
   boardStage: BoardStage;
   recycleCount: number;
   ownerName: string | null;
+  currentOwnerId?: string | null;
+  catcherName?: string | null;
   assignedAt: string | null;
   pendingTeamId: string | null;
   pendingTeamName: string | null;
@@ -36,6 +38,16 @@ interface AdminLeadCardProps {
   teams: { id: string; name: string }[];
   onReserveTeam: (leadId: string, teamId: string | null) => void;
   index?: number;
+  // Full active-employee roster — only actually used by the JUNK-
+  // recovery Reassign picker below (optional so every other existing
+  // caller of this card is unaffected).
+  employees?: { id: string; name: string; is_active: boolean }[];
+  // JUNK-recovery — Admin manually decides a specific JUNK lead is
+  // worth another shot and hands it to someone. The one deliberate,
+  // narrow exception to this card's "purely a visibility layer"
+  // design (see the file-level comment below) — optional, and only
+  // ever rendered when lead.status === "JUNK" && !readOnly.
+  onUnjunkReassign?: (leadId: string, employeeId: string, reason: string) => void | Promise<void>;
   // Sales Coordinator reuses this exact card for full-visibility
   // reporting (Golden Rule — one card, not a forked copy), but per
   // the approved scope ("Aankhen aur Reports," never "Haath"),
@@ -43,6 +55,7 @@ interface AdminLeadCardProps {
   // just be functionally blocked from it — the team-reserve <select>
   // below is a real decision-making control, so this replaces it with
   // plain read-only text instead of merely no-op'ing onReserveTeam.
+  // Also hides the JUNK-recovery Reassign control (Admin-only power).
   readOnly?: boolean;
 }
 
@@ -82,9 +95,35 @@ interface AdminLeadCardProps {
 // drawer resolve against the viewport, not this card's transformed
 // (animated) box — that was the cause of the drawer sometimes
 // rendering as if it were a small centered card.
-export default function AdminLeadCard({ lead, teams, onReserveTeam, index = 0, readOnly = false }: AdminLeadCardProps) {
+export default function AdminLeadCard({
+  lead,
+  teams,
+  onReserveTeam,
+  index = 0,
+  employees = [],
+  onUnjunkReassign,
+  readOnly = false
+}: AdminLeadCardProps) {
 
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [reassignOpen, setReassignOpen] = useState(false);
+  const [reassignEmployeeId, setReassignEmployeeId] = useState("");
+  const [reassignReason, setReassignReason] = useState("");
+  const [reassignSubmitting, setReassignSubmitting] = useState(false);
+
+  async function submitReassign() {
+    if (!onUnjunkReassign || !reassignEmployeeId || !reassignReason.trim() || reassignSubmitting) return;
+
+    setReassignSubmitting(true);
+    try {
+      await onUnjunkReassign(lead.id, reassignEmployeeId, reassignReason.trim());
+      setReassignOpen(false);
+      setReassignEmployeeId("");
+      setReassignReason("");
+    } finally {
+      setReassignSubmitting(false);
+    }
+  }
 
   const statusDisplay = LEAD_STATUS_DISPLAY[lead.status];
   const priorityDisplay = LEAD_PRIORITY_DISPLAY[lead.priority];
@@ -104,14 +143,26 @@ export default function AdminLeadCard({ lead, teams, onReserveTeam, index = 0, r
   // pausedUntil — same reasoning as calculateSLAStatus's dedicated
   // check: it only ends when Admin/Sales Coordinator verifies or
   // denies it, never just by the 3-day date passing.
+  // A CONVERTED (Booked) or JUNK lead is permanently closed — nothing
+  // else about it is still "pending," regardless of what its stale
+  // pause_reason/last_activity_at columns happen to still say (e.g.
+  // log_booking_atomic doesn't clear an in-progress VISIT_LOCK pause,
+  // since that's not its job — this card is what's responsible for
+  // not presenting that leftover state as if it were still active).
+  // Same terminal condition calculateSLAStatus.ts's own first gate
+  // uses — this card just can't reuse that function directly (it
+  // doesn't carry sla_deadline/outcome_at, which that function also
+  // needs), so the check is duplicated here rather than shared.
+  const isTerminal = lead.status === "CONVERTED" || lead.status === "JUNK";
   const isPaused =
-    lead.pauseReason === "VISIT_PENDING_VERIFICATION" ||
-    Boolean(lead.pausedUntil && new Date(lead.pausedUntil) > new Date());
+    !isTerminal &&
+    (lead.pauseReason === "VISIT_PENDING_VERIFICATION" ||
+      Boolean(lead.pausedUntil && new Date(lead.pausedUntil) > new Date()));
   const daysSinceActivity = lead.lastActivityAt
     ? (Date.now() - new Date(lead.lastActivityAt).getTime()) / (1000 * 60 * 60 * 24)
     : null;
   const isBeyondLeadsStage = lead.leadType !== "DATA" && lead.boardStage !== "LEADS";
-  const isStale = !isPaused && isBeyondLeadsStage && daysSinceActivity !== null && daysSinceActivity >= FOLLOWUP_INACTIVITY_WARNING_DAYS;
+  const isStale = !isTerminal && !isPaused && isBeyondLeadsStage && daysSinceActivity !== null && daysSinceActivity >= FOLLOWUP_INACTIVITY_WARNING_DAYS;
   const isGoingStale = isStale && daysSinceActivity !== null && daysSinceActivity >= FOLLOWUP_INACTIVITY_RECYCLE_DAYS;
 
   return (
@@ -146,6 +197,14 @@ export default function AdminLeadCard({ lead, teams, onReserveTeam, index = 0, r
               {lead.source && (
                 <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">
                   {lead.source}
+                </span>
+              )}
+              {lead.catcherName && (
+                <span
+                  className="max-w-[140px] truncate text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700"
+                  title={`Catcher: ${lead.catcherName}`}
+                >
+                  🎣 Catcher: {lead.catcherName}
                 </span>
               )}
             </div>
@@ -267,13 +326,70 @@ export default function AdminLeadCard({ lead, teams, onReserveTeam, index = 0, r
         )}
       </div>
 
-      <button
-        onClick={() => setHistoryOpen(true)}
-        className="flex items-center gap-1.5 mt-3 text-[11px] font-bold text-blue-700 hover:text-blue-900 transition"
-      >
-        <History size={12} />
-        View History
-      </button>
+      <div className="flex items-center gap-4 mt-3">
+        <button
+          onClick={() => setHistoryOpen(true)}
+          className="flex items-center gap-1.5 text-[11px] font-bold text-blue-700 hover:text-blue-900 transition"
+        >
+          <History size={12} />
+          View History
+        </button>
+
+        {lead.status === "JUNK" && !readOnly && onUnjunkReassign && !reassignOpen && (
+          <button
+            onClick={() => setReassignOpen(true)}
+            className="text-[11px] font-bold text-emerald-700 hover:text-emerald-900 transition"
+          >
+            🔁 Reassign
+          </button>
+        )}
+      </div>
+
+      {reassignOpen && (
+        <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
+          <p className="text-[11px] text-slate-500">Recover this JUNK lead and hand it to:</p>
+          <div className="flex items-center gap-2">
+            <select
+              value={reassignEmployeeId}
+              onChange={(e) => setReassignEmployeeId(e.target.value)}
+              className="flex-1 h-10 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs outline-none"
+            >
+              <option value="">Select employee...</option>
+              {employees
+                .filter((e) => e.is_active && e.id !== lead.currentOwnerId)
+                .map((e) => (
+                  <option key={e.id} value={e.id}>{e.name}</option>
+                ))}
+            </select>
+          </div>
+          <textarea
+            value={reassignReason}
+            onChange={(e) => setReassignReason(e.target.value)}
+            placeholder="Reason (mandatory)"
+            rows={2}
+            className="w-full rounded-lg bg-slate-50 border border-slate-200 px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-emerald-200"
+          />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={submitReassign}
+              disabled={reassignSubmitting || !reassignEmployeeId || !reassignReason.trim()}
+              className="h-10 px-3 rounded-lg bg-emerald-600 text-white text-[11px] font-bold disabled:opacity-50"
+            >
+              {reassignSubmitting ? "..." : "Reassign"}
+            </button>
+            <button
+              onClick={() => {
+                setReassignOpen(false);
+                setReassignEmployeeId("");
+                setReassignReason("");
+              }}
+              className="h-10 px-3 text-[11px] text-slate-400"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       <AnimatePresence>
         {historyOpen && (
@@ -282,6 +398,8 @@ export default function AdminLeadCard({ lead, teams, onReserveTeam, index = 0, r
             leadId={lead.id}
             leadName={lead.name}
             leadType={lead.leadType}
+            leadStatus={lead.status}
+            catcherName={lead.catcherName ?? null}
             onClose={() => setHistoryOpen(false)}
           />
         )}

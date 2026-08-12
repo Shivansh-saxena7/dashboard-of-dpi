@@ -87,6 +87,12 @@ icon:"🎯"
 },
 
 {
+name:"Coordinator View",
+href:"/coordinator",
+icon:"🧭"
+},
+
+{
 name:"Teams",
 href:"/admin/teams",
 icon:"🧑‍🤝‍🧑"
@@ -313,11 +319,22 @@ Logout
 
 {/* Right Side */}
 
+{/* min-w-0: flex items default to min-width:auto, which floors them
+    at their content's min-content size — no matter how deeply
+    nested, an un-wrapped/wide descendant (e.g. a horizontally-
+    scrollable table many levels down) pushes THIS flex item wider
+    than its allotted space, which pushes the whole page into
+    horizontal overflow. The descendant's own overflow-x-auto only
+    contains overflow for itself, not for this ancestor. min-w-0
+    breaks that propagation at the one place it actually needs to
+    break — confirmed empirically (documentScrollWidth stopped
+    exceeding window.innerWidth once this was added). */}
 <div
 className="
 flex-1
 lg:ml-[230px]
 w-full
+min-w-0
 "
 >
 

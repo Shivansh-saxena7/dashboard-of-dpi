@@ -231,12 +231,13 @@ serve(async (req) => {
     }
 
     // SLA clock starts at the moment of assignment (Section 4.4:
-    // "2 hours to first contact") — this function is the sole owner
-    // of setting sla_deadline, since it's the event that starts it.
-    const slaDeadline = new Date(
-      Date.now() + settings.sla_first_contact_minutes * 60 * 1000
-    ).toISOString();
-
+    // "2 hours to first contact") — assign_lead_atomic is the sole
+    // owner of computing AND setting sla_deadline now (working-hours-
+    // aware, via compute_working_hours_sla_deadline), since it's the
+    // event that starts it. This Edge Function doesn't compute it at
+    // all anymore — passing a naive Date.now()-based value here would
+    // just be a second, driftable copy of the same decision.
+    //
     // The 3 writes (leads update, lead_history insert, pointer
     // update) happen inside one Postgres function call so they are
     // atomic — if any step fails, everything rolls back instead of
@@ -246,7 +247,6 @@ serve(async (req) => {
     const { error: assignError } = await supabase.rpc("assign_lead_atomic", {
       p_lead_id: lead_id,
       p_employee_id: result.assignedEmployeeId,
-      p_sla_deadline: slaDeadline,
       p_next_pointer_employee_id: result.nextGlobalPointerEmployeeId
     });
 

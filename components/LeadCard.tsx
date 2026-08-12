@@ -17,6 +17,7 @@ interface LeadCardLead {
   mobile: string;
   project: string | null;
   source: string | null;
+  catcher_name?: string | null;
   status: LeadStatus;
   priority: LeadPriority;
   board_stage?: string | null;
@@ -75,7 +76,8 @@ export default function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps
       board_stage: lead.board_stage,
       paused_until: lead.paused_until,
       last_activity_at: lead.last_activity_at,
-      pause_reason: lead.pause_reason
+      pause_reason: lead.pause_reason,
+      assigned_at: lead.assigned_at
     },
     lead.outcome_at,
     // NOT_INTERESTED repeat-count isn't tracked at list-view
@@ -176,6 +178,14 @@ export default function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps
               {lead.source && (
                 <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">
                   {lead.source}
+                </span>
+              )}
+              {lead.catcher_name && (
+                <span
+                  className="max-w-[140px] truncate text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700"
+                  title={`Catcher: ${lead.catcher_name}`}
+                >
+                  🎣 {lead.catcher_name}
                 </span>
               )}
             </div>

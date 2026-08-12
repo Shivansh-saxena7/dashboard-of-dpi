@@ -207,7 +207,14 @@ export default function CoordinatorLayout({
           </div>
         </div>
 
-        <div className="flex-1 lg:ml-[230px] w-full">
+        {/* min-w-0 — same reasoning as app/admin/layout.tsx's content
+            wrapper: without it, a deeply-nested wide/scrollable
+            descendant anywhere on this page (e.g. a horizontally-
+            scrollable table) can push this flex item past its
+            allotted width and overflow the whole page horizontally,
+            since flex items default to min-width:auto (floored at
+            content's min-content size) regardless of nesting depth. */}
+        <div className="flex-1 lg:ml-[230px] w-full min-w-0">
           <div className="sticky top-0 z-30 bg-white/90 backdrop-blur-xl border-b border-slate-200 px-5 h-[60px] flex items-center justify-between">
             <div className="flex items-center gap-4">
               <button onClick={() => setMenuOpen(true)} className="lg:hidden">

@@ -1,16 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import toast from "react-hot-toast";
 import { Search, ChevronDown, CheckCircle2, XCircle, Clock, FileSpreadsheet, FileText, Table2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import AdminLeadCard from "@/components/AdminLeadCard";
 import ExportPreviewTable from "@/components/ExportPreviewTable";
+import ManualLeadEntryModal from "@/components/ManualLeadEntryModal";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES } from "@/lib/leadBoardStageDisplay";
 import { exportLeadsToExcel, exportLeadsToPDF } from "@/lib/exportLeadsReport";
-import { exportEmployeeSummaryToExcel, exportEmployeeSummaryToPDF, SummaryExportRow } from "@/lib/exportEmployeeSummaryReport";
+import { exportEmployeeSummaryToExcel, exportEmployeeSummaryToPDF, SummaryExportRow, NoContactDetailExportRow } from "@/lib/exportEmployeeSummaryReport";
 import { exportVisitsToExcel, exportVisitsToPDF, VisitExportRow } from "@/lib/exportVisitReport";
 import { exportSnoozesToExcel, exportSnoozesToPDF, SnoozeExportRow } from "@/lib/exportSnoozeReport";
 import { DateRangeOption, isWithinDateRange, dateRangeFilterLabel } from "@/lib/dateRangeFilter";
@@ -98,6 +99,19 @@ function shortDate(iso: string | null) {
   return new Date(iso).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
 }
 
+// Derived entirely from existing state — no new tracking needed. A
+// lead can genuinely show BOTH facts (status changed AND the board
+// was moved), so this lists whichever apply rather than picking one;
+// showing "NEW" alone when a board-move (not a status change) was
+// what actually happened was the exact confusion this replaces.
+function describeNoContactAction(status: string, boardStage: string | null): string {
+  const parts: string[] = [];
+  if (status !== "NEW") parts.push(`Status changed to ${status}`);
+  if (boardStage === "FOLLOW_UP") parts.push("Moved to Follow-up");
+  else if (boardStage === "VISIT") parts.push("Moved to Visit");
+  return parts.length > 0 ? parts.join(" · ") : "—";
+}
+
 function EmptyState({ emoji, text }: { emoji: string; text: string }) {
   return (
     <div className="flex flex-col items-center justify-center mt-16 text-center px-4">
@@ -121,11 +135,31 @@ export default function CoordinatorDashboard() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("LEADS");
   const [loading, setLoading] = useState(true);
 
+  // The logged-in viewer's own role — this page is shared by Admin
+  // and Sales Coordinator (coordinator/layout.tsx's guard already
+  // enforces only these two can even reach it), but Force-Reassign
+  // is an Admin-only power within it, so the page needs to know
+  // which one it's rendering for.
+  const [viewerRole, setViewerRole] = useState<"admin" | "sales_coordinator" | null>(null);
+
   const [leads, setLeads] = useState<any[]>([]);
   const [employees, setEmployees] = useState<{ id: string; name: string; is_active: boolean; team_id: string | null }[]>([]);
   const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
   const [siteVisits, setSiteVisits] = useState<SiteVisitRow[]>([]);
   const [snoozeLog, setSnoozeLog] = useState<SnoozeLogRow[]>([]);
+
+  // --- No-Contact-Click remarks + Admin Force-Reassign (Summary
+  // drill-down) ---
+  const [remarksByLeadHistoryId, setRemarksByLeadHistoryId] = useState<
+    Map<string, { id: string; remark: string; created_at: string; loggerName: string }[]>
+  >(new Map());
+  const [remarkDraft, setRemarkDraft] = useState<Record<string, string>>({});
+  const [remarkSubmittingId, setRemarkSubmittingId] = useState<string | null>(null);
+
+  const [reassignOpenLeadId, setReassignOpenLeadId] = useState<string | null>(null);
+  const [reassignTargetEmployeeId, setReassignTargetEmployeeId] = useState("");
+  const [reassignReason, setReassignReason] = useState("");
+  const [reassignSubmitting, setReassignSubmitting] = useState(false);
 
   const [verifying, setVerifying] = useState<string | null>(null);
   const [denyingVisitId, setDenyingVisitId] = useState<string | null>(null);
@@ -133,6 +167,7 @@ export default function CoordinatorDashboard() {
   const [denySubmitting, setDenySubmitting] = useState(false);
 
   const [exporting, setExporting] = useState(false);
+  const [manualEntryOpen, setManualEntryOpen] = useState(false);
 
   // --- Leads tab filters ---
   const [showPreviewTable, setShowPreviewTable] = useState(false);
@@ -168,6 +203,11 @@ export default function CoordinatorDashboard() {
   // --- Employee Summary tab ---
   const [summaryGroupBy, setSummaryGroupBy] = useState<SummaryGroupBy>("EMPLOYEE");
   const [summaryTeamFilter, setSummaryTeamFilter] = useState("");
+  const [expandedSummaryRowId, setExpandedSummaryRowId] = useState<string | null>(null);
+  const [expandedLeadDetailId, setExpandedLeadDetailId] = useState<string | null>(null);
+  const [summaryDateRangeFilter, setSummaryDateRangeFilter] = useState<DateRangeOption>("ALL");
+  const [summaryCustomStart, setSummaryCustomStart] = useState("");
+  const [summaryCustomEnd, setSummaryCustomEnd] = useState("");
 
   useEffect(() => {
     loadAll();
@@ -217,8 +257,51 @@ export default function CoordinatorDashboard() {
 
   async function loadAll() {
     setLoading(true);
-    await Promise.all([loadLeads(), loadEmployees(), loadTeams(), loadSiteVisits(), loadSnoozeLog()]);
+    await Promise.all([loadViewerRole(), loadLeads(), loadEmployees(), loadTeams(), loadSiteVisits(), loadSnoozeLog(), loadRemarks()]);
     setLoading(false);
+  }
+
+  async function loadViewerRole() {
+    const {
+      data: { session }
+    } = await supabase.auth.getSession();
+    if (!session) return;
+
+    const { data, error } = await supabase
+      .from("employees")
+      .select("role")
+      .eq("auth_user_id", session.user.id)
+      .single();
+
+    if (error) {
+      console.error("coordinator: loadViewerRole failed:", error.message);
+      return;
+    }
+    if (data) setViewerRole(data.role);
+  }
+
+  // Broad fetch, same "everything up front" pattern as the rest of
+  // this page — grouped client-side into a Map keyed by
+  // lead_history_id so the drill-down can look a specific lead's
+  // remarks up in O(1) without a per-row query.
+  async function loadRemarks() {
+    const { data, error } = await supabase
+      .from("no_contact_click_remarks")
+      .select("id, lead_history_id, remark, created_at, logger:employees!no_contact_click_remarks_logged_by_fkey(name)")
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      console.error("coordinator: loadRemarks failed:", error.message);
+      return;
+    }
+
+    const map = new Map<string, { id: string; remark: string; created_at: string; loggerName: string }[]>();
+    (data || []).forEach((row: any) => {
+      const list = map.get(row.lead_history_id) || [];
+      list.push({ id: row.id, remark: row.remark, created_at: row.created_at, loggerName: row.logger?.name || "—" });
+      map.set(row.lead_history_id, list);
+    });
+    setRemarksByLeadHistoryId(map);
   }
 
   async function loadLeads() {
@@ -226,12 +309,12 @@ export default function CoordinatorDashboard() {
       .from("leads")
       .select(
         `
-        id, name, mobile, project, source, status, priority, board_stage,
+        id, name, mobile, project, source, catcher_name, status, priority, board_stage, board_stage_changed_at,
         sla_deadline, recycle_count, created_at, current_owner_id, lead_type,
         employees ( name ),
         lead_history (
-          assigned_at, is_active, first_call_at, first_whatsapp_at, assigned_by_type, call_count,
-          last_activity_at, paused_until, pause_reason,
+          id, assigned_at, is_active, first_call_at, first_whatsapp_at, assigned_by_type, call_count,
+          last_activity_at, paused_until, pause_reason, outcome_at,
           assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)
         )
         `
@@ -521,6 +604,21 @@ export default function CoordinatorDashboard() {
   // EMPLOYEE SUMMARY TAB
   // ============================================================
 
+  // Scopes both leads and site-visit events to the same period before
+  // any of the Summary tab's counting happens — a date-range filter
+  // that only touched one of the two would leave the tab's own
+  // numbers internally inconsistent (e.g. "Total Leads" from one
+  // period, "Visits Verified" from all-time).
+  const summaryScopedLeads = useMemo(
+    () => leads.filter((lead: any) => isWithinDateRange(lead.created_at, summaryDateRangeFilter, summaryCustomStart, summaryCustomEnd)),
+    [leads, summaryDateRangeFilter, summaryCustomStart, summaryCustomEnd]
+  );
+
+  const summaryScopedVisits = useMemo(
+    () => siteVisits.filter((v) => isWithinDateRange(v.created_at, summaryDateRangeFilter, summaryCustomStart, summaryCustomEnd)),
+    [siteVisits, summaryDateRangeFilter, summaryCustomStart, summaryCustomEnd]
+  );
+
   const employeeSummary = useMemo(() => {
 
     const map = new Map<
@@ -532,9 +630,12 @@ export default function CoordinatorDashboard() {
         isActive: boolean;
         totalLeads: number;
         followUp: number;
+        inVisitStage: number;
         bookings: number;
         visits: number;
         verifiedVisits: number;
+        noContactClickUpdates: number;
+        noContactClickLeads: { id: string; leadHistoryId: string | null; name: string; mobile: string; status: string; action: string; evidenceAt: string | null; employeeName: string; employeeId: string }[];
         responseTimes: number[];
       }
     >();
@@ -547,14 +648,17 @@ export default function CoordinatorDashboard() {
         isActive: e.is_active,
         totalLeads: 0,
         followUp: 0,
+        inVisitStage: 0,
         bookings: 0,
         visits: 0,
         verifiedVisits: 0,
+        noContactClickUpdates: 0,
+        noContactClickLeads: [],
         responseTimes: []
       })
     );
 
-    leads.forEach((lead: any) => {
+    summaryScopedLeads.forEach((lead: any) => {
       if (!lead.current_owner_id) return;
       const entry = map.get(lead.current_owner_id);
       if (!entry) return;
@@ -562,7 +666,12 @@ export default function CoordinatorDashboard() {
       entry.totalLeads++;
 
       const stage = lead.board_stage || "LEADS";
-      if (stage === "FOLLOW_UP" || stage === "VISIT") entry.followUp++;
+      // Kept as two distinct counters — Follow-up and Visit are
+      // different stages of the funnel, and merging them into one
+      // number made it impossible to tell "lots of follow-ups, no
+      // visits yet" apart from the reverse.
+      if (stage === "FOLLOW_UP") entry.followUp++;
+      if (stage === "VISIT") entry.inVisitStage++;
       if (stage === "BOOKING") entry.bookings++;
 
       const history = lead.lead_history?.[0];
@@ -571,9 +680,59 @@ export default function CoordinatorDashboard() {
           new Date(history.first_call_at).getTime() - new Date(history.assigned_at).getTime()
         );
       }
+
+      // Reporting-transparency, not a block — this lead shows genuine
+      // engagement evidence (status moved past NEW, or the board was
+      // moved past LEADS — either way, some real progress was made)
+      // but neither the Call nor WhatsApp link was ever clicked for
+      // this assignment. Whole-lifecycle by design: covers a plain
+      // status/note log (log_lead_update_atomic) AND a board move
+      // (move_lead_to_followup_atomic) the same way, since both are
+      // "genuine progress with no tracked contact-click" the same
+      // way. Deliberately does NOT special-case VISIT — Visit already
+      // has its own, stronger oversight (Sales Coordinator Verify/
+      // Deny against the WhatsApp photo), so this signal would be
+      // redundant there specifically for the real-time notification
+      // (skipped in log_site_visit_atomic on purpose) — but it still
+      // stays IN this aggregate metric/drill-down, since it's still a
+      // genuinely useful thing for a Coordinator to see at a glance.
+      // Not proof of anything on its own (a click doesn't prove a
+      // real call either — see calculateSLAStatus.ts's own reasoning
+      // for the same point), but a repeating pattern is worth a look.
+      // Scoped to the CURRENTLY-active assignment only, same as every
+      // other metric on this tab.
+      const hasEngagementEvidence = lead.status !== "NEW" || stage !== "LEADS";
+
+      if (hasEngagementEvidence && !history?.first_call_at && !history?.first_whatsapp_at) {
+        entry.noContactClickUpdates++;
+
+        // Latest of the two applicable timestamps — whichever
+        // happened more recently is the more relevant "when" to show,
+        // rather than an arbitrary fallback-chain pick.
+        const candidates = [history?.outcome_at, lead.board_stage_changed_at, history?.last_activity_at]
+          .filter(Boolean)
+          .map((d: string) => new Date(d).getTime());
+        const evidenceAt = candidates.length > 0 ? new Date(Math.max(...candidates)).toISOString() : null;
+
+        entry.noContactClickLeads.push({
+          id: lead.id,
+          leadHistoryId: history?.id ?? null,
+          name: lead.name,
+          mobile: lead.mobile,
+          status: lead.status,
+          action: describeNoContactAction(lead.status, lead.board_stage || "LEADS"),
+          evidenceAt,
+          // Carried explicitly (not inferred from the containing
+          // row) so it survives the Team rollup below — a team-mode
+          // summary row's own `name` is the TEAM's name, but each
+          // lead in this array still belongs to one specific person.
+          employeeName: entry.name,
+          employeeId: entry.id
+        });
+      }
     });
 
-    siteVisits.forEach((v) => {
+    summaryScopedVisits.forEach((v) => {
       const entry = map.get(v.employee_id);
       if (!entry) return;
       entry.visits++;
@@ -588,7 +747,7 @@ export default function CoordinatorDashboard() {
           : null
     }));
 
-  }, [leads, employees, siteVisits]);
+  }, [summaryScopedLeads, employees, summaryScopedVisits]);
 
   const teamSummary = useMemo(() => {
 
@@ -599,15 +758,18 @@ export default function CoordinatorDashboard() {
         name: string;
         totalLeads: number;
         followUp: number;
+        inVisitStage: number;
         bookings: number;
         visits: number;
         verifiedVisits: number;
+        noContactClickUpdates: number;
+        noContactClickLeads: { id: string; leadHistoryId: string | null; name: string; mobile: string; status: string; action: string; evidenceAt: string | null; employeeName: string; employeeId: string }[];
         responseTimes: number[];
       }
     >();
 
     teams.forEach((t) =>
-      map.set(t.id, { id: t.id, name: t.name, totalLeads: 0, followUp: 0, bookings: 0, visits: 0, verifiedVisits: 0, responseTimes: [] })
+      map.set(t.id, { id: t.id, name: t.name, totalLeads: 0, followUp: 0, inVisitStage: 0, bookings: 0, visits: 0, verifiedVisits: 0, noContactClickUpdates: 0, noContactClickLeads: [], responseTimes: [] })
     );
 
     employeeSummary.forEach((emp) => {
@@ -616,9 +778,12 @@ export default function CoordinatorDashboard() {
       if (!entry) return;
       entry.totalLeads += emp.totalLeads;
       entry.followUp += emp.followUp;
+      entry.inVisitStage += emp.inVisitStage;
       entry.bookings += emp.bookings;
       entry.visits += emp.visits;
       entry.verifiedVisits += emp.verifiedVisits;
+      entry.noContactClickUpdates += emp.noContactClickUpdates;
+      entry.noContactClickLeads.push(...emp.noContactClickLeads);
       entry.responseTimes.push(...emp.responseTimes);
     });
 
@@ -647,23 +812,105 @@ export default function CoordinatorDashboard() {
         team: summaryGroupBy === "TEAM" ? r.name : (r.teamId ? teamNameMap.get(r.teamId) || "—" : "—"),
         totalLeads: r.totalLeads,
         followUp: r.followUp,
+        inVisitStage: r.inVisitStage,
         bookings: r.bookings,
         visits: r.visits,
         verifiedVisits: r.verifiedVisits,
-        avgResponseMs: r.avgResponseMs
+        avgResponseMs: r.avgResponseMs,
+        noContactClickUpdates: r.noContactClickUpdates
       }));
+      // Flattened across whatever's currently visible (By Employee/By
+      // Team, Team-filter) — same scope as the Summary rows above, so
+      // the Detail sheet never shows more (or less) than what the
+      // Summary sheet's counts actually represent.
+      const detailRows: NoContactDetailExportRow[] = visibleSummaryRows.flatMap((r: any) =>
+        r.noContactClickLeads.map((l: any) => ({
+          employeeName: l.employeeName,
+          leadName: l.name,
+          mobile: l.mobile,
+          action: l.action,
+          evidenceAt: l.evidenceAt
+        }))
+      );
+      const summaryOtherFilters: { label: string; value: string }[] = [];
+      if (summaryTeamFilter && summaryGroupBy === "EMPLOYEE") {
+        summaryOtherFilters.push({ label: "Team", value: teamNameMap.get(summaryTeamFilter) || summaryTeamFilter });
+      }
+      const summaryDateLabel = dateRangeFilterLabel(summaryDateRangeFilter, summaryCustomStart, summaryCustomEnd);
+      if (summaryDateLabel) summaryOtherFilters.push({ label: "Date", value: summaryDateLabel });
+
       const meta = {
         employeeLabel: null,
-        otherFilters: summaryTeamFilter && summaryGroupBy === "EMPLOYEE" ? [{ label: "Team", value: teamNameMap.get(summaryTeamFilter) || summaryTeamFilter }] : [],
+        otherFilters: summaryOtherFilters,
         scopeLabel: "Sales Coordinator"
       };
-      if (format === "excel") await exportEmployeeSummaryToExcel(rows, meta, summaryGroupBy);
-      else await exportEmployeeSummaryToPDF(rows, meta, summaryGroupBy);
+      if (format === "excel") await exportEmployeeSummaryToExcel(rows, detailRows, meta, summaryGroupBy);
+      else await exportEmployeeSummaryToPDF(rows, detailRows, meta, summaryGroupBy);
     } catch (err) {
       console.error(err);
       toast.error("Export failed. Please try again.");
     } finally {
       setExporting(false);
+    }
+  }
+
+  // Coordinator (or Admin) permanently logs what the employee told
+  // them offline, against this specific no-contact-click entry — no
+  // escalation, no "invalid" flagging, just a visible record.
+  async function handleLogRemark(leadHistoryId: string) {
+    const text = (remarkDraft[leadHistoryId] || "").trim();
+    if (!text || remarkSubmittingId) return;
+
+    setRemarkSubmittingId(leadHistoryId);
+    try {
+      const { error } = await supabase.rpc("log_no_contact_remark_atomic", {
+        p_lead_history_id: leadHistoryId,
+        p_remark: text
+      });
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+      setRemarkDraft((prev) => ({ ...prev, [leadHistoryId]: "" }));
+      await loadRemarks();
+      toast.success("Remark logged");
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to log remark. Please try again.");
+    } finally {
+      setRemarkSubmittingId(null);
+    }
+  }
+
+  // Admin-only universal reassign — any team, any board_stage. Also
+  // permanently bans the old employee from ever getting this lead
+  // back through automatic recycling (recycle-stale-leads honors
+  // lead_forced_removals; manual Team-Leader/Admin assignment is
+  // deliberately unaffected by it).
+  async function handleForceReassign(leadId: string) {
+    if (!reassignTargetEmployeeId || !reassignReason.trim() || reassignSubmitting) return;
+
+    setReassignSubmitting(true);
+    try {
+      const { error } = await supabase.rpc("force_reassign_lead_atomic", {
+        p_lead_id: leadId,
+        p_new_employee_id: reassignTargetEmployeeId,
+        p_reason: reassignReason.trim()
+      });
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+      setReassignOpenLeadId(null);
+      setReassignTargetEmployeeId("");
+      setReassignReason("");
+      await loadLeads();
+      toast.success("Lead force-reassigned");
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to reassign. Please try again.");
+    } finally {
+      setReassignSubmitting(false);
     }
   }
 
@@ -915,13 +1162,20 @@ export default function CoordinatorDashboard() {
                 <option value="CUSTOM">Custom</option>
               </FilterSelect>
 
-              <FilterSelect value={sortBy} onChange={(e) => setSortBy(e.target.value as SortOption)} className="sm:ml-auto">
+              <FilterSelect value={sortBy} onChange={(e) => setSortBy(e.target.value as SortOption)}>
                 <option value="NEWEST">Newest First</option>
                 <option value="OLDEST">Oldest First</option>
                 <option value="SLA_URGENCY">SLA Urgency</option>
               </FilterSelect>
 
               <div className="col-span-2 flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => setManualEntryOpen(true)}
+                  className="flex items-center gap-1.5 h-10 px-3 rounded-lg bg-amber-50 text-amber-700 text-xs font-bold hover:bg-amber-100 transition"
+                >
+                  🎣 Add Manual Lead
+                </button>
+
                 <button
                   onClick={() => setShowPreviewTable((v) => !v)}
                   disabled={visibleLeads.length === 0}
@@ -997,6 +1251,7 @@ export default function CoordinatorDashboard() {
                     mobile: lead.mobile,
                     project: lead.project,
                     source: lead.source,
+                    catcherName: lead.catcher_name ?? null,
                     status: lead.status,
                     priority: lead.priority,
                     boardStage: lead.board_stage || "LEADS",
@@ -1023,7 +1278,10 @@ export default function CoordinatorDashboard() {
           <div className="bg-white rounded-[24px] border border-slate-100 shadow-md p-4 flex flex-wrap items-center gap-2">
             <div className="flex rounded-lg border border-slate-200 overflow-hidden">
               <button
-                onClick={() => setSummaryGroupBy("EMPLOYEE")}
+                onClick={() => {
+                  setSummaryGroupBy("EMPLOYEE");
+                  setExpandedSummaryRowId(null);
+                }}
                 className={`px-3 h-9 text-xs font-bold transition ${
                   summaryGroupBy === "EMPLOYEE" ? "bg-blue-600 text-white" : "bg-white text-slate-600"
                 }`}
@@ -1031,7 +1289,10 @@ export default function CoordinatorDashboard() {
                 By Employee
               </button>
               <button
-                onClick={() => setSummaryGroupBy("TEAM")}
+                onClick={() => {
+                  setSummaryGroupBy("TEAM");
+                  setExpandedSummaryRowId(null);
+                }}
                 className={`px-3 h-9 text-xs font-bold transition ${
                   summaryGroupBy === "TEAM" ? "bg-blue-600 text-white" : "bg-white text-slate-600"
                 }`}
@@ -1049,7 +1310,31 @@ export default function CoordinatorDashboard() {
               </FilterSelect>
             )}
 
-            <div className="flex items-center gap-2 ml-auto">
+            <FilterSelect value={summaryDateRangeFilter} onChange={(e) => setSummaryDateRangeFilter(e.target.value as DateRangeOption)} className="w-36">
+              <option value="ALL">Any Time</option>
+              <option value="THIS_WEEK">This Week</option>
+              <option value="THIS_MONTH">This Month</option>
+              <option value="CUSTOM">Custom</option>
+            </FilterSelect>
+
+            {summaryDateRangeFilter === "CUSTOM" && (
+              <>
+                <input
+                  type="date"
+                  value={summaryCustomStart}
+                  onChange={(e) => setSummaryCustomStart(e.target.value)}
+                  className="h-10 rounded-lg bg-slate-50 border border-slate-200 px-3 text-xs text-slate-600 outline-none appearance-none"
+                />
+                <input
+                  type="date"
+                  value={summaryCustomEnd}
+                  onChange={(e) => setSummaryCustomEnd(e.target.value)}
+                  className="h-10 rounded-lg bg-slate-50 border border-slate-200 px-3 text-xs text-slate-600 outline-none appearance-none"
+                />
+              </>
+            )}
+
+            <div className="flex items-center gap-2">
               <button
                 onClick={() => handleExportSummary("excel")}
                 disabled={visibleSummaryRows.length === 0 || exporting}
@@ -1073,35 +1358,218 @@ export default function CoordinatorDashboard() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
+                  <tr className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500 divide-x divide-slate-200 border-b border-slate-200">
                     <th className="px-4 py-3 font-bold">{summaryGroupBy === "TEAM" ? "Team" : "Employee"}</th>
                     <th className="px-4 py-3 font-bold text-center">Total Leads</th>
-                    <th className="px-4 py-3 font-bold text-center">Follow-up / Visit</th>
+                    <th className="px-4 py-3 font-bold text-center">Follow-up</th>
+                    <th className="px-4 py-3 font-bold text-center" title="Leads currently in the Visit board-stage — distinct from Site Visits Logged, which counts actual visit events.">
+                      In Visit Stage
+                    </th>
                     <th className="px-4 py-3 font-bold text-center">Bookings</th>
-                    <th className="px-4 py-3 font-bold text-center">Visits (Verified)</th>
+                    <th className="px-4 py-3 font-bold text-center" title="Actual site-visit events logged (via the employee's Log Visit action), not the same as In Visit Stage above.">
+                      Site Visits (Verified)
+                    </th>
                     <th className="px-4 py-3 font-bold text-center">Avg. Response Time</th>
+                    <th className="px-4 py-3 font-bold text-center" title="Status/note logged with no Call or WhatsApp click ever recorded for that assignment — not proof of anything on its own, just a pattern worth a look.">
+                      Updates w/o Contact-Click
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleSummaryRows.map((row: any) => (
-                    <tr key={row.id} className="border-t border-slate-100">
-                      <td className="px-4 py-3 font-semibold text-slate-800">
-                        {row.name}
-                        {summaryGroupBy === "EMPLOYEE" && !row.isActive && (
-                          <span className="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-50 text-red-600">
-                            Inactive
-                          </span>
+                  {visibleSummaryRows.map((row: any) => {
+                    const isExpanded = expandedSummaryRowId === row.id;
+                    return (
+                      <Fragment key={row.id}>
+                        <tr className="border-t border-slate-100 divide-x divide-slate-100">
+                          <td className="px-4 py-3 font-semibold text-slate-800">
+                            {row.name}
+                            {summaryGroupBy === "EMPLOYEE" && !row.isActive && (
+                              <span className="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-50 text-red-600">
+                                Inactive
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-center text-slate-700">{row.totalLeads}</td>
+                          <td className="px-4 py-3 text-center text-slate-700">{row.followUp}</td>
+                          <td className="px-4 py-3 text-center text-slate-700">{row.inVisitStage}</td>
+                          <td className="px-4 py-3 text-center text-slate-700">{row.bookings}</td>
+                          <td className="px-4 py-3 text-center text-slate-700">
+                            {row.visits} <span className="text-slate-400">({row.verifiedVisits} verified)</span>
+                          </td>
+                          <td className="px-4 py-3 text-center text-slate-700">{formatDurationMs(row.avgResponseMs)}</td>
+                          <td className="px-4 py-3 text-center">
+                            {row.noContactClickUpdates > 0 ? (
+                              <button
+                                onClick={() => setExpandedSummaryRowId(isExpanded ? null : row.id)}
+                                className={`text-[11px] font-bold px-2 py-0.5 rounded-full transition ${
+                                  isExpanded ? "bg-amber-600 text-white" : "bg-amber-50 text-amber-700 hover:bg-amber-100"
+                                }`}
+                              >
+                                {row.noContactClickUpdates} {isExpanded ? "▲" : "▼"}
+                              </button>
+                            ) : (
+                              <span className="text-slate-300">0</span>
+                            )}
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr className="bg-amber-50/40">
+                            <td colSpan={8} className="px-4 py-3">
+                              <p className="text-[10px] uppercase tracking-wide text-amber-700 font-bold mb-2">
+                                Updates logged without a Call/WhatsApp click — {row.name}
+                              </p>
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-xs">
+                                  <thead>
+                                    <tr className="text-left text-slate-500">
+                                      <th className="pr-4 py-1.5 font-semibold">Lead</th>
+                                      <th className="pr-4 py-1.5 font-semibold">Mobile</th>
+                                      <th className="pr-4 py-1.5 font-semibold">Action</th>
+                                      <th className="pr-4 py-1.5 font-semibold">When</th>
+                                      <th className="pr-4 py-1.5 font-semibold">Notes</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {row.noContactClickLeads.map((l: any) => {
+                                      const leadRemarks = l.leadHistoryId ? remarksByLeadHistoryId.get(l.leadHistoryId) || [] : [];
+                                      const isLeadExpanded = expandedLeadDetailId === l.id;
+                                      const isReassignOpen = reassignOpenLeadId === l.id;
+                                      return (
+                                        <Fragment key={l.id}>
+                                          <tr className="border-t border-amber-100">
+                                            <td className="pr-4 py-1.5 text-slate-800 font-medium">{l.name}</td>
+                                            <td className="pr-4 py-1.5 text-slate-600">{l.mobile}</td>
+                                            <td className="pr-4 py-1.5 text-slate-600">{l.action}</td>
+                                            <td className="pr-4 py-1.5 text-slate-600">
+                                              {l.evidenceAt ? new Date(l.evidenceAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
+                                            </td>
+                                            <td className="pr-4 py-1.5">
+                                              <button
+                                                onClick={() => setExpandedLeadDetailId(isLeadExpanded ? null : l.id)}
+                                                className={`text-[10px] font-bold px-2 py-0.5 rounded-full transition ${
+                                                  isLeadExpanded ? "bg-slate-700 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                                }`}
+                                              >
+                                                {leadRemarks.length > 0 ? `${leadRemarks.length} remark${leadRemarks.length > 1 ? "s" : ""}` : "Add note"}{" "}
+                                                {isLeadExpanded ? "▲" : "▼"}
+                                              </button>
+                                            </td>
+                                          </tr>
+                                          {isLeadExpanded && (
+                                            <tr className="bg-white">
+                                              <td colSpan={5} className="px-3 py-3 border-t border-amber-100">
+                                                <div className="space-y-3">
+                                                  {leadRemarks.length > 0 && (
+                                                    <div className="space-y-1.5">
+                                                      {leadRemarks.map((r) => (
+                                                        <div key={r.id} className="rounded-lg bg-slate-50 border border-slate-100 px-2.5 py-1.5">
+                                                          <p className="text-slate-700">{r.remark}</p>
+                                                          <p className="text-[10px] text-slate-400 mt-0.5">
+                                                            {r.loggerName} ·{" "}
+                                                            {new Date(r.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                                                          </p>
+                                                        </div>
+                                                      ))}
+                                                    </div>
+                                                  )}
+
+                                                  {l.leadHistoryId && (
+                                                    <div className="flex items-start gap-2">
+                                                      <textarea
+                                                        value={remarkDraft[l.leadHistoryId] || ""}
+                                                        onChange={(e) =>
+                                                          setRemarkDraft((prev) => ({ ...prev, [l.leadHistoryId]: e.target.value }))
+                                                        }
+                                                        placeholder="What did the employee tell you about this lead?"
+                                                        rows={2}
+                                                        className="flex-1 rounded-lg bg-slate-50 border border-slate-200 px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-blue-200"
+                                                      />
+                                                      <button
+                                                        onClick={() => handleLogRemark(l.leadHistoryId)}
+                                                        disabled={!(remarkDraft[l.leadHistoryId] || "").trim() || remarkSubmittingId === l.leadHistoryId}
+                                                        className="shrink-0 h-10 px-3 rounded-lg bg-blue-600 text-white text-[11px] font-bold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-blue-700 transition"
+                                                      >
+                                                        {remarkSubmittingId === l.leadHistoryId ? "Saving..." : "Log Remark"}
+                                                      </button>
+                                                    </div>
+                                                  )}
+
+                                                  {viewerRole === "admin" && (
+                                                    <div className="pt-2 border-t border-slate-100">
+                                                      {!isReassignOpen ? (
+                                                        <button
+                                                          onClick={() => {
+                                                            setReassignOpenLeadId(l.id);
+                                                            setReassignTargetEmployeeId("");
+                                                            setReassignReason("");
+                                                          }}
+                                                          className="text-[11px] font-bold text-red-600 hover:text-red-700"
+                                                        >
+                                                          🔁 Force Reassign this lead
+                                                        </button>
+                                                      ) : (
+                                                        <div className="space-y-2">
+                                                          <p className="text-[10px] uppercase tracking-wide text-red-600 font-bold">
+                                                            Force Reassign — takes this lead from {l.employeeName}, any team, any board stage
+                                                          </p>
+                                                          <div className="flex flex-wrap items-start gap-2">
+                                                            <FilterSelect
+                                                              value={reassignTargetEmployeeId}
+                                                              onChange={(e) => setReassignTargetEmployeeId(e.target.value)}
+                                                              className="w-48"
+                                                            >
+                                                              <option value="">Select employee...</option>
+                                                              {employees
+                                                                .filter((e) => e.is_active && e.id !== l.employeeId)
+                                                                .map((e) => (
+                                                                  <option key={e.id} value={e.id}>
+                                                                    {e.name}
+                                                                  </option>
+                                                                ))}
+                                                            </FilterSelect>
+                                                            <textarea
+                                                              value={reassignReason}
+                                                              onChange={(e) => setReassignReason(e.target.value)}
+                                                              placeholder="Reason (mandatory)"
+                                                              rows={1}
+                                                              className="flex-1 min-w-[160px] rounded-lg bg-slate-50 border border-slate-200 px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-red-200"
+                                                            />
+                                                          </div>
+                                                          <div className="flex items-center gap-2">
+                                                            <button
+                                                              onClick={() => handleForceReassign(l.id)}
+                                                              disabled={!reassignTargetEmployeeId || !reassignReason.trim() || reassignSubmitting}
+                                                              className="h-10 px-3 rounded-lg bg-red-600 text-white text-[11px] font-bold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-red-700 transition"
+                                                            >
+                                                              {reassignSubmitting ? "Reassigning..." : "Confirm Reassign"}
+                                                            </button>
+                                                            <button
+                                                              onClick={() => setReassignOpenLeadId(null)}
+                                                              className="h-10 px-3 rounded-lg bg-slate-100 text-slate-600 text-[11px] font-bold hover:bg-slate-200 transition"
+                                                            >
+                                                              Cancel
+                                                            </button>
+                                                          </div>
+                                                        </div>
+                                                      )}
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              </td>
+                                            </tr>
+                                          )}
+                                        </Fragment>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </td>
+                          </tr>
                         )}
-                      </td>
-                      <td className="px-4 py-3 text-center text-slate-700">{row.totalLeads}</td>
-                      <td className="px-4 py-3 text-center text-slate-700">{row.followUp}</td>
-                      <td className="px-4 py-3 text-center text-slate-700">{row.bookings}</td>
-                      <td className="px-4 py-3 text-center text-slate-700">
-                        {row.visits} <span className="text-slate-400">({row.verifiedVisits} verified)</span>
-                      </td>
-                      <td className="px-4 py-3 text-center text-slate-700">{formatDurationMs(row.avgResponseMs)}</td>
-                    </tr>
-                  ))}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1141,7 +1609,7 @@ export default function CoordinatorDashboard() {
                 <option value="CUSTOM">Custom</option>
               </FilterSelect>
 
-              <div className="col-span-2 flex flex-wrap items-center gap-2 sm:ml-auto">
+              <div className="col-span-2 flex flex-wrap items-center gap-2">
                 <button
                   onClick={() => handleExportVisits("excel")}
                   disabled={visibleVisits.length === 0 || exporting}
@@ -1331,7 +1799,7 @@ export default function CoordinatorDashboard() {
                 <option value="CUSTOM">Custom</option>
               </FilterSelect>
 
-              <div className="col-span-2 flex flex-wrap items-center gap-2 sm:ml-auto">
+              <div className="col-span-2 flex flex-wrap items-center gap-2">
                 <button
                   onClick={() => handleExportSnoozes("excel")}
                   disabled={visibleSnoozeLog.length === 0 || exporting}
@@ -1411,6 +1879,14 @@ export default function CoordinatorDashboard() {
             </div>
           )}
         </div>
+      )}
+
+      {manualEntryOpen && (
+        <ManualLeadEntryModal
+          employees={employees}
+          onClose={() => setManualEntryOpen(false)}
+          onCreated={loadLeads}
+        />
       )}
     </div>
   );

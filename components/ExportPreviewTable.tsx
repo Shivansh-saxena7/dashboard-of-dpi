@@ -75,7 +75,7 @@ export default function ExportPreviewTable({ leads }: { leads: AdminExportLead[]
       <div className="overflow-x-auto rounded-xl border border-slate-100">
         <table className="text-xs">
           <thead className="bg-slate-50 sticky top-0">
-            <tr>
+            <tr className="divide-x divide-slate-200 border-b border-slate-200">
               {EXPORT_COLUMNS.map((col) => (
                 <th
                   key={col.key}
@@ -90,7 +90,7 @@ export default function ExportPreviewTable({ leads }: { leads: AdminExportLead[]
           </thead>
           <tbody>
             {shown.map((row, i) => (
-              <tr key={i} className="border-t border-slate-100">
+              <tr key={i} className="border-t border-slate-100 divide-x divide-slate-100">
                 {EXPORT_COLUMNS.map((col) => (
                   <td
                     key={col.key}

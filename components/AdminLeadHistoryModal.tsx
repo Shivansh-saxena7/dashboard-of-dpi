@@ -12,6 +12,8 @@ interface AdminLeadHistoryModalProps {
   leadId: string;
   leadName: string;
   leadType?: string;
+  leadStatus?: string;
+  catcherName?: string | null;
   onClose: () => void;
 }
 
@@ -24,7 +26,7 @@ interface HistoryEntry {
   reassign_note: string | null;
   outcome: string | null;
   call_count: number;
-  assigned_by_type: "SYSTEM" | "ADMIN" | "TEAM_LEADER";
+  assigned_by_type: "SYSTEM" | "ADMIN" | "TEAM_LEADER" | "SALES_COORDINATOR";
   employees: { name: string } | null;
   assigned_by: { name: string } | null;
 }
@@ -71,10 +73,18 @@ type TimelineEntry =
 // the point where the {historyOpen && ...} conditional actually is —
 // portals change DOM output, not React parent/unmount timing, so
 // AnimatePresence still needs to sit there to see the removal coming.
-export default function AdminLeadHistoryModal({ leadId, leadName, leadType, onClose }: AdminLeadHistoryModalProps) {
+export default function AdminLeadHistoryModal({ leadId, leadName, leadType, leadStatus, catcherName, onClose }: AdminLeadHistoryModalProps) {
 
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // A CONVERTED/JUNK lead is permanently closed — "Current" on its
+  // still-is_active=true row implies ongoing/active work that isn't
+  // there anymore (same terminal condition as AdminLeadCard's own
+  // isTerminal check). "Final Owner" reads correctly for either
+  // outcome (Booked or Junked) without needing separate wording per
+  // outcome.
+  const isTerminal = leadStatus === "CONVERTED" || leadStatus === "JUNK";
 
   useEffect(() => {
     loadHistory();
@@ -158,6 +168,11 @@ export default function AdminLeadHistoryModal({ leadId, leadName, leadType, onCl
           <p className="relative text-sm text-white/70 mt-1">
             {assignmentCount} assignment{assignmentCount === 1 ? "" : "s"}
           </p>
+          {catcherName && (
+            <p className="relative text-sm text-amber-200 mt-1 font-semibold">
+              🎣 Caught by: {catcherName}
+            </p>
+          )}
         </div>
 
         <div className="px-6 py-6">
@@ -214,8 +229,12 @@ export default function AdminLeadHistoryModal({ leadId, leadName, leadType, onCl
                             {item.data.employees?.name || "Unknown employee"}
                           </p>
                           {item.data.is_active && (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 shrink-0">
-                              Current
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                                isTerminal ? "bg-slate-200 text-slate-600" : "bg-blue-100 text-blue-700"
+                              }`}
+                            >
+                              {isTerminal ? "Final Owner" : "Current"}
                             </span>
                           )}
                         </div>

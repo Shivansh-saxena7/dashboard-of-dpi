@@ -27,7 +27,7 @@ interface MemberLead {
   status: string;
   board_stage: string | null;
   activeHistoryId: string | null;
-  assignedByType: "SYSTEM" | "ADMIN" | "TEAM_LEADER" | null;
+  assignedByType: "SYSTEM" | "ADMIN" | "TEAM_LEADER" | "SALES_COORDINATOR" | null;
   assignedByName: string | null;
 }
 
