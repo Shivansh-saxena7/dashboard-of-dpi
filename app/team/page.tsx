@@ -501,7 +501,7 @@ export default function TeamPage() {
     <main className="min-h-screen bg-gradient-to-br from-white via-blue-50 to-blue-100">
       <Header />
       {employee?.id && <StartShiftCard employeeId={employee.id} compact />}
-      <EmployeeTabBar role={employee?.role} />
+      <EmployeeTabBar role={employee?.role} department={employee?.department} />
 
       {/* Hero — dark/gold with looping ambient glow. Deliberate
           exception to the static-only treatment used elsewhere

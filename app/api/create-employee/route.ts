@@ -19,7 +19,8 @@ const {
 name,
 email,
 password,
-role
+role,
+department
 }=body;
 
 
@@ -116,6 +117,7 @@ await supabaseAdmin
 name,
 email,
 role,
+department: department || "sales",
 auth_user_id:authUserId,
 is_active:true
 

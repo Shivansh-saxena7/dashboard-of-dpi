@@ -6,15 +6,16 @@ import { supabase } from "@/lib/supabase";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import EmployeeTabBar from "@/components/EmployeeTabBar";
-import StartShiftCard from "@/components/StartShiftCard";
-import LeadList from "@/components/LeadList";
+import WeeklyLeaderboardView from "@/components/WeeklyLeaderboardView";
 
-// New V2 route — deliberately its own page rather than folded into
-// app/page.tsx (V1's employee dashboard), so V1 stays untouched. No
-// shared employee layout exists yet, so this repeats the same
-// inline auth-check block app/page.tsx already uses, rather than
-// introducing a new layout abstraction for just two pages.
-export default function LeadsPage() {
+// Leaderboard's own top-level route — mirrors app/data/page.tsx
+// exactly (same inline auth-check block; no shared employee layout
+// exists yet for just a few pages). This is the permanent,
+// check-anytime counterpart to Header.tsx's Tuesday-only Weekly
+// Visits popup — Monthly Bookings stays popup-only for now, not
+// added here, since only the weekly view was asked to become
+// permanent.
+export default function LeaderboardPage() {
 
   const router = useRouter();
 
@@ -55,13 +56,11 @@ export default function LeadsPage() {
         return;
       }
 
-      // Leads is Sales-only active work — a non-Sales employee
-      // (department !== 'sales') has no owned leads to manage here,
-      // and non-Sales departments have no dedicated module of their
-      // own yet (Posts is their whole experience) — so this redirects
-      // to "/" rather than a Sales-adjacent substitute. Redirects at
-      // the route level, not just tab-hiding, so a direct URL hit is
-      // blocked the same way admin's is above.
+      // Weekly Visits Leaderboard is a Sales-achievement view — a
+      // non-Sales employee has nothing to check here. Route-level
+      // redirect, not just tab-hiding (a direct URL hit is blocked
+      // the same way admin's is above), matching the same hardening
+      // now applied to /leads and /data.
       if (data.department !== "sales") {
         router.replace("/");
         return;
@@ -81,9 +80,8 @@ export default function LeadsPage() {
   return (
     <main className="min-h-screen bg-gradient-to-br from-white via-blue-50 to-blue-100">
       <Header />
-      {employee?.id && <StartShiftCard employeeId={employee.id} compact />}
       <EmployeeTabBar role={employee?.role} department={employee?.department} />
-      {employee?.id && <LeadList employeeId={employee.id} />}
+      <WeeklyLeaderboardView myEmployeeId={employee?.id ?? null} />
       <Footer />
     </main>
   );

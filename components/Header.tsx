@@ -11,42 +11,9 @@ import { FaInstagram, FaFacebookF, FaYoutube } from "react-icons/fa";
 import NotificationModal from "./NotificationModal";
 import BookingCelebrationModal from "./BookingCelebrationModal";
 import LeaderboardPopupModal from "./LeaderboardPopupModal";
+import { getISTParts, ymd, formatShortDate, getMostRecentCompletedWeek } from "@/lib/leaderboardWeek";
 
 const playfair = Playfair_Display({ subsets: ["latin"], weight: ["600", "700"] });
-
-// IST wall-clock parts, independent of the device's own timezone —
-// same reasoning as the working-hours SLA-timer work (a phone set to
-// a different timezone shouldn't shift when these popups fire).
-// toLocaleString(..., {timeZone}) renders the IST wall-clock as a
-// string; re-parsing it via `new Date()` interprets that string in
-// the BROWSER's local zone, which is exactly the trick that makes
-// the resulting getHours()/getDay()/etc. reflect IST regardless of
-// device settings.
-function getISTParts() {
-  const now = new Date();
-  const ist = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-  return {
-    year: ist.getFullYear(),
-    month: ist.getMonth(),
-    dayOfMonth: ist.getDate(),
-    dayOfWeek: ist.getDay(),
-    hour: ist.getHours(),
-    minute: ist.getMinutes()
-  };
-}
-
-function pad2(n: number) {
-  return String(n).padStart(2, "0");
-}
-
-// year/month(0-indexed)/day -> "YYYY-MM-DD", built from plain
-// integers rather than a Date's own toISOString() — that goes
-// through a UTC round-trip that can silently shift the date by a day
-// depending on the device's timezone, exactly the kind of bug this
-// whole IST-explicit approach exists to avoid.
-function ymd(year: number, month: number, day: number) {
-  return `${year}-${pad2(month + 1)}-${pad2(day)}`;
-}
 
 const POPUP_WINDOWS_MINUTES = [11 * 60, 14 * 60, 17 * 60]; // 11:00, 14:00, 17:00 IST
 const POPUP_WINDOW_LENGTH_MINUTES = 10;
@@ -54,10 +21,6 @@ const POPUP_WINDOW_LENGTH_MINUTES = 10;
 function isWithinPopupWindow(hour: number, minute: number): boolean {
   const total = hour * 60 + minute;
   return POPUP_WINDOWS_MINUTES.some((start) => total >= start && total < start + POPUP_WINDOW_LENGTH_MINUTES);
-}
-
-function formatShortDate(year: number, month: number, day: number): string {
-  return new Date(year, month, day).toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
 interface CelebrationQueueItem {
@@ -85,6 +48,7 @@ export default function Header() {
   // --- Weekly/Monthly Leaderboards (Features 1 & 2) ---
   const [leaderboardPopup, setLeaderboardPopup] = useState<LeaderboardPopupState | null>(null);
   const [myEmployeeId, setMyEmployeeId] = useState<string | null>(null);
+  const [myDepartment, setMyDepartment] = useState<string | null>(null);
 
   const router = useRouter();
 
@@ -126,13 +90,14 @@ useEffect(() => {
 
       const { data: employee } = await supabase
         .from("employees")
-        .select("id")
+        .select("id, department")
         .eq("auth_user_id", user.id)
         .single();
 
       if (!employee || cancelled) return;
 
       setMyEmployeeId(employee.id);
+      setMyDepartment(employee.department);
 
       const existing = supabase.getChannels().find((ch) => ch.topic === `realtime:employee-${employee.id}`);
 
@@ -292,7 +257,13 @@ useEffect(() => {
   // month's popup at most once (leaderboard_popup_views), whichever
   // window catches them first — not three times.
   useEffect(() => {
-    if (!myEmployeeId) return;
+    // Runs independently of the tab bar — a non-Sales employee never
+    // has a Leaderboard tab, but Header mounts on every employee page
+    // (including Posts) regardless, so without this check they'd
+    // still silently get the popup. Weekly Visits is a Sales-
+    // achievement view non-Sales has nothing to do with (same
+    // reasoning as removing their access to /leaderboard itself).
+    if (!myEmployeeId || myDepartment !== "sales") return;
 
     let cancelled = false;
 
@@ -303,8 +274,8 @@ useEffect(() => {
       if (!isWithinPopupWindow(parts.hour, parts.minute)) return;
 
       if (parts.dayOfWeek === 2) {
-        const weekStartDate = new Date(parts.year, parts.month, parts.dayOfMonth - 8);
-        const periodKey = ymd(weekStartDate.getFullYear(), weekStartDate.getMonth(), weekStartDate.getDate());
+        const week = getMostRecentCompletedWeek(parts);
+        const periodKey = week.periodKey;
 
         const { data: seen } = await supabase
           .from("leaderboard_popup_views")
@@ -323,11 +294,9 @@ useEffect(() => {
               .insert({ employee_id: myEmployeeId, popup_type: "WEEKLY_VISITS", period_key: periodKey });
 
             if (!insertError && !cancelled) {
-              const weekEndDate = new Date(weekStartDate);
-              weekEndDate.setDate(weekEndDate.getDate() + 6);
               setLeaderboardPopup({
                 title: "🏆 Weekly Visits Leaderboard",
-                subtitle: `Week of ${formatShortDate(weekStartDate.getFullYear(), weekStartDate.getMonth(), weekStartDate.getDate())} – ${formatShortDate(weekEndDate.getFullYear(), weekEndDate.getMonth(), weekEndDate.getDate())}`,
+                subtitle: `Week of ${formatShortDate(week.startYear, week.startMonth, week.startDay)} – ${formatShortDate(week.endYear, week.endMonth, week.endDay)}`,
                 countLabel: "visits",
                 rows: rows.map((r: any) => ({ employeeId: r.employee_id, employeeName: r.employee_name, count: r.visit_count }))
               });
@@ -389,7 +358,7 @@ useEffect(() => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [myEmployeeId, leaderboardPopup]);
+  }, [myEmployeeId, myDepartment, leaderboardPopup]);
 
   const loadNotifications = async () => {
     const {

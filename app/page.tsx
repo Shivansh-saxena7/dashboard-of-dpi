@@ -379,7 +379,7 @@ to-blue-100
 
 <Header />
 
-<EmployeeTabBar role={employee?.role} />
+<EmployeeTabBar role={employee?.role} department={employee?.department} />
 
 {employee?.id && <StartShiftCard employeeId={employee.id} />}
 

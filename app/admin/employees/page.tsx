@@ -111,6 +111,28 @@ const toggleSalesCoordinator = async (
 
 };
 
+// Department controls which EmployeeTabBar tab-set an "employee" row
+// gets (Sales: Posts/Leads/Data/Leaderboard vs non-Sales: Posts only)
+// — see components/EmployeeTabBar.tsx. Deliberately not offered for
+// "team_leader" rows — leading a Sales team structurally requires
+// Sales access, so this dropdown can never be used to accidentally
+// misconfigure one into losing it. Not shown for admin/
+// sales_coordinator either, since those roles have their own separate
+// dashboards (/admin, /coordinator) that don't read this field at
+// all.
+const updateDepartment = async (id: string, newDepartment: string) => {
+
+  const { error } = await supabase
+    .from("employees")
+    .update({ department: newDepartment })
+    .eq("id", id);
+
+  if (!error) {
+    fetchEmployees();
+  }
+
+};
+
 const deleteEmployee=async()=>{
 
 const res = await fetch("/api/delete-employee", {
@@ -736,6 +758,24 @@ employee.rr_eligible
   >
     {employee.role === "sales_coordinator" ? "Remove Coordinator role" : "Make Sales Coordinator"}
   </button>
+)}
+
+{employee.role === "employee" && (
+  <select
+    value={employee.department || "sales"}
+    onChange={async (e) => {
+      e.stopPropagation();
+      await updateDepartment(employee.id, e.target.value);
+    }}
+    onClick={(e) => e.stopPropagation()}
+    className="px-3 py-2 rounded-xl text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200 outline-none"
+  >
+    <option value="sales">Sales</option>
+    <option value="hr">HR</option>
+    <option value="accounts">Accounts</option>
+    <option value="marketing">Digital Marketer</option>
+    <option value="other">Other</option>
+  </select>
 )}
 
 <button

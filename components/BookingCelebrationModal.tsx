@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
 import { motion } from "framer-motion";
 import { createPortal } from "react-dom";
-import { PartyPopper } from "lucide-react";
+import { PartyPopper, X } from "lucide-react";
 
 interface BookingCelebrationModalProps {
   message: string;
@@ -16,19 +15,15 @@ interface BookingCelebrationModalProps {
 // transformed/animated ancestor happens to be mounting it (Header is
 // itself sticky + can sit inside animated wrappers on some pages).
 //
-// Auto-dismisses after 5s but is also manually closable — a
-// celebration shouldn't require an action to get rid of, but an
-// employee mid-task shouldn't be stuck waiting either. Every prior
-// close (auto or manual) calls the same onClose, which is what
-// Header.tsx uses to advance its celebration queue — this component
-// has no idea whether it's showing a live one or a catch-up one, by
-// design (that distinction lives entirely in Header).
+// Manual-close only, no timer — a celebration is worth reading, not
+// racing a clock over. Closable via the corner X (matches every other
+// modal's convention — AdminLeadHistoryModal etc.), backdrop click, or
+// the "🎉 Nice!" button, all deliberate user actions. Every close path
+// calls the same onClose, which is what Header.tsx uses to advance
+// its celebration queue — this component has no idea whether it's
+// showing a live one or a catch-up one, by design (that distinction
+// lives entirely in Header).
 export default function BookingCelebrationModal({ message, onClose }: BookingCelebrationModalProps) {
-
-  useEffect(() => {
-    const timer = setTimeout(onClose, 5000);
-    return () => clearTimeout(timer);
-  }, [onClose]);
 
   const modal = (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" onClick={onClose}>
@@ -46,7 +41,14 @@ export default function BookingCelebrationModal({ message, onClose }: BookingCel
         onClick={(e) => e.stopPropagation()}
         className="relative w-full max-w-sm rounded-[28px] bg-gradient-to-br from-amber-400 via-orange-500 to-rose-500 p-1 shadow-[0_20px_60px_rgba(217,119,6,0.4)]"
       >
-        <div className="rounded-[24px] bg-white px-6 py-8 text-center">
+        <div className="relative rounded-[24px] bg-white px-6 py-8 text-center">
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 h-8 w-8 flex items-center justify-center rounded-full bg-slate-900/5 hover:bg-slate-900/10 text-slate-500 hover:text-slate-700 transition"
+          >
+            <X size={16} />
+          </button>
+
           <motion.div
             initial={{ scale: 0, rotate: -20 }}
             animate={{ scale: 1, rotate: 0 }}

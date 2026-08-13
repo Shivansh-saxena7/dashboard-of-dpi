@@ -14,6 +14,7 @@ const [name,setName]=useState("");
 const [email,setEmail]=useState("");
 const [password,setPassword]=useState("");
 const [role,setRole]=useState("employee");
+const [department,setDepartment]=useState("sales");
 
 const [loading,setLoading]=useState(false);
 
@@ -26,7 +27,7 @@ setLoading(true);
 const res = await fetch("/api/create-employee", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ name, email, password, role }),
+  body: JSON.stringify({ name, email, password, role, department }),
 });
 
 const result = await res.json();
@@ -46,6 +47,7 @@ setName("");
 setEmail("");
 setPassword("");
 setRole("");
+setDepartment("sales");
 
 }catch(err){
 
@@ -213,6 +215,46 @@ Sales Coordinator
 </option>
 
 </select>
+
+{role === "employee" && (
+<select
+
+value={department}
+onChange={(e)=>setDepartment(e.target.value)}
+
+className="
+w-full
+h-14
+px-5
+rounded-2xl
+bg-slate-100
+outline-none
+"
+
+>
+
+<option value="sales">
+Department: Sales
+</option>
+
+<option value="hr">
+Department: HR
+</option>
+
+<option value="accounts">
+Department: Accounts
+</option>
+
+<option value="marketing">
+Department: Digital Marketer
+</option>
+
+<option value="other">
+Department: Other
+</option>
+
+</select>
+)}
 
 
 <div className="

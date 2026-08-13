@@ -56,6 +56,13 @@ export default function DataPage() {
         return;
       }
 
+      // Data is Sales-only active work — same reasoning/redirect as
+      // app/leads/page.tsx.
+      if (data.department !== "sales") {
+        router.replace("/");
+        return;
+      }
+
       setEmployee(data);
       setAuthChecked(true);
     }
@@ -71,7 +78,7 @@ export default function DataPage() {
     <main className="min-h-screen bg-gradient-to-br from-white via-blue-50 to-blue-100">
       <Header />
       {employee?.id && <StartShiftCard employeeId={employee.id} compact />}
-      <EmployeeTabBar role={employee?.role} />
+      <EmployeeTabBar role={employee?.role} department={employee?.department} />
       {employee?.id && <DataList employeeId={employee.id} />}
       <Footer />
     </main>

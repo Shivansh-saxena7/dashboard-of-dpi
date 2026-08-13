@@ -3,16 +3,18 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
-import { Image as ImageIcon, Target, Database, Users } from "lucide-react";
+import { Image as ImageIcon, Target, Database, Users, Trophy } from "lucide-react";
 
 interface EmployeeTabBarProps {
   role?: string;
+  department?: string;
 }
 
-const BASE_TABS = [
+const SALES_TABS = [
   { href: "/", label: "Posts", icon: ImageIcon },
   { href: "/leads", label: "Leads", icon: Target },
-  { href: "/data", label: "Data", icon: Database }
+  { href: "/data", label: "Data", icon: Database },
+  { href: "/leaderboard", label: "Leaderboard", icon: Trophy }
 ];
 
 const TEAM_LEADER_TAB = { href: "/team", label: "Team", icon: Users };
@@ -36,10 +38,21 @@ const TEAM_LEADER_TAB = { href: "/team", label: "Team", icon: Users };
 // of one pill disappearing and another appearing. Gold-gradient +
 // icon per tab matches the exact treatment LeadList's own board-stage
 // tabs already use, for one consistent tab-bar language app-wide.
-export default function EmployeeTabBar({ role }: EmployeeTabBarProps) {
+export default function EmployeeTabBar({ role, department }: EmployeeTabBarProps) {
   const pathname = usePathname();
 
-  const tabs = role === "team_leader" ? [...BASE_TABS, TEAM_LEADER_TAB] : BASE_TABS;
+  // Non-Sales departments (hr/accounts/marketing/other) have nothing
+  // Sales-related to navigate to — Posts is their entire experience,
+  // so there's no tab bar to show at all rather than a single
+  // pointless pill. department defaults to "sales" (undefined —
+  // e.g. mid-flight before the employee row has loaded — falls
+  // through to the normal tab bar, matching the DB column's own
+  // default so nothing changes for the common case).
+  if (department && department !== "sales") {
+    return null;
+  }
+
+  const tabs = role === "team_leader" ? [...SALES_TABS, TEAM_LEADER_TAB] : SALES_TABS;
 
   return (
     <motion.div
