@@ -37,14 +37,17 @@ function formatDate(date: string) {
   });
 }
 
-// Two systems' notifications used to render in one mixed, hardcoded-
+// Three systems' notifications used to render in one mixed, hardcoded-
 // "POST ASSIGNED"-labeled list — confusing (V1 Posts vs V2 Lead
 // Engine, no way to tell them apart) and actively wrong (every card
 // said "POST ASSIGNED" regardless of what it actually was). Split
 // into tabs instead of just fixing the label in place, since Posts
 // notifications are high-volume and would otherwise still bury Leads
-// ones in the same scroll. Defaults to the Leads tab — the actively-
-// evolving system this work is on.
+// ones in the same scroll. Tickets joined as a third tab, not folded
+// into Leads — it's a genuinely separate, company-wide system
+// (HR/Accounts/Sales-Coordinator/Admin), same reasoning that kept
+// Posts split out. Defaults to the Leads tab — the actively-evolving
+// system this work is on.
 export default function NotificationModal({
   notifications,
   onClose,
@@ -54,7 +57,9 @@ export default function NotificationModal({
 
   const leadsNotifications = notifications.filter((n) => classifyNotificationSystem(n.type) === "LEADS");
   const postsNotifications = notifications.filter((n) => classifyNotificationSystem(n.type) === "POSTS");
-  const visibleNotifications = activeTab === "LEADS" ? leadsNotifications : postsNotifications;
+  const ticketsNotifications = notifications.filter((n) => classifyNotificationSystem(n.type) === "TICKETS");
+  const visibleNotifications =
+    activeTab === "LEADS" ? leadsNotifications : activeTab === "POSTS" ? postsNotifications : ticketsNotifications;
 
   return (
     <AnimatePresence>
@@ -261,6 +266,19 @@ export default function NotificationModal({
                 {postsNotifications.length}
               </span>
             </button>
+            <button
+              onClick={() => setActiveTab("TICKETS")}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-t-xl text-sm font-bold transition ${
+                activeTab === "TICKETS"
+                  ? "bg-blue-50 text-blue-700 border-b-2 border-blue-600"
+                  : "text-gray-400 hover:text-gray-600"
+              }`}
+            >
+              Tickets
+              <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full ${activeTab === "TICKETS" ? "bg-blue-100" : "bg-gray-100"}`}>
+                {ticketsNotifications.length}
+              </span>
+            </button>
           </div>
 
           {/* BODY */}
@@ -314,7 +332,9 @@ export default function NotificationModal({
                 <p className="mt-3 text-gray-500 max-w-sm leading-7">
                   {activeTab === "LEADS"
                     ? "No Lead Engine notifications yet — assignments, reminders, and alerts will appear here."
-                    : "No Post notifications yet — whenever admin assigns a new post, it will instantly appear here."}
+                    : activeTab === "POSTS"
+                    ? "No Post notifications yet — whenever admin assigns a new post, it will instantly appear here."
+                    : "No Ticket notifications yet — raised and resolved tickets will appear here."}
                 </p>
 
               </div>

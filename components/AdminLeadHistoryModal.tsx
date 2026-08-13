@@ -7,12 +7,14 @@ import { X, User, Bookmark } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { ENDED_REASON_TEXT } from "@/lib/endedReasonDisplay";
 import { assignedByLabel } from "@/lib/assignedByDisplay";
+import { isLeadTerminal } from "@/lib/isLeadTerminal";
 
 interface AdminLeadHistoryModalProps {
   leadId: string;
   leadName: string;
   leadType?: string;
   leadStatus?: string;
+  leadBoardStage?: string;
   catcherName?: string | null;
   onClose: () => void;
 }
@@ -73,18 +75,24 @@ type TimelineEntry =
 // the point where the {historyOpen && ...} conditional actually is —
 // portals change DOM output, not React parent/unmount timing, so
 // AnimatePresence still needs to sit there to see the removal coming.
-export default function AdminLeadHistoryModal({ leadId, leadName, leadType, leadStatus, catcherName, onClose }: AdminLeadHistoryModalProps) {
+export default function AdminLeadHistoryModal({ leadId, leadName, leadType, leadStatus, leadBoardStage, catcherName, onClose }: AdminLeadHistoryModalProps) {
 
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // A CONVERTED/JUNK lead is permanently closed — "Current" on its
-  // still-is_active=true row implies ongoing/active work that isn't
-  // there anymore (same terminal condition as AdminLeadCard's own
-  // isTerminal check). "Final Owner" reads correctly for either
-  // outcome (Booked or Junked) without needing separate wording per
-  // outcome.
-  const isTerminal = leadStatus === "CONVERTED" || leadStatus === "JUNK";
+  // A genuinely-Booked (status=CONVERTED AND board_stage=BOOKING) or
+  // JUNK lead is permanently closed — "Current" on its still-
+  // is_active=true row implies ongoing/active work that isn't there
+  // anymore (same terminal condition as AdminLeadCard's own
+  // isTerminal check, now both sourced from lib/isLeadTerminal.ts).
+  // status='CONVERTED' ALONE used to be treated as terminal here —
+  // wrong, since an employee can mark CONVERTED as a plain call-
+  // outcome (verbal yes) without the lead ever reaching board_stage=
+  // BOOKING, at which point the lead is still very much active and
+  // "Current" is the correct, accurate label. "Final Owner" reads
+  // correctly for either genuine terminal outcome (Booked or Junked)
+  // without needing separate wording per outcome.
+  const isTerminal = isLeadTerminal(leadStatus, leadBoardStage);
 
   useEffect(() => {
     loadHistory();

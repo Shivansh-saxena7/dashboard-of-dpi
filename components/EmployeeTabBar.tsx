@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
-import { Image as ImageIcon, Target, Database, Users, Trophy } from "lucide-react";
+import { Image as ImageIcon, Target, Database, Users, Trophy, Ticket } from "lucide-react";
 
 interface EmployeeTabBarProps {
   role?: string;
@@ -14,7 +14,19 @@ const SALES_TABS = [
   { href: "/", label: "Posts", icon: ImageIcon },
   { href: "/leads", label: "Leads", icon: Target },
   { href: "/data", label: "Data", icon: Database },
-  { href: "/leaderboard", label: "Leaderboard", icon: Trophy }
+  { href: "/leaderboard", label: "Leaderboard", icon: Trophy },
+  { href: "/tickets", label: "Tickets", icon: Ticket }
+];
+
+// Tickets is deliberately universal — "koi-bhi-employee" can raise
+// one, so unlike Leads/Data/Leaderboard (Sales-only) it belongs on
+// BOTH branches. Non-Sales departments previously got no tab bar at
+// all (Posts was their entire experience) — that's reversed here,
+// specifically because Tickets exists now and is genuinely relevant
+// to them, not a blanket re-expansion of their access.
+const NON_SALES_TABS = [
+  { href: "/", label: "Posts", icon: ImageIcon },
+  { href: "/tickets", label: "Tickets", icon: Ticket }
 ];
 
 const TEAM_LEADER_TAB = { href: "/team", label: "Team", icon: Users };
@@ -65,32 +77,30 @@ const TEAM_LEADER_TAB = { href: "/team", label: "Team", icon: Users };
 //
 // Split into an outer fixed-size card (rounded corners + gold-strip
 // anchor) and an inner overflow-x-auto row — deliberate, not
-// decorative: with 5 tabs (team_leader) at flex-1, each tab's own
-// text has a default min-content floor it won't shrink below (same
-// min-width:auto flex behavior documented on the admin/coordinator
-// layout fix elsewhere in this app), so the row's natural width can
-// exceed the card's at narrow phone widths. overflow-hidden there
-// would silently CLIP the last tab's label mid-word — verified this
-// happening via Playwright before landing on overflow-x-auto instead
-// (same "make it scrollable, never hidden" principle as the Employee-
-// Summary table fix). The 4-tab case (no team_leader) always fits
-// with room to spare, so this never shows a scrollbar in practice —
-// it's a safety net for the one case that needs it.
+// decorative: at flex-1, each tab's own text has a default min-content
+// floor it won't shrink below (same min-width:auto flex behavior
+// documented on the admin/coordinator layout fix elsewhere in this
+// app), so the row's natural width can exceed the card's at narrow
+// phone widths. overflow-hidden there would silently CLIP the last
+// tab's label mid-word — verified this happening via Playwright
+// before landing on overflow-x-auto instead (same "make it
+// scrollable, never hidden" principle as the Employee-Summary table
+// fix). Re-verified after adding Tickets: at 360px even the base
+// 5-tab Sales case (no team_leader) now scrolls (353px content vs
+// 326px available) — confirmed via screenshot this degrades cleanly
+// (trailing tab fades at the edge, swipeable, not clipped/broken),
+// same as the 6-tab team_leader case already did. The 2-tab
+// NON_SALES_TABS case is the only one that never needs to scroll.
 export default function EmployeeTabBar({ role, department }: EmployeeTabBarProps) {
   const pathname = usePathname();
 
-  // Non-Sales departments (hr/accounts/marketing/other) have nothing
-  // Sales-related to navigate to — Posts is their entire experience,
-  // so there's no tab bar to show at all rather than a single
-  // pointless pill. department defaults to "sales" (undefined —
-  // e.g. mid-flight before the employee row has loaded — falls
-  // through to the normal tab bar, matching the DB column's own
-  // default so nothing changes for the common case).
-  if (department && department !== "sales") {
-    return null;
-  }
-
-  const tabs = role === "team_leader" ? [...SALES_TABS, TEAM_LEADER_TAB] : SALES_TABS;
+  // department defaults to "sales" here (undefined — e.g. mid-flight
+  // before the employee row has loaded — falls through to the Sales
+  // tab-set, matching the DB column's own default so nothing changes
+  // for the common case).
+  const isNonSales = Boolean(department && department !== "sales");
+  const baseTabs = isNonSales ? NON_SALES_TABS : SALES_TABS;
+  const tabs = !isNonSales && role === "team_leader" ? [...baseTabs, TEAM_LEADER_TAB] : baseTabs;
 
   return (
     <motion.div

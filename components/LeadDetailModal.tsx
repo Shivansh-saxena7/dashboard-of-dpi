@@ -124,11 +124,15 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
       });
   }
 
-  const validNextStatuses = getValidNextLeadStatuses(lead.status);
+  const validNextStatuses = getValidNextLeadStatuses(lead.status, lead.boardStage);
   const isTerminal = validNextStatuses.length === 0;
 
   // Board moves stop once a lead is Booked (terminal) or its status
-  // is otherwise terminal (JUNK) — same reasoning as Log Update.
+  // is otherwise terminal (JUNK) — same reasoning as Log Update. The
+  // boardStage==='BOOKING' half is redundant with isTerminal now that
+  // it factors board_stage in too, kept explicit anyway since it
+  // costs nothing and makes the intent obvious without tracing into
+  // isLeadTerminal.
   const boardMovesDisabled = isTerminal || lead.boardStage === "BOOKING";
 
   async function submitUpdate() {

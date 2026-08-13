@@ -99,6 +99,12 @@ icon:"🏆"
 },
 
 {
+name:"Tickets",
+href:"/admin/tickets",
+icon:"🎫"
+},
+
+{
 name:"Teams",
 href:"/admin/teams",
 icon:"🧑‍🤝‍🧑"

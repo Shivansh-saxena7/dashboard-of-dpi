@@ -4,6 +4,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 import { calculateSLAStatus, FOLLOWUP_INACTIVITY_WARNING_DAYS } from "../../../lib/calculateSLAStatus.ts";
 import { calculateLeadAssignment } from "../../../lib/calculateLeadAssignment.ts";
+import { isLeadTerminal } from "../../../lib/isLeadTerminal.ts";
 
 // Scheduled sweep (pg_cron, every 15 min — modeled on
 // mark-missed-posts). No CORS, no caller-identity resolution: this
@@ -261,7 +262,19 @@ serve(async () => {
         )
       `
       )
-      .not("status", "in", "(CONVERTED,JUNK)")
+      // Only JUNK is excluded at the query level — CONVERTED is NOT,
+      // deliberately. status='CONVERTED' alone doesn't mean genuinely
+      // booked (see lib/isLeadTerminal.ts); a lead an employee marked
+      // CONVERTED as a plain call-outcome, without ever reaching
+      // board_stage='BOOKING', is still active and needs the same
+      // staleness/recycling sweep as anything else. The real terminal
+      // check (which needs board_stage, not expressible as a simple
+      // PostgREST .not() filter) happens per-row in the loop below via
+      // isLeadTerminal — this used to blanket-exclude CONVERTED here,
+      // making the whole safety net structurally blind to a
+      // premature/mistaken CONVERTED mark: that lead would never be
+      // flagged or recovered, forever, even if abandoned right after.
+      .neq("status", "JUNK")
       .eq("lead_history.is_active", true);
 
     if (leadsError) {
@@ -283,6 +296,16 @@ serve(async () => {
 
       if (!activeHistory) {
         diagnostics.push({ leadId: lead.id, action: "SKIPPED", reason: "no active lead_history row" });
+        continue;
+      }
+
+      // Genuinely-terminal check — JUNK is already excluded at the
+      // query level above, this only needs to catch a genuinely-
+      // Booked lead (status=CONVERTED AND board_stage=BOOKING) now
+      // that the query intentionally lets CONVERTED-but-not-booked
+      // leads through. A real Booking is done, nothing left to sweep.
+      if (isLeadTerminal(lead.status, lead.board_stage)) {
+        diagnostics.push({ leadId: lead.id, action: "SKIPPED", reason: "genuinely terminal (booked or junked)" });
         continue;
       }
 

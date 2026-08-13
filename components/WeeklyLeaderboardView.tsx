@@ -33,6 +33,14 @@ interface WeeklyLeaderboardViewProps {
   // itself. Defaults to false so any future caller that forgets to
   // pass it fails closed, not open.
   canExport?: boolean;
+  // Same reasoning, same fail-closed default, for the two ADVANCED
+  // filter controls — the employee-name Search box and the Custom
+  // Range date-pickers (+ the This-Week/Custom-Range toggle that
+  // exposes them). An employee should only ever VIEW the leaderboard,
+  // not slice it. Week Prev/Next is deliberately NOT gated by this —
+  // it's simple browse (like paging), not a filter, and stays visible
+  // for everyone regardless of canFilter.
+  canFilter?: boolean;
 }
 
 type Mode = "WEEK" | "CUSTOM";
@@ -70,7 +78,16 @@ function formatDateKey(key: string): string {
 // rank badges are computed from the full unfiltered list first so a
 // filtered-down view still shows someone's true rank, not "1" just
 // because they're the only row left on screen.
-export default function WeeklyLeaderboardView({ myEmployeeId, canExport = false }: WeeklyLeaderboardViewProps) {
+//
+// canFilter draws the exact same line as canExport (see prop comment)
+// between VIEWING and SLICING the data — Week Prev/Next is browse
+// (like turning a page, always visible), while the This-Week/Custom-
+// Range toggle, the Custom Range date-pickers, and employee search
+// are filter CONTROLS reserved for Admin/Sales Coordinator. When
+// canFilter is false, mode simply never leaves its default "WEEK"
+// (the only UI that could switch it is unrendered), so no extra
+// guard is needed to keep an employee pinned to the plain week view.
+export default function WeeklyLeaderboardView({ myEmployeeId, canExport = false, canFilter = false }: WeeklyLeaderboardViewProps) {
   const mostRecentWeek = useMemo(() => getMostRecentCompletedWeek(getISTParts()), []);
   const todayStr = useMemo(() => todayKey(), []);
 
@@ -232,6 +249,7 @@ export default function WeeklyLeaderboardView({ myEmployeeId, canExport = false 
           </div>
         </div>
 
+        {canFilter && (
         <div className="p-4 pb-3 border-b border-slate-100 space-y-3">
           <div className="flex items-center gap-1 rounded-xl bg-slate-100 p-1 w-fit">
             <button
@@ -273,8 +291,11 @@ export default function WeeklyLeaderboardView({ myEmployeeId, canExport = false 
             </div>
           )}
         </div>
+        )}
 
+        {(canFilter || canExport) && (
         <div className="p-4 pb-3 flex flex-col sm:flex-row gap-2 border-b border-slate-100">
+          {canFilter && (
           <div className="relative flex-1">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
@@ -284,9 +305,10 @@ export default function WeeklyLeaderboardView({ myEmployeeId, canExport = false 
               className="w-full h-10 pl-9 pr-3 rounded-xl bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-300 transition"
             />
           </div>
+          )}
 
           {canExport && (
-          <div className="flex gap-2">
+          <div className={`flex gap-2 ${canFilter ? "" : "sm:ml-auto"}`}>
             <button
               onClick={() => handleExport("excel")}
               disabled={visibleRows.length === 0 || exporting !== null}
@@ -306,6 +328,7 @@ export default function WeeklyLeaderboardView({ myEmployeeId, canExport = false 
           </div>
           )}
         </div>
+        )}
 
         <div className="p-4 space-y-1.5">
           {!range.ready ? (

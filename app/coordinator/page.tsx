@@ -9,6 +9,7 @@ import AdminLeadCard from "@/components/AdminLeadCard";
 import ExportPreviewTable from "@/components/ExportPreviewTable";
 import ManualLeadEntryModal from "@/components/ManualLeadEntryModal";
 import WeeklyLeaderboardView from "@/components/WeeklyLeaderboardView";
+import TicketsView from "@/components/TicketsView";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES } from "@/lib/leadBoardStageDisplay";
 import { exportLeadsToExcel, exportLeadsToPDF } from "@/lib/exportLeadsReport";
@@ -17,7 +18,7 @@ import { exportVisitsToExcel, exportVisitsToPDF, VisitExportRow } from "@/lib/ex
 import { exportSnoozesToExcel, exportSnoozesToPDF, SnoozeExportRow } from "@/lib/exportSnoozeReport";
 import { DateRangeOption, isWithinDateRange, dateRangeFilterLabel } from "@/lib/dateRangeFilter";
 
-type ActiveTab = "LEADS" | "SUMMARY" | "VERIFY" | "SNOOZE" | "LEADERBOARD";
+type ActiveTab = "LEADS" | "SUMMARY" | "VERIFY" | "SNOOZE" | "LEADERBOARD" | "TICKETS";
 type SortOption = "NEWEST" | "OLDEST" | "SLA_URGENCY";
 type VisitStatusFilter = "PENDING" | "VERIFIED" | "DENIED" | "ALL";
 type SnoozeStatusFilter = "ACTIVE" | "EXPIRED" | "CANCELLED" | "ALL";
@@ -142,6 +143,10 @@ export default function CoordinatorDashboard() {
   // is an Admin-only power within it, so the page needs to know
   // which one it's rendering for.
   const [viewerRole, setViewerRole] = useState<"admin" | "sales_coordinator" | null>(null);
+  // Needed by the new Tickets tab (TicketsView) to bucket "My
+  // Tickets" vs "To Resolve" correctly for whoever's viewing this
+  // page — not needed anywhere else this page already does.
+  const [viewerEmployeeId, setViewerEmployeeId] = useState<string | null>(null);
 
   const [leads, setLeads] = useState<any[]>([]);
   const [employees, setEmployees] = useState<{ id: string; name: string; is_active: boolean; team_id: string | null }[]>([]);
@@ -270,7 +275,7 @@ export default function CoordinatorDashboard() {
 
     const { data, error } = await supabase
       .from("employees")
-      .select("role")
+      .select("id, role")
       .eq("auth_user_id", session.user.id)
       .single();
 
@@ -278,7 +283,10 @@ export default function CoordinatorDashboard() {
       console.error("coordinator: loadViewerRole failed:", error.message);
       return;
     }
-    if (data) setViewerRole(data.role);
+    if (data) {
+      setViewerRole(data.role);
+      setViewerEmployeeId(data.id);
+    }
   }
 
   // Broad fetch, same "everything up front" pattern as the rest of
@@ -1067,7 +1075,8 @@ export default function CoordinatorDashboard() {
     { key: "SUMMARY", label: "📊 Employee Summary", count: employeeSummary.length },
     { key: "VERIFY", label: "✅ Visit Verification", count: pendingVisitsCount },
     { key: "SNOOZE", label: "😴 Snooze Activity", count: snoozeLog.length },
-    { key: "LEADERBOARD", label: "🏆 Leaderboard" }
+    { key: "LEADERBOARD", label: "🏆 Leaderboard" },
+    { key: "TICKETS", label: "🎫 Tickets" }
   ];
 
   if (loading) {
@@ -1891,14 +1900,23 @@ export default function CoordinatorDashboard() {
 
       {/* Reuses the exact same WeeklyLeaderboardView the employee-
           facing /leaderboard route uses (Golden Rule — no separate
-          coordinator-flavored view) — canExport=true (Sales
-          Coordinator is one of the two roles allowed to download),
-          myEmployeeId=null (Coordinator isn't a ranked participant,
-          so no row highlights as "You"). Padding-free (no wrapping
-          px-4/mt-4 div) since Coordinator's own page body already
-          provides that spacing for every tab. */}
+          coordinator-flavored view) — canExport=true and
+          canFilter=true (Sales Coordinator gets full Search +
+          Custom Range + Export power, same as Admin), myEmployeeId=
+          null (Coordinator isn't a ranked participant, so no row
+          highlights as "You"). Padding-free (no wrapping px-4/mt-4
+          div) since Coordinator's own page body already provides
+          that spacing for every tab. */}
       {activeTab === "LEADERBOARD" && (
-        <WeeklyLeaderboardView myEmployeeId={null} canExport={true} />
+        <WeeklyLeaderboardView myEmployeeId={null} canExport={true} canFilter={true} />
+      )}
+
+      {/* Reuses the exact same TicketsView every other surface uses
+          (Golden Rule) — viewerEmployeeId (Admin-or-Coordinator,
+          whoever's viewing this shared page) so their own raised
+          tickets land in "My Tickets", not "To Resolve". */}
+      {activeTab === "TICKETS" && (
+        <TicketsView myEmployeeId={viewerEmployeeId} />
       )}
 
       {manualEntryOpen && (

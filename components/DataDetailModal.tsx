@@ -92,7 +92,16 @@ export default function DataDetailModal({ lead, onClose, onUpdated }: DataDetail
       });
   }
 
-  const validNextStatuses = getValidNextLeadStatuses(lead.status);
+  // Data rows have no board_stage/Booking funnel at all — board_stage
+  // stays 'LEADS' forever on a Data row (Phase 4 design), so this
+  // lead object never carries one. Passing undefined is correct, not
+  // a workaround: isLeadTerminal treats a missing board_stage as
+  // "not BOOKING," which is exactly true for every Data row, always —
+  // adding a real boardStage field to the whole Data pipeline just to
+  // satisfy this call would be plumbing for a value that can only
+  // ever be one constant. JUNK still terminates a Data row correctly
+  // either way, since that half of isLeadTerminal doesn't need it.
+  const validNextStatuses = getValidNextLeadStatuses(lead.status, undefined);
   const isTerminal = validNextStatuses.length === 0;
 
   async function submitUpdate() {

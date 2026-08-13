@@ -8,6 +8,7 @@ import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
 import { FOLLOWUP_INACTIVITY_WARNING_DAYS, FOLLOWUP_INACTIVITY_RECYCLE_DAYS } from "@/lib/calculateSLAStatus";
+import { isLeadTerminal } from "@/lib/isLeadTerminal";
 import AdminLeadHistoryModal from "./AdminLeadHistoryModal";
 
 interface AdminLeadCardLead {
@@ -143,17 +144,23 @@ export default function AdminLeadCard({
   // pausedUntil — same reasoning as calculateSLAStatus's dedicated
   // check: it only ends when Admin/Sales Coordinator verifies or
   // denies it, never just by the 3-day date passing.
-  // A CONVERTED (Booked) or JUNK lead is permanently closed — nothing
-  // else about it is still "pending," regardless of what its stale
-  // pause_reason/last_activity_at columns happen to still say (e.g.
-  // log_booking_atomic doesn't clear an in-progress VISIT_LOCK pause,
-  // since that's not its job — this card is what's responsible for
-  // not presenting that leftover state as if it were still active).
-  // Same terminal condition calculateSLAStatus.ts's own first gate
-  // uses — this card just can't reuse that function directly (it
-  // doesn't carry sla_deadline/outcome_at, which that function also
-  // needs), so the check is duplicated here rather than shared.
-  const isTerminal = lead.status === "CONVERTED" || lead.status === "JUNK";
+  // A genuinely Booked (status=CONVERTED AND board_stage=BOOKING) or
+  // JUNK lead is permanently closed — nothing else about it is still
+  // "pending," regardless of what its stale pause_reason/
+  // last_activity_at columns happen to still say (e.g. log_booking_
+  // atomic doesn't clear an in-progress VISIT_LOCK pause, since
+  // that's not its job — this card is what's responsible for not
+  // presenting that leftover state as if it were still active).
+  // status='CONVERTED' ALONE is deliberately not enough — status and
+  // board_stage are independent (log_lead_update_atomic lets an
+  // employee mark CONVERTED as a plain call-outcome, e.g. "client
+  // verbally agreed, formal booking hasn't happened yet," without
+  // ever touching board_stage). This card used to treat status=
+  // CONVERTED alone as terminal, which incorrectly suppressed stale/
+  // pause badges on leads that were still very much active — see
+  // lib/isLeadTerminal.ts for the full reasoning (same helper
+  // calculateSLAStatus.ts's own first gate now uses too).
+  const isTerminal = isLeadTerminal(lead.status, lead.boardStage);
   const isPaused =
     !isTerminal &&
     (lead.pauseReason === "VISIT_PENDING_VERIFICATION" ||
@@ -399,6 +406,7 @@ export default function AdminLeadCard({
             leadName={lead.name}
             leadType={lead.leadType}
             leadStatus={lead.status}
+            leadBoardStage={lead.boardStage}
             catcherName={lead.catcherName ?? null}
             onClose={() => setHistoryOpen(false)}
           />

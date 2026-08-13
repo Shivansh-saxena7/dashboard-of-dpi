@@ -81,11 +81,14 @@ export default function LeaderboardPage() {
     <main className="min-h-screen bg-gradient-to-br from-white via-blue-50 to-blue-100">
       <Header />
       <EmployeeTabBar role={employee?.role} department={employee?.department} />
-      {/* canExport explicitly false — this route is reachable only by
-          role "employee"/"team_leader" (admin and department-gated
-          redirects above already exclude everyone else), and Export
-          is an Admin/Sales-Coordinator-only power. Admin's and
-          Coordinator's own Leaderboard views pass true instead.
+      {/* canExport/canFilter both explicitly false — this route is
+          reachable only by role "employee"/"team_leader" (admin and
+          department-gated redirects above already exclude everyone
+          else). Export and the Search/Custom-Range filter controls
+          are both Admin/Sales-Coordinator-only powers — an employee
+          only ever VIEWS this leaderboard (Week Prev/Next stays
+          visible regardless, that's plain browsing). Admin's and
+          Coordinator's own Leaderboard views pass both true instead.
 
           px-4 mt-4 wrapper lives HERE, not inside the shared
           component — this bare <main> (mirrors app/data/page.tsx) has
@@ -94,7 +97,7 @@ export default function LeaderboardPage() {
           it. See WeeklyLeaderboardView's own comment for the full
           reasoning. */}
       <div className="px-4 mt-4">
-        <WeeklyLeaderboardView myEmployeeId={employee?.id ?? null} canExport={false} />
+        <WeeklyLeaderboardView myEmployeeId={employee?.id ?? null} canExport={false} canFilter={false} />
       </div>
       <Footer />
     </main>

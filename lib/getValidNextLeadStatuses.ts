@@ -1,3 +1,5 @@
+import { isLeadTerminal } from "./isLeadTerminal";
+
 // Single source of truth for "what statuses can this lead move to
 // next" — same pattern as the other lib/calculate*.ts files: pure
 // function, fixed set of outputs, imported everywhere this decision
@@ -21,10 +23,6 @@ export type LeadStatus =
   | "CONVERTED"
   | "JUNK";
 
-// Once a lead reaches either of these, no further employee-initiated
-// update is allowed.
-const TERMINAL_STATUSES: LeadStatus[] = ["CONVERTED", "JUNK"];
-
 // NEW and JUNK are deliberately excluded from the selectable set:
 //   - NEW means "not yet contacted" — it's a starting value, never
 //     something a call outcome produces, so it's never a valid pick.
@@ -40,9 +38,18 @@ const EMPLOYEE_SELECTABLE_STATUSES: LeadStatus[] = [
   "CONVERTED"
 ];
 
-export function getValidNextLeadStatuses(currentStatus: LeadStatus): LeadStatus[] {
+// boardStage added as a required second parameter — a lead is only
+// genuinely terminal (no further employee-initiated update allowed)
+// once isLeadTerminal() says so, which needs board_stage alongside
+// status (status='CONVERTED' alone can mean "verbal yes, not
+// genuinely booked yet" — see lib/isLeadTerminal.ts for the full
+// reasoning). This used to check status IN ('CONVERTED','JUNK') on
+// its own, which locked the dropdown for a lead that was still very
+// much active. Both call sites (LeadDetailModal, DataDetailModal)
+// updated to pass board_stage.
+export function getValidNextLeadStatuses(currentStatus: LeadStatus, boardStage: string | null | undefined): LeadStatus[] {
 
-  if (TERMINAL_STATUSES.includes(currentStatus)) {
+  if (isLeadTerminal(currentStatus, boardStage)) {
     return [];
   }
 

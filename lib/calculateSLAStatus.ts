@@ -3,6 +3,8 @@
 // set of string outputs, imported everywhere this decision is needed
 // (assignment engine, recycling Edge Function, SLA countdown UI).
 
+import { isLeadTerminal } from "./isLeadTerminal.ts";
+
 export type SLAStatus =
   | "WITHIN_SLA"
   | "SLA_BREACHED"
@@ -75,16 +77,25 @@ export function calculateSLAStatus(
 
   const now = new Date();
 
-  if (lead.status === "CONVERTED" || lead.status === "JUNK") {
+  // Was `status IN ('CONVERTED','JUNK')` — wrong, since status and
+  // board_stage are independent (see lib/isLeadTerminal.ts). A lead
+  // an employee marked CONVERTED as a plain call-outcome, without
+  // ever reaching board_stage='BOOKING' (log_booking_atomic is the
+  // only thing that sets it), is NOT actually done — it still needs
+  // the same staleness/recycling enforcement as any other active
+  // lead. Without this fix, a premature/mistaken CONVERTED mark made
+  // a lead permanently invisible to this whole function, forever,
+  // even if abandoned right after.
+  if (isLeadTerminal(lead.status, lead.board_stage)) {
     return "NOT_APPLICABLE";
   }
 
-  // Deliberately excludes status === "CONNECTED" OR a board_stage that
-  // has moved past "LEADS" — recycle_count/notInterestedCount are
-  // HISTORY (how many times this lead bounced between employees
-  // before someone finally reached the client, or was manually
-  // organized into Follow-up/Visit). Once genuine progress like
-  // either of those has happened, that history shouldn't
+  // Deliberately excludes status === "CONNECTED"/"CONVERTED" OR a
+  // board_stage that has moved past "LEADS" — recycle_count/
+  // notInterestedCount are HISTORY (how many times this lead bounced
+  // between employees before someone finally reached the client, or
+  // was manually organized into Follow-up/Visit). Once genuine
+  // progress like any of those has happened, that history shouldn't
   // retroactively destroy it — without this guard, a lead that took
   // 3 recycles to finally connect (or get moved to Follow-up/Visit,
   // even without a formal CONNECTED status-mark) got auto-JUNKed by
@@ -92,8 +103,19 @@ export function calculateSLAStatus(
   // count that predates the actual progress. A lead still unreached
   // AND still sitting in the LEADS column after MAX_RECYCLES attempts
   // is exactly what this was designed to catch, and still does.
+  //
+  // CONVERTED added to this exclusion as a direct consequence of the
+  // isLeadTerminal fix above — before that fix, CONVERTED always
+  // short-circuited to NOT_APPLICABLE at the top of this function, so
+  // this branch was structurally unreachable for it. Now that a
+  // verbally-CONVERTED-but-not-booked lead can reach this far, the
+  // exact same "genuine progress" reasoning this comment already
+  // documents for CONNECTED applies equally — a client verbally
+  // agreeing is if anything MORE progress than a mere connected call,
+  // not less, so it gets the same protection.
   if (
     lead.status !== "CONNECTED" &&
+    lead.status !== "CONVERTED" &&
     !(lead.board_stage && lead.board_stage !== "LEADS") &&
     (lead.recycle_count >= MAX_RECYCLES || notInterestedCount >= MAX_NOT_INTERESTED)
   ) {
