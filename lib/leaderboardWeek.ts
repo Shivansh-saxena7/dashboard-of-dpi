@@ -88,3 +88,46 @@ export function getMostRecentCompletedWeek(parts: ISTParts): CompletedWeek {
     periodKey: ymd(completedWeekStart.getFullYear(), completedWeekStart.getMonth(), completedWeekStart.getDate())
   };
 }
+
+// Builds a CompletedWeek for an arbitrary Monday, given its
+// year/month(0-indexed)/day — same shape as getMostRecentCompletedWeek
+// (single owner for "what does a week look like"), used by the
+// permanent Leaderboard page's Prev/Next navigation below.
+export function buildWeek(startYear: number, startMonth: number, startDay: number): CompletedWeek {
+  const start = new Date(startYear, startMonth, startDay);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+
+  return {
+    startYear: start.getFullYear(),
+    startMonth: start.getMonth(),
+    startDay: start.getDate(),
+    endYear: end.getFullYear(),
+    endMonth: end.getMonth(),
+    endDay: end.getDate(),
+    periodKey: ymd(start.getFullYear(), start.getMonth(), start.getDate())
+  };
+}
+
+// Steps a week forward/backward by N weeks (negative = earlier) —
+// e.g. shiftWeek(week, -1) is the Monday-Sunday week immediately
+// before `week`.
+export function shiftWeek(week: CompletedWeek, deltaWeeks: number): CompletedWeek {
+  const shifted = new Date(week.startYear, week.startMonth, week.startDay + deltaWeeks * 7);
+  return buildWeek(shifted.getFullYear(), shifted.getMonth(), shifted.getDate());
+}
+
+// week.periodKey is already the start-date key; this is its end-date
+// counterpart — both are what visits_leaderboard's p_start_date/
+// p_end_date params expect.
+export function weekEndKey(week: CompletedWeek): string {
+  return ymd(week.endYear, week.endMonth, week.endDay);
+}
+
+// Today as "YYYY-MM-DD" in IST — used to cap custom-range date-picker
+// inputs so a query can't be built for visits that haven't happened
+// yet (same IST-explicit reasoning as getISTParts itself).
+export function todayKey(): string {
+  const parts = getISTParts();
+  return ymd(parts.year, parts.month, parts.dayOfMonth);
+}

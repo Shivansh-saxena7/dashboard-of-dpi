@@ -81,7 +81,21 @@ export default function LeaderboardPage() {
     <main className="min-h-screen bg-gradient-to-br from-white via-blue-50 to-blue-100">
       <Header />
       <EmployeeTabBar role={employee?.role} department={employee?.department} />
-      <WeeklyLeaderboardView myEmployeeId={employee?.id ?? null} />
+      {/* canExport explicitly false — this route is reachable only by
+          role "employee"/"team_leader" (admin and department-gated
+          redirects above already exclude everyone else), and Export
+          is an Admin/Sales-Coordinator-only power. Admin's and
+          Coordinator's own Leaderboard views pass true instead.
+
+          px-4 mt-4 wrapper lives HERE, not inside the shared
+          component — this bare <main> (mirrors app/data/page.tsx) has
+          no ambient page padding the way Admin's/Coordinator's own
+          layouts do, so this is the one call-site that actually needs
+          it. See WeeklyLeaderboardView's own comment for the full
+          reasoning. */}
+      <div className="px-4 mt-4">
+        <WeeklyLeaderboardView myEmployeeId={employee?.id ?? null} canExport={false} />
+      </div>
       <Footer />
     </main>
   );

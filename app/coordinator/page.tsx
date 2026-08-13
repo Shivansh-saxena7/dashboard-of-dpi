@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase";
 import AdminLeadCard from "@/components/AdminLeadCard";
 import ExportPreviewTable from "@/components/ExportPreviewTable";
 import ManualLeadEntryModal from "@/components/ManualLeadEntryModal";
+import WeeklyLeaderboardView from "@/components/WeeklyLeaderboardView";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES } from "@/lib/leadBoardStageDisplay";
 import { exportLeadsToExcel, exportLeadsToPDF } from "@/lib/exportLeadsReport";
@@ -16,7 +17,7 @@ import { exportVisitsToExcel, exportVisitsToPDF, VisitExportRow } from "@/lib/ex
 import { exportSnoozesToExcel, exportSnoozesToPDF, SnoozeExportRow } from "@/lib/exportSnoozeReport";
 import { DateRangeOption, isWithinDateRange, dateRangeFilterLabel } from "@/lib/dateRangeFilter";
 
-type ActiveTab = "LEADS" | "SUMMARY" | "VERIFY" | "SNOOZE";
+type ActiveTab = "LEADS" | "SUMMARY" | "VERIFY" | "SNOOZE" | "LEADERBOARD";
 type SortOption = "NEWEST" | "OLDEST" | "SLA_URGENCY";
 type VisitStatusFilter = "PENDING" | "VERIFIED" | "DENIED" | "ALL";
 type SnoozeStatusFilter = "ACTIVE" | "EXPIRED" | "CANCELLED" | "ALL";
@@ -1057,11 +1058,16 @@ export default function CoordinatorDashboard() {
     }
   }
 
-  const tabs: { key: ActiveTab; label: string; count: number }[] = [
+  // count is optional — LEADERBOARD has no "pending items" number the
+  // way the other tabs do (it's a ranked view, not a queue), so its
+  // badge is omitted entirely below rather than showing a misleading
+  // "0".
+  const tabs: { key: ActiveTab; label: string; count?: number }[] = [
     { key: "LEADS", label: "🎯 All Leads", count: leads.length },
     { key: "SUMMARY", label: "📊 Employee Summary", count: employeeSummary.length },
     { key: "VERIFY", label: "✅ Visit Verification", count: pendingVisitsCount },
-    { key: "SNOOZE", label: "😴 Snooze Activity", count: snoozeLog.length }
+    { key: "SNOOZE", label: "😴 Snooze Activity", count: snoozeLog.length },
+    { key: "LEADERBOARD", label: "🏆 Leaderboard" }
   ];
 
   if (loading) {
@@ -1082,13 +1088,15 @@ export default function CoordinatorDashboard() {
             }`}
           >
             {tab.label}
-            <span
-              className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full ${
-                activeTab === tab.key ? "bg-white/20" : "bg-slate-100 text-slate-500"
-              }`}
-            >
-              {tab.count}
-            </span>
+            {tab.count !== undefined && (
+              <span
+                className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full ${
+                  activeTab === tab.key ? "bg-white/20" : "bg-slate-100 text-slate-500"
+                }`}
+              >
+                {tab.count}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -1879,6 +1887,18 @@ export default function CoordinatorDashboard() {
             </div>
           )}
         </div>
+      )}
+
+      {/* Reuses the exact same WeeklyLeaderboardView the employee-
+          facing /leaderboard route uses (Golden Rule — no separate
+          coordinator-flavored view) — canExport=true (Sales
+          Coordinator is one of the two roles allowed to download),
+          myEmployeeId=null (Coordinator isn't a ranked participant,
+          so no row highlights as "You"). Padding-free (no wrapping
+          px-4/mt-4 div) since Coordinator's own page body already
+          provides that spacing for every tab. */}
+      {activeTab === "LEADERBOARD" && (
+        <WeeklyLeaderboardView myEmployeeId={null} canExport={true} />
       )}
 
       {manualEntryOpen && (

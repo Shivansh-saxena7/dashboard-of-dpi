@@ -11,7 +11,7 @@ import { FaInstagram, FaFacebookF, FaYoutube } from "react-icons/fa";
 import NotificationModal from "./NotificationModal";
 import BookingCelebrationModal from "./BookingCelebrationModal";
 import LeaderboardPopupModal from "./LeaderboardPopupModal";
-import { getISTParts, ymd, formatShortDate, getMostRecentCompletedWeek } from "@/lib/leaderboardWeek";
+import { getISTParts, ymd, formatShortDate, getMostRecentCompletedWeek, weekEndKey } from "@/lib/leaderboardWeek";
 
 const playfair = Playfair_Display({ subsets: ["latin"], weight: ["600", "700"] });
 
@@ -286,7 +286,10 @@ useEffect(() => {
           .maybeSingle();
 
         if (!cancelled && !seen) {
-          const { data: rows } = await supabase.rpc("weekly_visits_leaderboard", { p_week_start: periodKey });
+          const { data: rows } = await supabase.rpc("visits_leaderboard", {
+            p_start_date: periodKey,
+            p_end_date: weekEndKey(week)
+          });
 
           if (!cancelled && rows && rows.length > 0) {
             const { error: insertError } = await supabase

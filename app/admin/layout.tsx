@@ -93,6 +93,12 @@ icon:"🧭"
 },
 
 {
+name:"Leaderboard",
+href:"/admin/leaderboard",
+icon:"🏆"
+},
+
+{
 name:"Teams",
 href:"/admin/teams",
 icon:"🧑‍🤝‍🧑"
