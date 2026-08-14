@@ -394,6 +394,180 @@ export async function exportTableToPDF(opts: ExportTableOptions) {
   doc.save(buildExportFilename(filenamePrefix, "pdf"));
 }
 
+// --- Cost-Sheet PDF (Part 2, Lead Engine) -----------------------------
+// A single structured document (client/project header + a line-item
+// table + a Grand Total + a disclaimer), not a plain data table — so
+// it builds its own jsPDF layout rather than going through
+// exportTableToPDF's autoTable-only shape.
+//
+// DELIBERATELY DOES NOT reuse this file's COMPANY_NAME text or
+// drawPdfWatermarkAndPageNumber (the diagonal repeated-company-name
+// watermark) — every other export in this file is an internal/admin
+// report, but a Cost Sheet is handed directly to the CLIENT. A
+// repeated watermark and explicit company letterhead read as an
+// internal audit document, not the clean, plain cost sheet a real
+// estate buyer actually expects to receive. Still reuses the shared
+// table styles (PDF_TABLE_STYLES/HEAD_STYLES) and formatDateTime for
+// visual consistency, and a plain page-number-only footer (no
+// watermark, no branding) for the rare multi-page case.
+export interface CostSheetPdfLineItem {
+  label: string;
+  amount: number;
+}
+
+// Mirrors the real company Cost Sheet format exactly (S.No /
+// Particularity / Size / Rate / Flat-Cost columns), confirmed against
+// an actual La Residentia sheet — not the earlier Stamp-Duty/
+// Registration/GST breakdown, which was never how this company
+// actually builds one.
+export interface CostSheetPdfInput {
+  leadName: string;
+  leadMobile: string;
+  project: string;
+  size: string; // free-text Size/Type label (e.g. "2BHK — 880 sqft"), for the header only
+  area: number; // numeric sqft, multiplies against the 3 per-sqft rates below
+  bspRate: number;
+  ifmsRate: number;
+  leaseRentRate: number;
+  carParking: number;
+  clubMembership: number;
+  viewPlc: number;
+  floorPlc: number;
+  powerBackup: number;
+  dualMeter: number;
+  otherCharges: CostSheetPdfLineItem[];
+  bspAmount: number;
+  ifmsAmount: number;
+  leaseRentAmount: number;
+  totalFlatCost: number;
+  govtChargePct: number;
+  govtCharge: number;
+  grandTotal: number;
+}
+
+function formatINR(amount: number): string {
+  return amount.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+}
+
+// Plain "Page N" bottom-right, muted grey — no watermark, no company
+// name. Only used by the Cost-Sheet PDF, which multi-pages rarely
+// (many Other Charges rows) but should still be numbered if it does.
+function drawPlainPageNumber(doc: import("jspdf").jsPDF, pageNumber: number) {
+  const pw = doc.internal.pageSize.getWidth();
+  const ph = doc.internal.pageSize.getHeight();
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7);
+  doc.setTextColor(148, 163, 184);
+  doc.text(`Page ${pageNumber}`, pw - 20, ph - 15, { align: "right" });
+}
+
+async function buildCostSheetDoc(input: CostSheetPdfInput) {
+  const { jsPDF } = await import("jspdf");
+  const { default: autoTable } = await import("jspdf-autotable");
+
+  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+  const pageWidth = doc.internal.pageSize.getWidth();
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(20);
+  doc.setTextColor(15, 23, 42);
+  doc.text("Cost Sheet", 40, 50);
+
+  const dateLabel = new Date().toLocaleDateString("en-IN", { year: "numeric", month: "long", day: "numeric" });
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(...SLATE_500);
+  doc.text(`Date: ${dateLabel}`, pageWidth - 40, 50, { align: "right" });
+
+  doc.setDrawColor(...SLATE_200);
+  doc.setLineWidth(1);
+  doc.line(40, 64, pageWidth - 40, 64);
+
+  let y = 90;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`Client: ${input.leadName} (${input.leadMobile})`, 40, y);
+  y += 16;
+  doc.text(`Project: ${input.project} — ${input.size}`, 40, y);
+  y += 20;
+
+  // S.No | Particularity | Size | Rate | Flat Cost — exactly the real
+  // sheet's own column layout. Per-sqft rows show their Size/Rate;
+  // fixed-amount rows show "NA" for both, matching how the real sheet
+  // marks them.
+  let sno = 1;
+  const rows: [string, string, string, string, string][] = [
+    [String(sno++), "BSP", formatINR(input.area), formatINR(input.bspRate), formatINR(input.bspAmount)],
+    [String(sno++), "IFMS", formatINR(input.area), formatINR(input.ifmsRate), formatINR(input.ifmsAmount)],
+    [String(sno++), "Lease Rent", formatINR(input.area), formatINR(input.leaseRentRate), formatINR(input.leaseRentAmount)],
+    [String(sno++), "Car Parking", "NA", "NA", formatINR(input.carParking)],
+    [String(sno++), "Club Membership", "NA", "NA", formatINR(input.clubMembership)],
+    [String(sno++), "View PLC", "NA", "NA", formatINR(input.viewPlc)],
+    [String(sno++), "Floor PLC", "NA", "NA", formatINR(input.floorPlc)],
+    [String(sno++), "Power Backup", "NA", "NA", formatINR(input.powerBackup)],
+    [String(sno++), "Dual Meter", "NA", "NA", formatINR(input.dualMeter)],
+    ...input.otherCharges.map((o): [string, string, string, string, string] => [String(sno++), o.label, "NA", "NA", formatINR(o.amount)])
+  ];
+
+  autoTable(doc, {
+    startY: y,
+    theme: "grid",
+    head: [["S.No", "Particularity", "Size", "Rate", "Flat Cost (Rs.)"]],
+    body: rows,
+    styles: PDF_TABLE_STYLES,
+    headStyles: PDF_HEAD_STYLES,
+    alternateRowStyles: { fillColor: [248, 250, 252] },
+    columnStyles: {
+      0: { halign: "center", cellWidth: 32 },
+      1: { halign: "left" },
+      2: { halign: "right" },
+      3: { halign: "right" },
+      4: { halign: "right" }
+    },
+    margin: { left: 40, right: 40 },
+    didDrawPage: (data) => drawPlainPageNumber(doc, data.pageNumber)
+  });
+
+  let finalY = (doc as any).lastAutoTable.finalY + 22;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`Total Flat Cost: Rs. ${formatINR(input.totalFlatCost)}`, 40, finalY);
+  finalY += 16;
+  doc.text(`Govt Charge (${input.govtChargePct}%): Rs. ${formatINR(input.govtCharge)}`, 40, finalY);
+  finalY += 22;
+
+  doc.setDrawColor(...SLATE_200);
+  doc.setLineWidth(1);
+  doc.line(40, finalY - 12, pageWidth - 40, finalY - 12);
+
+  doc.setFontSize(14);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`Grand Total: Rs. ${formatINR(input.grandTotal)}`, 40, finalY);
+
+  doc.setFont("helvetica", "italic");
+  doc.setFontSize(7);
+  doc.setTextColor(...SLATE_500);
+  doc.text("This is an internal estimate only, not a legal or tax document.", 40, finalY + 20, { maxWidth: 500 });
+
+  return doc;
+}
+
+export async function buildCostSheetPdfBlob(input: CostSheetPdfInput): Promise<Blob> {
+  const doc = await buildCostSheetDoc(input);
+  return doc.output("blob");
+}
+
+// Generic "save this already-built PDF Blob locally" — reuses the same
+// downloadBlob/buildExportFilename machinery every other export in
+// this file uses, exposed here since Cost-Sheet PDFs are built as a
+// Blob first (for the Storage-upload-then-share path) rather than via
+// doc.save() directly.
+export function downloadPdfBlob(blob: Blob, filenamePrefix: string) {
+  downloadBlob(blob, buildExportFilename(filenamePrefix, "pdf"));
+}
+
 export async function exportMultiSectionToPDF(opts: ExportMultiSectionOptions) {
   const { reportTitle, filenamePrefix, sections, meta, pdfExcludedKeys = [] } = opts;
 

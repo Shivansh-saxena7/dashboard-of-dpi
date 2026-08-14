@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
-import { X, User, Bookmark } from "lucide-react";
+import { X, User, Bookmark, Share2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { ENDED_REASON_TEXT } from "@/lib/endedReasonDisplay";
 import { assignedByLabel } from "@/lib/assignedByDisplay";
@@ -40,15 +40,50 @@ interface ReservationEntry {
   reserved_by: { name: string } | null;
 }
 
-// Reservations (Admin -> team, before anyone owns the lead) and
-// assignments (lead_history rows) are two structurally different
-// event types — merged here into one timestamp-sorted timeline so
-// the drawer reads as a single continuous story, even though they
-// live in two separate tables (a reservation has no employee_id yet,
-// which lead_history's schema doesn't allow).
+interface AssetSnapshotItem {
+  asset_id: string;
+  label: string;
+  asset_type: "VIDEO" | "FILE";
+  group_label: string;
+  url: string;
+}
+
+// COST_SHEET entries store a genuinely different shape in the same
+// assets_snapshot jsonb column — there's no project_assets row behind
+// a generated cost sheet, so log_cost_sheet_share_atomic (Part 2)
+// writes the full calculation snapshot directly instead of an
+// asset-item array. Only the fields this modal actually displays are
+// typed here (the real snapshot carries the full breakdown too, for
+// historical-accuracy reasons — see CostSheetModal.tsx).
+interface CostSheetSnapshot {
+  project: string;
+  size: string;
+  totalFlatCost: number;
+  govtChargePct: number;
+  grandTotal: number;
+  pdfUrl: string;
+}
+
+interface AssetShareEntry {
+  id: string;
+  shared_at: string;
+  entry_type: "ASSETS" | "COST_SHEET";
+  assets_snapshot: AssetSnapshotItem[] | CostSheetSnapshot;
+  employees: { name: string } | null;
+}
+
+// Reservations (Admin -> team, before anyone owns the lead),
+// assignments (lead_history rows), and asset shares (Project Assets /
+// Cost-Sheet WhatsApp sends) are three structurally different event
+// types — merged here into one timestamp-sorted timeline so the
+// drawer reads as a single continuous story, even though they live in
+// three separate tables (a reservation has no employee_id yet, which
+// lead_history's schema doesn't allow; an asset share isn't an
+// ownership event at all).
 type TimelineEntry =
   | { kind: "ASSIGNMENT"; timestamp: string; data: HistoryEntry }
-  | { kind: "RESERVATION"; timestamp: string; data: ReservationEntry };
+  | { kind: "RESERVATION"; timestamp: string; data: ReservationEntry }
+  | { kind: "ASSET_SHARE"; timestamp: string; data: AssetShareEntry };
 
 // Admin-only, full audit trail — queries lead_history DIRECTLY (never
 // employee_sla_breach_history, which is deliberately scoped/masked
@@ -101,8 +136,11 @@ export default function AdminLeadHistoryModal({ leadId, leadName, leadType, lead
   async function loadHistory() {
     setLoading(true);
 
-    const [{ data: historyData, error: historyError }, { data: reservationData, error: reservationError }] =
-      await Promise.all([
+    const [
+      { data: historyData, error: historyError },
+      { data: reservationData, error: reservationError },
+      { data: assetShareData, error: assetShareError }
+    ] = await Promise.all([
         supabase
           .from("lead_history")
           .select(
@@ -117,6 +155,10 @@ export default function AdminLeadHistoryModal({ leadId, leadName, leadType, lead
         supabase
           .from("lead_team_reservations")
           .select("id, reserved_at, team:teams(name), reserved_by:employees(name)")
+          .eq("lead_id", leadId),
+        supabase
+          .from("asset_share_log")
+          .select("id, shared_at, entry_type, assets_snapshot, employees(name)")
           .eq("lead_id", leadId)
       ]);
 
@@ -131,6 +173,12 @@ export default function AdminLeadHistoryModal({ leadId, leadName, leadType, lead
     if (!reservationError && reservationData) {
       (reservationData as unknown as ReservationEntry[]).forEach((entry) =>
         merged.push({ kind: "RESERVATION", timestamp: entry.reserved_at, data: entry })
+      );
+    }
+
+    if (!assetShareError && assetShareData) {
+      (assetShareData as unknown as AssetShareEntry[]).forEach((entry) =>
+        merged.push({ kind: "ASSET_SHARE", timestamp: entry.shared_at, data: entry })
       );
     }
 
@@ -217,6 +265,63 @@ export default function AdminLeadHistoryModal({ leadId, leadName, leadType, lead
                             minute: "2-digit"
                           })}
                         </p>
+                      </div>
+                    </>
+                  ) : item.kind === "ASSET_SHARE" ? (
+                    <>
+                      <div className="absolute left-0 top-0.5 h-5 w-5 rounded-full flex items-center justify-center bg-gradient-to-br from-emerald-500 to-emerald-600">
+                        <Share2 size={11} className="text-white" />
+                      </div>
+
+                      <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-3">
+                        <p className="text-sm font-bold text-emerald-800">
+                          {item.data.entry_type === "COST_SHEET" ? "Cost Sheet sent" : "Assets sent"} via WhatsApp
+                        </p>
+                        <p className="text-[11px] text-emerald-700/80 mt-1">
+                          By {item.data.employees?.name || "Unknown"} ·{" "}
+                          {new Date(item.data.shared_at).toLocaleString([], {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit"
+                          })}
+                        </p>
+                        {item.data.entry_type === "COST_SHEET" ? (
+                          (() => {
+                            const snapshot = item.data.assets_snapshot as CostSheetSnapshot;
+                            return (
+                              <div className="mt-2 space-y-0.5">
+                                <p className="text-xs text-emerald-800/90">
+                                  📎 {snapshot.project} — {snapshot.size}
+                                </p>
+                                <p className="text-xs text-emerald-800/90">
+                                  Total Flat Cost: Rs. {snapshot.totalFlatCost.toLocaleString("en-IN", { maximumFractionDigits: 0 })} + Govt Charge ({snapshot.govtChargePct}%)
+                                </p>
+                                <p className="text-xs font-bold text-emerald-800/90">
+                                  Grand Total: Rs. {snapshot.grandTotal.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+                                </p>
+                                {snapshot.pdfUrl && (
+                                  <a
+                                    href={snapshot.pdfUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-block text-xs font-semibold text-emerald-700 underline"
+                                  >
+                                    View PDF
+                                  </a>
+                                )}
+                              </div>
+                            );
+                          })()
+                        ) : (
+                          <ul className="mt-2 space-y-0.5">
+                            {(item.data.assets_snapshot as AssetSnapshotItem[]).map((a) => (
+                              <li key={a.asset_id} className="text-xs text-emerald-800/90">
+                                {a.asset_type === "VIDEO" ? "🎥" : "📎"} {a.group_label} — {a.label}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
                       </div>
                     </>
                   ) : (

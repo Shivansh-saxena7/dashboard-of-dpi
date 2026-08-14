@@ -11,6 +11,8 @@ import { BoardStage } from "@/lib/leadBoardStageDisplay";
 import { LEAD_POINTS } from "@/lib/calculateLeadPoints";
 import { AssignedBySource } from "@/lib/assignedByDisplay";
 import { buildWhatsAppLink } from "@/lib/buildWhatsAppLink";
+import LeadProjectAssetsSection from "./LeadProjectAssetsSection";
+import CostSheetSection from "./CostSheetSection";
 
 export interface LeadDetailLead {
   id: string;
@@ -733,6 +735,10 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
               </motion.button>
             </div>
           )}
+
+          <LeadProjectAssetsSection leadId={lead.id} leadMobile={lead.mobile} leadProject={lead.project} />
+
+          <CostSheetSection leadId={lead.id} leadName={lead.name} leadMobile={lead.mobile} leadProject={lead.project} />
 
           <div>
             <p className="text-[10.5px] uppercase tracking-[0.25em] text-slate-400 font-bold mb-3">

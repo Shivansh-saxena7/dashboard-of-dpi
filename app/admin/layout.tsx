@@ -105,6 +105,12 @@ icon:"🎫"
 },
 
 {
+name:"Project Assets",
+href:"/admin/project-assets",
+icon:"🗂️"
+},
+
+{
 name:"Teams",
 href:"/admin/teams",
 icon:"🧑‍🤝‍🧑"
