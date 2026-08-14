@@ -205,9 +205,20 @@ export default function AdminLeadHistoryModal({ leadId, leadName, leadType, lead
         animate={{ x: 0 }}
         exit={{ x: "100%" }}
         transition={{ type: "spring", stiffness: 120, damping: 18 }}
-        className="fixed top-0 right-0 h-full w-full sm:w-[420px] z-50 bg-white shadow-2xl overflow-y-auto"
+        className="fixed top-0 right-0 h-full w-full sm:w-[420px] z-50 bg-white shadow-2xl flex flex-col overflow-hidden"
       >
-        <div className="relative pt-6 pb-6 px-6 bg-gradient-to-br from-[#0f172a] via-[#1d4ed8] to-[#06b6d4] text-white overflow-hidden">
+        {/* shrink-0: this header (and the close button in it) must
+            NEVER scroll away with the timeline below — it used to sit
+            inside the same overflow-y-auto box as the content, so on
+            any lead with a long enough history to actually need
+            scrolling, scrolling down carried the close button off-
+            screen with it. Real bug this fixes: the close button
+            "sometimes" not working — it always worked, it just wasn't
+            there anymore once you'd scrolled. Every ASSET_SHARE/
+            COST_SHEET entry added an extra timeline row, making that
+            far more likely to happen than before. Same sticky-header/
+            sticky-footer fix as CostSheetModal.tsx. */}
+        <div className="relative pt-6 pb-6 px-6 bg-gradient-to-br from-[#0f172a] via-[#1d4ed8] to-[#06b6d4] text-white overflow-hidden shrink-0">
           <div className="absolute top-[-40px] right-[-40px] w-[120px] h-[120px] rounded-full bg-white/10 blur-3xl pointer-events-none" />
 
           <button
@@ -231,7 +242,7 @@ export default function AdminLeadHistoryModal({ leadId, leadName, leadType, lead
           )}
         </div>
 
-        <div className="px-6 py-6">
+        <div className="flex-1 overflow-y-auto px-6 py-6">
 
           {loading ? (
             <p className="text-sm text-slate-400">Loading...</p>
