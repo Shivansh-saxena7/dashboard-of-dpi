@@ -13,6 +13,7 @@ import {
   calculateEndShiftWindow,
   EndShiftWindowResult
 } from "@/lib/calculateEndShiftWindow";
+import { calculateGeofenceStatus } from "@/lib/calculateGeofenceStatus";
 
 interface StartShiftCardProps {
   employeeId: string;
@@ -34,7 +35,18 @@ interface ShiftTimingConfig {
   second_half_start_window_end: string;
   first_half_min_end_time: string;
   second_half_min_end_time: string;
+  office_lat: number | null;
+  office_lng: number | null;
+  geofence_radius_meters: number;
 }
+
+// "outside" is the only state that actually blocks the button —
+// "checking"/"unavailable" fall through to whatever the time-window
+// already decided, so a slow/denied geolocation permission never
+// double-blocks someone the server would otherwise let through (the
+// server's own check at click-time is what's authoritative either
+// way — see the file-level comment).
+type GeoStatus = "checking" | "within" | "outside" | "unavailable";
 
 const WINDOW_RECHECK_INTERVAL_MS = 30000;
 
@@ -79,6 +91,8 @@ export default function StartShiftCard({ employeeId, compact = false }: StartShi
   const [config, setConfig] = useState<ShiftTimingConfig | null>(null);
   const [startWindow, setStartWindow] = useState<StartShiftWindowResult | null>(null);
   const [endWindow, setEndWindow] = useState<EndShiftWindowResult | null>(null);
+  const [geoStatus, setGeoStatus] = useState<GeoStatus>("checking");
+  const [geoDistanceMeters, setGeoDistanceMeters] = useState<number | null>(null);
 
   useEffect(() => {
     checkTodaysShift();
@@ -110,7 +124,7 @@ export default function StartShiftCard({ employeeId, compact = false }: StartShi
     const { data, error } = await supabase
       .from("lead_engine_settings")
       .select(
-        "first_half_start_time, first_half_start_window_end, half_day_boundary_time, second_half_start_window_end, first_half_min_end_time, second_half_min_end_time"
+        "first_half_start_time, first_half_start_window_end, half_day_boundary_time, second_half_start_window_end, first_half_min_end_time, second_half_min_end_time, office_lat, office_lng, geofence_radius_meters"
       )
       .eq("id", 1)
       .single();
@@ -165,6 +179,47 @@ export default function StartShiftCard({ employeeId, compact = false }: StartShi
 
     return () => clearInterval(interval);
   }, [config, shiftStartAt, shiftEndAt, attendanceType]);
+
+  // Client-side geofence check, purely for instant feedback/button-
+  // disable — the start-shift Edge Function is still the authoritative
+  // gate (confirmed via a real end-to-end test: a genuine session
+  // ~21.8km from the office was correctly rejected server-side even
+  // though this client check didn't exist yet). Before this, the
+  // button's disabled state depended ONLY on the time window —
+  // calculateGeofenceStatus was never actually imported/called here,
+  // so the button stayed fully active regardless of distance, which
+  // read as "geofencing isn't enforced" even though the server-side
+  // gate was working correctly the whole time. One-shot check (not a
+  // continuous watch) — this only matters at the moment someone is
+  // about to start their shift, not throughout the day.
+  useEffect(() => {
+    if (!config || shiftStartAt || shiftEndAt) {
+      return;
+    }
+
+    if (!navigator.geolocation || config.office_lat === null || config.office_lng === null) {
+      setGeoStatus("unavailable");
+      return;
+    }
+
+    setGeoStatus("checking");
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const result = calculateGeofenceStatus(
+          position.coords.latitude,
+          position.coords.longitude,
+          config.office_lat as number,
+          config.office_lng as number,
+          config.geofence_radius_meters
+        );
+        setGeoDistanceMeters(Math.round(result.distanceMeters));
+        setGeoStatus(result.withinGeofence ? "within" : "outside");
+      },
+      () => setGeoStatus("unavailable"),
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
+  }, [config, shiftStartAt, shiftEndAt]);
 
   // Both Start Shift and End Shift need the current session's access
   // token — Edge Functions require it in the Authorization header,
@@ -309,8 +364,13 @@ export default function StartShiftCard({ employeeId, compact = false }: StartShi
   const started = Boolean(shiftStartAt);
   const ended = Boolean(shiftEndAt);
 
-  const canStart = !config || !startWindow ? false : startWindow.allowed;
+  const canStart = !config || !startWindow ? false : startWindow.allowed && geoStatus !== "outside";
   const canEnd = !config || !endWindow ? false : endWindow.allowed;
+
+  const startBlockedReason =
+    geoStatus === "outside"
+      ? `You are ${geoDistanceMeters}m from the office — must be within ${config?.geofence_radius_meters}m to start your shift.`
+      : startWindow?.reason;
 
   if (compact) {
     return (
@@ -494,9 +554,13 @@ export default function StartShiftCard({ employeeId, compact = false }: StartShi
               {starting ? "Starting..." : "Start Shift"}
             </motion.button>
 
-            {!canStart && startWindow?.reason && (
-              <p className="basis-full text-[11px] text-amber-700 bg-amber-50 rounded-lg px-2.5 py-1.5">
-                {startWindow.reason}
+            {!canStart && startBlockedReason && (
+              <p
+                className={`basis-full text-[11px] rounded-lg px-2.5 py-1.5 ${
+                  geoStatus === "outside" ? "text-red-700 bg-red-50" : "text-amber-700 bg-amber-50"
+                }`}
+              >
+                {startBlockedReason}
               </p>
             )}
           </motion.div>

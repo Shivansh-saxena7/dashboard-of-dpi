@@ -119,7 +119,17 @@ export default function EmployeeTabBar({ role, department }: EmployeeTabBarProps
 
       <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-[#B8860B] via-[#E8C766] to-[#B8860B] z-10" />
 
-      <div className="flex gap-1 p-1.5 overflow-x-auto">
+      {/* gap-2 (was gap-1) + p-2 (was p-1.5) + px-3/sm:px-4 on each pill
+          (was none at all) — previously each pill had ZERO horizontal
+          padding, so at the narrow widths this row already needs to
+          scroll at (see the comment above), every tab shrank to
+          exactly its icon+label's own min-content width with nothing
+          around it — cramped/no-breathing-room by construction, not
+          just a rendering quirk. This still scrolls the same way when
+          it doesn't fit (unchanged, deliberate), it just looks like a
+          premium spaced-out bar instead of jammed-together pills
+          before it needs to. */}
+      <div className="flex gap-2 p-2 overflow-x-auto">
         {tabs.map((tab) => {
           const active = pathname === tab.href;
           const Icon = tab.icon;
@@ -128,7 +138,7 @@ export default function EmployeeTabBar({ role, department }: EmployeeTabBarProps
             <Link key={tab.href} href={tab.href} className="flex-1">
               <motion.div
                 whileTap={{ scale: 0.97 }}
-                className={`relative h-11 flex items-center justify-center gap-1.5 rounded-xl overflow-hidden transition-colors ${
+                className={`relative h-11 flex items-center justify-center gap-1.5 px-3 sm:px-4 rounded-xl overflow-hidden transition-colors ${
                   !active ? "hover:bg-slate-50" : ""
                 }`}
               >
