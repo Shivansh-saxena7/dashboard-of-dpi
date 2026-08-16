@@ -402,18 +402,26 @@ export default function CostSheetModal({ leadId, leadName, leadMobile, leadProje
         </div>
 
         <div className="shrink-0 px-6 pt-3 pb-6 border-t border-slate-100 space-y-2">
+          {/* min-h-11 (not h-11) + flex items-center justify-center +
+              text-sm — same fix as the "Open WhatsApp" button below.
+              Fixed-height + no flex-centering + default (16px) text
+              meant "Send via WhatsApp" wrapped to 2 lines at the
+              narrow flex-1-shrunk width these get on mobile, and with
+              a FIXED height + default overflow:visible, that second
+              line rendered past the button's own box instead of the
+              box growing to fit it. */}
           <div className="flex gap-2">
             <button
               onClick={handleDownload}
               disabled={generating}
-              className="flex-1 min-w-0 h-11 rounded-xl font-semibold text-blue-700 bg-blue-50 border border-blue-200 disabled:opacity-60"
+              className="flex-1 min-w-0 min-h-11 flex items-center justify-center px-2 py-2 rounded-xl font-semibold text-sm text-blue-700 bg-blue-50 border border-blue-200 disabled:opacity-60"
             >
               {generating ? "Working..." : "Download PDF"}
             </button>
             <button
               onClick={handleSend}
               disabled={generating}
-              className="flex-1 min-w-0 h-11 rounded-xl font-semibold text-white bg-gradient-to-r from-emerald-500 to-emerald-600 shadow-[0_8px_20px_rgba(16,185,129,0.3)] disabled:opacity-60"
+              className="flex-1 min-w-0 min-h-11 flex items-center justify-center px-2 py-2 rounded-xl font-semibold text-sm text-white bg-gradient-to-r from-emerald-500 to-emerald-600 shadow-[0_8px_20px_rgba(16,185,129,0.3)] disabled:opacity-60"
             >
               {generating ? "Working..." : "Send via WhatsApp"}
             </button>

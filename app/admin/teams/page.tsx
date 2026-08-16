@@ -377,17 +377,25 @@ export default function AdminTeamsPage() {
           <p className="text-slate-500 mt-1">Manage teams, leaders, and members</p>
         </div>
 
-        <div className="flex gap-2">
+        {/* flex-col below sm (was a plain flex row with no wrap/width
+            constraints — the input had no width class at all, so it
+            took its own default intrinsic width right next to the
+            fixed-content-width button, with nothing to shrink or wrap
+            when the two combined didn't fit a narrow screen, pushing
+            the button past the card's edge). Same flex-col -> flex-row
+            responsive-stacking pattern the outer header row above
+            already uses. */}
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
           <input
             value={newTeamName}
             onChange={(e) => setNewTeamName(e.target.value)}
             placeholder="New team name..."
-            className="h-12 rounded-2xl bg-white border border-slate-200 px-4 outline-none focus:ring-4 focus:ring-cyan-200"
+            className="h-12 rounded-2xl bg-white border border-slate-200 px-4 outline-none focus:ring-4 focus:ring-cyan-200 w-full sm:w-auto sm:min-w-[200px]"
           />
           <button
             onClick={createTeam}
             disabled={creating || !newTeamName.trim()}
-            className="h-12 px-6 rounded-2xl text-white font-medium bg-gradient-to-r from-blue-600 to-cyan-500 shadow-lg hover:scale-105 transition disabled:opacity-50 disabled:hover:scale-100 flex items-center gap-2"
+            className="h-12 px-6 rounded-2xl text-white font-medium bg-gradient-to-r from-blue-600 to-cyan-500 shadow-lg hover:scale-105 transition disabled:opacity-50 disabled:hover:scale-100 flex items-center justify-center gap-2 shrink-0"
           >
             <Plus size={18} />
             Create

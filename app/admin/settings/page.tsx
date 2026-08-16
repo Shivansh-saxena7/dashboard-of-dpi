@@ -214,7 +214,12 @@ export default function SettingsPage() {
       (position) => {
         setGeoLat(String(position.coords.latitude));
         setGeoLng(String(position.coords.longitude));
-        toast.success("Current location captured — review and Save below.");
+        const accuracy = Math.round(position.coords.accuracy);
+        toast.success(
+          accuracy > 50
+            ? `Location captured (±${accuracy}m accuracy — on the lower side; consider retrying near a window, or capture from a couple of spots and average). Review and Save below.`
+            : `Location captured (±${accuracy}m accuracy) — review and Save below.`
+        );
         setLocating(false);
       },
       (err) => {

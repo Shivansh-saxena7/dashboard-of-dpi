@@ -48,7 +48,12 @@ serve(async (req) => {
 
   try {
 
-    const { lat, lng } = await req.json();
+    // accuracy is optional (older cached clients may not send it yet)
+    // and purely diagnostic — never affects whether the gate passes,
+    // only what the rejection message says, so a genuinely-far-away
+    // employee with a great GPS lock can't talk their way past this by
+    // claiming bad accuracy.
+    const { lat, lng, accuracy } = await req.json();
 
     if (typeof lat !== "number" || typeof lng !== "number") {
       return respond(
@@ -157,11 +162,22 @@ serve(async (req) => {
     );
 
     if (!geofence.withinGeofence) {
+      const roundedAccuracy = typeof accuracy === "number" ? Math.round(accuracy) : null;
+      // >50m accuracy is a real, common signal for "Approximate" (not
+      // "Precise") location permission on iOS 14+/Android 12+, which
+      // deliberately fuzzes the coordinate — surfaced here so an
+      // employee genuinely at the office has something actionable to
+      // check, instead of a flatly confusing "you're 44m away".
+      const accuracyNote =
+        roundedAccuracy !== null && roundedAccuracy > 50
+          ? ` Your device reported ±${roundedAccuracy}m location accuracy — if you're actually at the office, check that Precise/Exact Location is enabled for this site in your phone's location settings.`
+          : "";
       return respond({
         success: false,
         withinGeofence: false,
         distanceMeters: Math.round(geofence.distanceMeters),
-        message: `You are ${Math.round(geofence.distanceMeters)}m from the office — must be within ${settings.geofence_radius_meters}m to start your shift`
+        accuracyMeters: roundedAccuracy,
+        message: `You are ${Math.round(geofence.distanceMeters)}m from the office — must be within ${settings.geofence_radius_meters}m to start your shift.${accuracyNote}`
       });
     }
 

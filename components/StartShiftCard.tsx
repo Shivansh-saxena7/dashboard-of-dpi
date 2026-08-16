@@ -93,6 +93,7 @@ export default function StartShiftCard({ employeeId, compact = false }: StartShi
   const [endWindow, setEndWindow] = useState<EndShiftWindowResult | null>(null);
   const [geoStatus, setGeoStatus] = useState<GeoStatus>("checking");
   const [geoDistanceMeters, setGeoDistanceMeters] = useState<number | null>(null);
+  const [geoAccuracyMeters, setGeoAccuracyMeters] = useState<number | null>(null);
 
   useEffect(() => {
     checkTodaysShift();
@@ -214,6 +215,7 @@ export default function StartShiftCard({ employeeId, compact = false }: StartShi
           config.geofence_radius_meters
         );
         setGeoDistanceMeters(Math.round(result.distanceMeters));
+        setGeoAccuracyMeters(Math.round(position.coords.accuracy));
         setGeoStatus(result.withinGeofence ? "within" : "outside");
       },
       () => setGeoStatus("unavailable"),
@@ -269,7 +271,8 @@ export default function StartShiftCard({ employeeId, compact = false }: StartShi
               },
               body: JSON.stringify({
                 lat: position.coords.latitude,
-                lng: position.coords.longitude
+                lng: position.coords.longitude,
+                accuracy: position.coords.accuracy
               })
             }
           );
@@ -369,7 +372,11 @@ export default function StartShiftCard({ employeeId, compact = false }: StartShi
 
   const startBlockedReason =
     geoStatus === "outside"
-      ? `You are ${geoDistanceMeters}m from the office — must be within ${config?.geofence_radius_meters}m to start your shift.`
+      ? `You are ${geoDistanceMeters}m from the office — must be within ${config?.geofence_radius_meters}m to start your shift.${
+          geoAccuracyMeters !== null && geoAccuracyMeters > 50
+            ? ` Location accuracy is ±${geoAccuracyMeters}m — if you're actually at the office, check that Precise/Exact Location is enabled for this site.`
+            : ""
+        }`
       : startWindow?.reason;
 
   if (compact) {
