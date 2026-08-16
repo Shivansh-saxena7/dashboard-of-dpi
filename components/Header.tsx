@@ -654,7 +654,7 @@ useEffect(() => {
   Designed &amp; Developed by <span className="text-[#9c7a1f] font-bold">Shivansh Saxena</span>
 </p>
 <p className="text-center text-[9px] text-slate-500 mt-1 tracking-wide">
-  Version 1.0
+  Version 2.0
 </p>
               </div>
             </motion.div>

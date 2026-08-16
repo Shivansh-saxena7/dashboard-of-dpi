@@ -24,7 +24,7 @@ export default function Footer() {
           <span className="text-slate-300 text-[9px]">|</span>
 
           <span className="px-2 py-0.5 rounded-full bg-slate-100 text-[9.5px] font-medium text-slate-500">
-            Version 1.0
+            Version 2.0
           </span>
         </div>
       </div>

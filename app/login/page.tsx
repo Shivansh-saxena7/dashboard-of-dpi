@@ -325,7 +325,7 @@ export default function LoginPage() {
   <p className="text-[10px] text-gray-600 tracking-wide">
     Designed &amp; Developed by <span className="text-yellow-500/70 font-semibold">Shivansh Saxena</span>
   </p>
-  <p className="text-[9px] text-gray-700 tracking-wide">Version 1.0</p>
+  <p className="text-[9px] text-gray-700 tracking-wide">Version 2.0</p>
 </div>
         </div>
       </motion.div>
