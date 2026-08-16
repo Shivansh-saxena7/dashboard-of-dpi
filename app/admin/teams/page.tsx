@@ -481,16 +481,23 @@ export default function AdminTeamsPage() {
                       <Trash2 size={15} />
                     </button>
                   </div>
+                  {/* min-w-0 on the input (was missing — flex-1 alone
+                      only sets grow/shrink/basis, the browser still
+                      floors its shrink at the value text's own min-
+                      content width) + shrink-0 on the button — same
+                      fix as the Team-Create row above this card, and
+                      the same established min-w-0-on-flex-children
+                      pattern used throughout this app. */}
                   <div className="flex gap-2">
                     <input
                       value={teamNameDraft}
                       onChange={(e) => setTeamNameDraft(e.target.value)}
-                      className="flex-1 h-12 rounded-xl bg-slate-50 border border-slate-200 px-4 outline-none focus:ring-4 focus:ring-cyan-200"
+                      className="flex-1 min-w-0 h-12 rounded-xl bg-slate-50 border border-slate-200 px-4 outline-none focus:ring-4 focus:ring-cyan-200"
                     />
                     <button
                       onClick={saveTeamName}
                       disabled={savingName || !teamNameDraft.trim() || teamNameDraft.trim() === selectedTeam.name}
-                      className="h-12 px-5 rounded-xl font-semibold text-white bg-gradient-to-r from-blue-600 to-cyan-500 disabled:opacity-50"
+                      className="shrink-0 h-12 px-5 rounded-xl font-semibold text-white bg-gradient-to-r from-blue-600 to-cyan-500 disabled:opacity-50"
                     >
                       Save
                     </button>
