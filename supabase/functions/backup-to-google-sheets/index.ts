@@ -37,6 +37,38 @@ const HEADER_ROW = [
   "Last Contact Date", "Follow-up Notes", "Visit Status", "Booking Status"
 ];
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Root-caused 2026-08-18: the 2 AM IST run failed with a genuine Google
+// Sheets API 503 ("The service is currently unavailable") on the very
+// first Sheets call — our own OAuth exchange had already succeeded, so
+// this was Google's side, not ours. The function correctly caught it
+// and returned HTTP 500, but nothing ever surfaced that failure to a
+// human — a disaster-recovery backup that fails silently defeats its
+// own purpose. Fix is two-part: (1) retry transient failures here so a
+// single Google-side blip doesn't cost us the whole night's backup,
+// (2) notify Admins on any run that still fails after retrying (below).
+//
+// Only retries 429 (rate limit) and 5xx (server-side) — a 4xx like 401/
+// 403 means a real auth/permission problem that retrying won't fix, so
+// those fail fast instead of wasting the function's time budget.
+async function fetchWithRetry(url: string, init: RequestInit, maxAttempts = 3): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await fetch(url, init);
+      if (res.ok || (res.status < 500 && res.status !== 429)) return res;
+      lastError = new Error(`HTTP ${res.status}: ${await res.text()}`);
+    } catch (err) {
+      lastError = err;
+    }
+    if (attempt < maxAttempts) await sleep(1000 * attempt); // 1s, 2s backoff
+  }
+  throw lastError;
+}
+
 function base64url(input: string | ArrayBuffer): string {
   const bytes = typeof input === "string" ? new TextEncoder().encode(input) : new Uint8Array(input);
   let binary = "";
@@ -79,7 +111,7 @@ async function getGoogleAccessToken(serviceAccountKey: any): Promise<string> {
 
   const jwt = `${unsigned}.${base64url(signature)}`;
 
-  const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+  const tokenRes = await fetchWithRetry("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -212,7 +244,7 @@ serve(async () => {
     const allTabNames = Array.from(rowsByTab.keys());
 
     // 1) Which tabs already exist?
-    const metaRes = await fetch(
+    const metaRes = await fetchWithRetry(
       `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties.title`,
       { headers: { Authorization: `Bearer ${accessToken}` } }
     );
@@ -223,7 +255,7 @@ serve(async () => {
     // 2) Create any missing tabs (new employees since the last run).
     const missingTabs = allTabNames.filter((t) => !existingTabTitles.has(t));
     if (missingTabs.length > 0) {
-      const addRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}:batchUpdate`, {
+      const addRes = await fetchWithRetry(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}:batchUpdate`, {
         method: "POST",
         headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
         body: JSON.stringify({ requests: missingTabs.map((title) => ({ addSheet: { properties: { title } } })) })
@@ -237,7 +269,7 @@ serve(async () => {
     // 3) Clear every tab's data range before rewriting (so a shrunk
     // list — e.g. leads recycled away from someone — doesn't leave
     // stale rows behind).
-    const clearRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchClear`, {
+    const clearRes = await fetchWithRetry(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchClear`, {
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({ ranges: allTabNames.map(rangeFor) })
@@ -246,7 +278,7 @@ serve(async () => {
     if (!clearRes.ok) throw new Error(`Clearing tabs failed: ${JSON.stringify(clearJson)}`);
 
     // 4) Write the fresh snapshot — one API call for every tab.
-    const writeRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchUpdate`, {
+    const writeRes = await fetchWithRetry(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values:batchUpdate`, {
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -271,6 +303,39 @@ serve(async () => {
     );
   } catch (error: any) {
     console.error("backup-to-google-sheets failed:", error.message);
+
+    // A disaster-recovery backup that fails silently defeats its own
+    // purpose — retrying (above) absorbs a transient blip, but if the
+    // run still fails after retries, Admin needs to know today, not
+    // whenever someone happens to check the Sheet. Best-effort: uses
+    // its own client (a Supabase-connectivity failure would already
+    // have been the thing that failed above), and never lets a
+    // notification-insert error mask the real one being reported back.
+    try {
+      const supabase = createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+      );
+      const { data: activeAdmins } = await supabase
+        .from("employees")
+        .select("id, name")
+        .eq("role", "admin")
+        .eq("is_active", true);
+
+      for (const admin of activeAdmins || []) {
+        await supabase.from("notification").insert({
+          employee_id: admin.id,
+          employee_name: admin.name || "",
+          title: "Google Sheets backup failed",
+          message: `Tonight's disaster-recovery backup to Google Sheets did not complete: ${error.message}`,
+          type: "BACKUP_FAILED",
+          is_read: false
+        });
+      }
+    } catch (notifyError: any) {
+      console.error("backup-to-google-sheets: also failed to send failure notification:", notifyError.message);
+    }
+
     return new Response(JSON.stringify({ success: false, message: error.message }), {
       headers: { "Content-Type": "application/json" },
       status: 500
