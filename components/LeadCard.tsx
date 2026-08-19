@@ -158,6 +158,15 @@ export default function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps
       className="rounded-[22px] bg-white border border-slate-100 shadow-[0_4px_20px_rgba(15,23,42,0.06)] hover:shadow-[0_10px_30px_rgba(15,23,42,0.1)] transition-shadow p-4 sm:p-5 cursor-pointer"
     >
       <div className="flex items-start gap-3">
+        {/* Position-in-current-list number — "aaj maine kitne pe call
+            kiya" at a glance. Reuses the `index` prop that already
+            existed here (previously only fed the entrance-animation
+            delay above) — no new data, purely a visual count of the
+            current filtered/sorted view, not a permanent lead ID. */}
+        <div className="shrink-0 w-5 pt-1.5 text-center text-[11px] font-bold text-slate-400">
+          {index + 1}
+        </div>
+
         <div className="shrink-0 h-11 w-11 rounded-2xl bg-gradient-to-br from-yellow-400 to-amber-500 shadow-[0_4px_12px_rgba(217,119,6,0.35)] flex items-center justify-center text-slate-900 font-bold text-sm">
           {initial}
         </div>

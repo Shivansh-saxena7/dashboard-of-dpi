@@ -99,6 +99,12 @@ icon:"🏆"
 },
 
 {
+name:"Work Reports",
+href:"/admin/work-reports",
+icon:"📋"
+},
+
+{
 name:"Tickets",
 href:"/admin/tickets",
 icon:"🎫"

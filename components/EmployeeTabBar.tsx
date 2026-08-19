@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
-import { Image as ImageIcon, Target, Database, Users, Trophy, Ticket } from "lucide-react";
+import { Image as ImageIcon, Target, Database, Users, Trophy, Ticket, ClipboardList } from "lucide-react";
 
 interface EmployeeTabBarProps {
   role?: string;
@@ -15,6 +15,7 @@ const SALES_TABS = [
   { href: "/leads", label: "Leads", icon: Target },
   { href: "/data", label: "Data", icon: Database },
   { href: "/leaderboard", label: "Leaderboard", icon: Trophy },
+  { href: "/report", label: "My Report", icon: ClipboardList },
   { href: "/tickets", label: "Tickets", icon: Ticket }
 ];
 

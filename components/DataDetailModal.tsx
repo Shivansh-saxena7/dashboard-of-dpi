@@ -7,6 +7,8 @@ import { supabase } from "@/lib/supabase";
 import toast from "react-hot-toast";
 import { getValidNextLeadStatuses, LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
+import { BoardStage } from "@/lib/leadBoardStageDisplay";
+import { LEAD_POINTS } from "@/lib/calculateLeadPoints";
 import { buildWhatsAppLink } from "@/lib/buildWhatsAppLink";
 
 export interface DataDetailLead {
@@ -16,6 +18,7 @@ export interface DataDetailLead {
   mobile: string;
   status: LeadStatus;
   callCount: number;
+  boardStage: BoardStage;
 }
 
 interface LeadNote {
@@ -28,14 +31,29 @@ interface DataDetailModalProps {
   lead: DataDetailLead;
   onClose: () => void;
   onUpdated: (updates: { status?: LeadStatus; callCount: number }) => void;
+  onBoardStageChanged: (boardStage: BoardStage) => void;
 }
 
-// The Data-tab counterpart to LeadDetailModal — deliberately much
-// smaller: no "Move Lead" section at all, since Data has no
-// board_stage workflow (no Follow-up/Visit/Booking funnel — see
-// components/DataList.tsx). Everything else (status update, note,
-// reminder, call/WhatsApp tracking) reuses the exact same RPCs the
-// Leads drawer uses — one write-path, not two.
+// The Data-tab counterpart to LeadDetailModal. Previously had no
+// "Move Lead" section at all (comment here used to say Data has no
+// board_stage workflow) — that was a UI-scope decision, not a real
+// technical limit: `leads.board_stage`'s CHECK constraint and
+// move_lead_to_followup_atomic/log_site_visit_atomic/log_booking_atomic
+// never actually checked lead_type, and a live re-verification of
+// calculateSLAStatus.ts + recycle-stale-leads (2026-08-19, Point 2 of
+// the live-production review) confirmed the whole staleness/recycling
+// engine already keys off board_stage generically, not lead_type — so
+// this now reuses the exact same three RPCs LeadDetailModal uses, zero
+// new RPCs, zero changes to the recycling engine. Deliberately still
+// NOT adding Snooze here — that wasn't part of what was asked for, and
+// keeping this addition scoped to exactly Follow-up/Visit/Booking
+// keeps the diff reviewable.
+//
+// A genuine client Data-to-Booking conversion now also counts toward
+// the same Weekly Visits / Monthly Bookings Leaderboard a Lead-sourced
+// one does (visits_leaderboard has no lead_type filter) — a deliberate
+// choice, confirmed with the user before implementing, not an
+// oversight: a booking is real revenue either way.
 //
 // submitUpdate calls log_lead_update_atomic with the SAME full
 // 6-named-param shape LeadDetailModal already uses (p_lead_id,
@@ -46,7 +64,7 @@ interface DataDetailModalProps {
 // reminder phases: 4/5/6-param versions all still exist), and always
 // matching the exact shape already proven in production avoids any
 // risk of PostgREST resolving to the wrong overload.
-export default function DataDetailModal({ lead, onClose, onUpdated }: DataDetailModalProps) {
+export default function DataDetailModal({ lead, onClose, onUpdated, onBoardStageChanged }: DataDetailModalProps) {
 
   const [notes, setNotes] = useState<LeadNote[]>([]);
   const [loadingNotes, setLoadingNotes] = useState(true);
@@ -55,6 +73,10 @@ export default function DataDetailModal({ lead, onClose, onUpdated }: DataDetail
   const [reminderValue, setReminderValue] = useState("");
   const [reminderUnit, setReminderUnit] = useState<"hours" | "days" | "months">("days");
   const [submitting, setSubmitting] = useState(false);
+
+  const [visitPromptOpen, setVisitPromptOpen] = useState(false);
+  const [bookingConfirmOpen, setBookingConfirmOpen] = useState(false);
+  const [moving, setMoving] = useState(false);
 
   useEffect(() => {
     loadNotes();
@@ -92,17 +114,98 @@ export default function DataDetailModal({ lead, onClose, onUpdated }: DataDetail
       });
   }
 
-  // Data rows have no board_stage/Booking funnel at all — board_stage
-  // stays 'LEADS' forever on a Data row (Phase 4 design), so this
-  // lead object never carries one. Passing undefined is correct, not
-  // a workaround: isLeadTerminal treats a missing board_stage as
-  // "not BOOKING," which is exactly true for every Data row, always —
-  // adding a real boardStage field to the whole Data pipeline just to
-  // satisfy this call would be plumbing for a value that can only
-  // ever be one constant. JUNK still terminates a Data row correctly
-  // either way, since that half of isLeadTerminal doesn't need it.
-  const validNextStatuses = getValidNextLeadStatuses(lead.status, undefined);
+  // Now passes the real board_stage (previously always undefined,
+  // back when Data had no board_stage workflow at all — see the
+  // file-level comment above). isLeadTerminal correctly locks this
+  // once board_stage reaches BOOKING, same as a Lead.
+  const validNextStatuses = getValidNextLeadStatuses(lead.status, lead.boardStage);
   const isTerminal = validNextStatuses.length === 0;
+
+  // Same gating LeadDetailModal uses — board moves stop once
+  // genuinely Booked or otherwise terminal (JUNK).
+  const boardMovesDisabled = isTerminal || lead.boardStage === "BOOKING";
+
+  async function moveToFollowUp() {
+    setMoving(true);
+
+    try {
+
+      const { error } = await supabase.rpc("move_lead_to_followup_atomic", {
+        p_lead_id: lead.id
+      });
+
+      if (error) {
+        toast.error(error.message || "Could not move this lead.");
+        return;
+      }
+
+      toast.success("Moved to Follow-up.");
+      onBoardStageChanged("FOLLOW_UP");
+
+    } catch (err) {
+      console.log(err);
+      toast.error("Something went wrong.");
+    } finally {
+      setMoving(false);
+    }
+  }
+
+  async function moveToVisit(visitType: "VISIT" | "REVISIT") {
+    setMoving(true);
+
+    try {
+
+      const points = visitType === "VISIT" ? LEAD_POINTS.VISIT : LEAD_POINTS.REVISIT;
+
+      const { error } = await supabase.rpc("log_site_visit_atomic", {
+        p_lead_id: lead.id,
+        p_event_type: visitType,
+        p_points: points
+      });
+
+      if (error) {
+        toast.error(error.message || "Could not log this visit.");
+        return;
+      }
+
+      toast.success(visitType === "VISIT" ? "First visit logged." : "Revisit logged.");
+      setVisitPromptOpen(false);
+      onBoardStageChanged("VISIT");
+
+    } catch (err) {
+      console.log(err);
+      toast.error("Something went wrong.");
+    } finally {
+      setMoving(false);
+    }
+  }
+
+  async function confirmBooking() {
+    setMoving(true);
+
+    try {
+
+      const { error } = await supabase.rpc("log_booking_atomic", {
+        p_lead_id: lead.id,
+        p_points: LEAD_POINTS.BOOKED
+      });
+
+      if (error) {
+        toast.error(error.message || "Could not log this booking.");
+        return;
+      }
+
+      toast.success("🎉 Booking logged!");
+      setBookingConfirmOpen(false);
+      onBoardStageChanged("BOOKING");
+
+    } catch (err) {
+      console.log(err);
+      toast.error("Something went wrong.");
+    } finally {
+      setMoving(false);
+    }
+  }
 
   async function submitUpdate() {
     setSubmitting(true);
@@ -174,11 +277,18 @@ export default function DataDetailModal({ lead, onClose, onUpdated }: DataDetail
           </p>
           <h2 className="text-xl font-bold text-slate-800 pr-10">{lead.name}</h2>
 
-          <span
-            className={`inline-block mt-3 text-[11px] font-semibold px-2.5 py-1 rounded-full ${LEAD_STATUS_DISPLAY[lead.status].badgeClassName}`}
-          >
-            {LEAD_STATUS_DISPLAY[lead.status].label}
-          </span>
+          <div className="flex items-center gap-1.5 flex-wrap mt-3">
+            <span
+              className={`inline-block text-[11px] font-semibold px-2.5 py-1 rounded-full ${LEAD_STATUS_DISPLAY[lead.status].badgeClassName}`}
+            >
+              {LEAD_STATUS_DISPLAY[lead.status].label}
+            </span>
+            {lead.boardStage !== "LEADS" && (
+              <span className="inline-block text-[11px] font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">
+                {lead.boardStage === "FOLLOW_UP" ? "📞 Follow-up" : lead.boardStage === "VISIT" ? "🏠 Visit" : "✅ Booked"}
+              </span>
+            )}
+          </div>
 
           <div className="mt-4 flex items-center gap-2">
             <a
@@ -204,6 +314,101 @@ export default function DataDetailModal({ lead, onClose, onUpdated }: DataDetail
         </div>
 
         <div className="px-6 py-6 space-y-6">
+
+          {!boardMovesDisabled && (
+            <div className="rounded-2xl bg-white border border-slate-100 shadow-md p-5">
+              <p className="text-sm font-bold text-slate-800 mb-3">Move Lead</p>
+
+              {visitPromptOpen ? (
+                <div>
+                  <p className="text-xs text-slate-500 mb-2">Pehli Visit hai ya Revisit?</p>
+                  <div className="flex gap-2">
+                    <button
+                      disabled={moving}
+                      onClick={() => moveToVisit("VISIT")}
+                      className="flex-1 h-10 rounded-xl text-sm font-semibold bg-slate-800 text-white disabled:opacity-60"
+                    >
+                      First Visit
+                    </button>
+                    <button
+                      disabled={moving}
+                      onClick={() => moveToVisit("REVISIT")}
+                      className="flex-1 h-10 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 disabled:opacity-60"
+                    >
+                      Revisit
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => setVisitPromptOpen(false)}
+                    className="text-xs text-slate-400 mt-2"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : bookingConfirmOpen ? (
+                <div>
+                  <p className="text-xs text-slate-500 mb-3">
+                    Confirm booking? This closes the lead and notifies the whole team.
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      disabled={moving}
+                      onClick={confirmBooking}
+                      className="flex-1 h-10 rounded-xl text-sm font-semibold bg-green-600 text-white disabled:opacity-60"
+                    >
+                      {moving ? "Logging..." : "Confirm Booking"}
+                    </button>
+                    <button
+                      disabled={moving}
+                      onClick={() => setBookingConfirmOpen(false)}
+                      className="flex-1 h-10 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 disabled:opacity-60"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {lead.boardStage !== "FOLLOW_UP" && (
+                    <button
+                      disabled={moving}
+                      onClick={moveToFollowUp}
+                      className="text-xs font-semibold px-3 py-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-60"
+                    >
+                      📞 Move to Follow-up
+                    </button>
+                  )}
+                  {lead.boardStage !== "VISIT" ? (
+                    <button
+                      disabled={moving}
+                      onClick={() => setVisitPromptOpen(true)}
+                      className="text-xs font-semibold px-3 py-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-60"
+                    >
+                      🏠 Move to Visit
+                    </button>
+                  ) : (
+                    // Same reasoning as LeadDetailModal's identical
+                    // branch — once already in Visit, every further
+                    // visit here IS a revisit by definition.
+                    <button
+                      disabled={moving}
+                      onClick={() => moveToVisit("REVISIT")}
+                      className="text-xs font-semibold px-3 py-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-60"
+                    >
+                      🔄 Log Revisit
+                    </button>
+                  )}
+                  <button
+                    disabled={moving}
+                    onClick={() => setBookingConfirmOpen(true)}
+                    className="text-xs font-semibold px-3 py-2 rounded-xl bg-gradient-to-r from-yellow-400 to-amber-500 text-slate-900 hover:opacity-90 disabled:opacity-60"
+                  >
+                    ✅ Move to Booking
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {isTerminal ? (
             <div className="rounded-2xl bg-slate-100 p-4 text-sm text-slate-500 text-center">
