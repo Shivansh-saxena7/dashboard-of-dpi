@@ -59,6 +59,13 @@ export default function SettingsPage() {
   const [secondHalfMinEnd, setSecondHalfMinEnd] = useState("");
   const [shiftTimingLoading, setShiftTimingLoading] = useState(false);
 
+  // ✅ Work Report — WhatsApp group reminder (Point 4, 2026-08-19).
+  // Purely a descriptive on-screen label ("Post this in: <label>"),
+  // NOT a real link target — WhatsApp has no way to pre-target a
+  // specific group via URL, see WorkReportView.tsx's own comment.
+  const [workReportGroupLabel, setWorkReportGroupLabel] = useState("");
+  const [workReportLoading, setWorkReportLoading] = useState(false);
+
   useEffect(() => {
     loadEmployees();
   }, []);
@@ -67,6 +74,7 @@ export default function SettingsPage() {
     loadGeofenceSettings();
     loadSlaOfficeHours();
     loadShiftTiming();
+    loadWorkReportSettings();
   }, []);
 
   async function loadGeofenceSettings() {
@@ -199,6 +207,48 @@ export default function SettingsPage() {
       toast.error("Something went wrong.");
     } finally {
       setShiftTimingLoading(false);
+    }
+  }
+
+  async function loadWorkReportSettings() {
+    const { data } = await supabase
+      .from("lead_engine_settings")
+      .select("work_report_whatsapp_group_label")
+      .eq("id", 1)
+      .single();
+
+    if (data) {
+      setWorkReportGroupLabel(data.work_report_whatsapp_group_label || "");
+    }
+  }
+
+  async function saveWorkReportSettings() {
+    setWorkReportLoading(true);
+
+    try {
+      const res = await fetch("/api/admin/update-work-report-settings", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          work_report_whatsapp_group_label: workReportGroupLabel
+        })
+      });
+
+      const result = await res.json();
+
+      if (!res.ok) {
+        toast.error(result.error || "Failed to update Work Report settings.");
+        return;
+      }
+
+      toast.success("Work Report settings updated successfully");
+    } catch (err) {
+      console.log(err);
+      toast.error("Something went wrong.");
+    } finally {
+      setWorkReportLoading(false);
     }
   }
 
@@ -1068,6 +1118,77 @@ disabled:opacity-60
 "
           >
             {shiftTimingLoading ? "Saving..." : "Save Shift Timing"}
+          </button>
+        </div>
+      </motion.div>
+
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="
+bg-white
+rounded-[24px]
+border
+border-slate-100
+shadow-md
+p-6
+"
+      >
+        <h2
+          className="
+text-xl
+font-bold
+text-slate-800
+mb-5
+"
+        >
+          📋 Work Report
+        </h2>
+
+        <div className="space-y-4">
+          <div>
+            <label className="text-xs font-semibold text-slate-500 mb-1 block">
+              WhatsApp Group Reminder (optional)
+            </label>
+            <input
+              type="text"
+              value={workReportGroupLabel}
+              onChange={(e) => setWorkReportGroupLabel(e.target.value)}
+              placeholder="e.g. Sales Team Group"
+              className="
+w-full
+h-12
+rounded-xl
+bg-slate-50
+border
+border-slate-200
+px-4
+outline-none
+"
+            />
+            <p className="text-xs text-slate-400 mt-1.5">
+              Sirf ek on-screen reminder hai ("Post this in: ...") — WhatsApp mein koi specific group ko
+              directly auto-select karna technically possible nahi hai, isliye employee ko manually apni
+              chat-list se group choose karna padega.
+            </p>
+          </div>
+
+          <button
+            onClick={saveWorkReportSettings}
+            disabled={workReportLoading}
+            className="
+w-full
+h-12
+rounded-xl
+font-semibold
+text-white
+bg-gradient-to-r
+from-blue-600
+to-cyan-500
+disabled:opacity-60
+"
+          >
+            {workReportLoading ? "Saving..." : "Save Work Report Settings"}
           </button>
         </div>
       </motion.div>

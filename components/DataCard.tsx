@@ -13,7 +13,9 @@ interface DataCardLead {
   leadHistoryId: string;
   name: string;
   mobile: string;
+  source?: string | null;
   status: LeadStatus;
+  board_stage?: string | null;
   call_count: number;
 }
 
@@ -36,7 +38,18 @@ export default function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
   const statusDisplay = LEAD_STATUS_DISPLAY[lead.status];
   const initial = lead.name?.charAt(0)?.toUpperCase() || "?";
 
-  const stillAtRisk = lead.status === "NEW" || lead.status === "NOT_CONNECTED" || lead.status === "SWITCHED_OFF";
+  // Attempt-count auto-recycle only actually applies while board_stage
+  // is still "LEADS" (calculateSLAStatus.ts) — once an employee has
+  // moved this lead to Follow-up/Visit, that mechanism no longer
+  // fires, so this warning must stop showing too, or it'd falsely
+  // suggest an about-to-be-recycled lead that's actually safe now.
+  // Before board_stage moves existed for Data (Point 2, 2026-08-19),
+  // every Data row was implicitly always "LEADS," so this check wasn't
+  // needed — it's a direct consequence of that change, not unrelated.
+  const inLeadsStage = !lead.board_stage || lead.board_stage === "LEADS";
+  const stillAtRisk =
+    inLeadsStage &&
+    (lead.status === "NEW" || lead.status === "NOT_CONNECTED" || lead.status === "SWITCHED_OFF");
   const attemptsLeft = Math.max(MAX_DATA_ATTEMPTS - lead.call_count, 0);
   const showAttemptWarning = stillAtRisk && attemptsLeft <= 1;
 
@@ -72,6 +85,13 @@ export default function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
       className="rounded-[22px] bg-white border border-slate-100 shadow-[0_4px_20px_rgba(15,23,42,0.06)] hover:shadow-[0_10px_30px_rgba(15,23,42,0.1)] transition-shadow p-4 sm:p-5 cursor-pointer"
     >
       <div className="flex items-center gap-3">
+        {/* Position-in-current-list number — same addition as
+            LeadCard.tsx, reusing the `index` prop that already existed
+            (previously only fed the entrance-animation delay below). */}
+        <div className="shrink-0 w-5 text-center text-[11px] font-bold text-slate-400">
+          {index + 1}
+        </div>
+
         <div className="shrink-0 h-11 w-11 rounded-2xl bg-gradient-to-br from-yellow-400 to-amber-500 shadow-[0_4px_12px_rgba(217,119,6,0.35)] flex items-center justify-center text-slate-900 font-bold text-sm">
           {initial}
         </div>
@@ -79,12 +99,24 @@ export default function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
           <p className="text-[15px] font-bold text-slate-800 truncate">{lead.name}</p>
           <p className="text-xs text-slate-500 mt-0.5">{lead.mobile}</p>
         </div>
+
+        {lead.source && (
+          <span className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">
+            {lead.source}
+          </span>
+        )}
       </div>
 
       <div className="flex items-center flex-wrap gap-1.5 mt-3.5">
         <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${statusDisplay.badgeClassName}`}>
           {statusDisplay.label}
         </span>
+
+        {lead.board_stage && lead.board_stage !== "LEADS" && (
+          <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-500">
+            {lead.board_stage === "FOLLOW_UP" ? "📞 Follow-up" : lead.board_stage === "VISIT" ? "🏠 Visit" : "✅ Booked"}
+          </span>
+        )}
 
         {lead.call_count > 0 && (
           stillAtRisk ? (
