@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
-import { X, User, Bookmark, Share2 } from "lucide-react";
+import { X, User, Bookmark, Share2, Radio } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { ENDED_REASON_TEXT } from "@/lib/endedReasonDisplay";
 import { assignedByLabel } from "@/lib/assignedByDisplay";
@@ -72,18 +72,36 @@ interface AssetShareEntry {
   employees: { name: string } | null;
 }
 
+// Meta CAPI signal history (feature: meta-capi-integration,
+// 2026-08-19) — timestamp is queued_at (when the underlying real
+// action happened: Connected/Follow-up/Visit/Booking), not sent_at
+// (which lags by up to the cron interval and would place the entry
+// out of story-order relative to everything else in this timeline).
+interface CapiEventEntry {
+  id: string;
+  event_tier: string;
+  meta_event_name: string;
+  status: string;
+  queued_at: string;
+  sent_at: string | null;
+  last_error: string | null;
+}
+
 // Reservations (Admin -> team, before anyone owns the lead),
-// assignments (lead_history rows), and asset shares (Project Assets /
-// Cost-Sheet WhatsApp sends) are three structurally different event
-// types — merged here into one timestamp-sorted timeline so the
-// drawer reads as a single continuous story, even though they live in
-// three separate tables (a reservation has no employee_id yet, which
-// lead_history's schema doesn't allow; an asset share isn't an
-// ownership event at all).
+// assignments (lead_history rows), asset shares (Project Assets /
+// Cost-Sheet WhatsApp sends), and Meta CAPI signals are four
+// structurally different event types — merged here into one
+// timestamp-sorted timeline so the drawer reads as a single
+// continuous story, even though they live in four separate tables (a
+// reservation has no employee_id yet, which lead_history's schema
+// doesn't allow; an asset share isn't an ownership event at all; a
+// CAPI signal is a system-generated side effect, not something any
+// employee directly did).
 type TimelineEntry =
   | { kind: "ASSIGNMENT"; timestamp: string; data: HistoryEntry }
   | { kind: "RESERVATION"; timestamp: string; data: ReservationEntry }
-  | { kind: "ASSET_SHARE"; timestamp: string; data: AssetShareEntry };
+  | { kind: "ASSET_SHARE"; timestamp: string; data: AssetShareEntry }
+  | { kind: "CAPI_EVENT"; timestamp: string; data: CapiEventEntry };
 
 // Admin-only, full audit trail — queries lead_history DIRECTLY (never
 // employee_sla_breach_history, which is deliberately scoped/masked
@@ -139,7 +157,8 @@ export default function AdminLeadHistoryModal({ leadId, leadName, leadType, lead
     const [
       { data: historyData, error: historyError },
       { data: reservationData, error: reservationError },
-      { data: assetShareData, error: assetShareError }
+      { data: assetShareData, error: assetShareError },
+      { data: capiEventData, error: capiEventError }
     ] = await Promise.all([
         supabase
           .from("lead_history")
@@ -159,6 +178,10 @@ export default function AdminLeadHistoryModal({ leadId, leadName, leadType, lead
         supabase
           .from("asset_share_log")
           .select("id, shared_at, entry_type, assets_snapshot, employees(name)")
+          .eq("lead_id", leadId),
+        supabase
+          .from("meta_capi_events_log")
+          .select("id, event_tier, meta_event_name, status, queued_at, sent_at, last_error")
           .eq("lead_id", leadId)
       ]);
 
@@ -179,6 +202,12 @@ export default function AdminLeadHistoryModal({ leadId, leadName, leadType, lead
     if (!assetShareError && assetShareData) {
       (assetShareData as unknown as AssetShareEntry[]).forEach((entry) =>
         merged.push({ kind: "ASSET_SHARE", timestamp: entry.shared_at, data: entry })
+      );
+    }
+
+    if (!capiEventError && capiEventData) {
+      (capiEventData as unknown as CapiEventEntry[]).forEach((entry) =>
+        merged.push({ kind: "CAPI_EVENT", timestamp: entry.queued_at, data: entry })
       );
     }
 
@@ -332,6 +361,44 @@ export default function AdminLeadHistoryModal({ leadId, leadName, leadType, lead
                               </li>
                             ))}
                           </ul>
+                        )}
+                      </div>
+                    </>
+                  ) : item.kind === "CAPI_EVENT" ? (
+                    <>
+                      <div className="absolute left-0 top-0.5 h-5 w-5 rounded-full flex items-center justify-center bg-gradient-to-br from-indigo-500 to-violet-600">
+                        <Radio size={11} className="text-white" />
+                      </div>
+
+                      <div className="rounded-xl bg-indigo-50 border border-indigo-100 p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-bold text-indigo-800">
+                            Meta signal: {item.data.event_tier} ({item.data.meta_event_name})
+                          </p>
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                              item.data.status === "SENT"
+                                ? "bg-emerald-100 text-emerald-700"
+                                : item.data.status === "FAILED"
+                                ? "bg-red-100 text-red-700"
+                                : "bg-amber-100 text-amber-700"
+                            }`}
+                          >
+                            {item.data.status}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-indigo-700/80 mt-1">
+                          {new Date(item.data.sent_at || item.data.queued_at).toLocaleString([], {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit"
+                          })}
+                        </p>
+                        {item.data.status === "FAILED" && item.data.last_error && (
+                          <p className="text-xs text-red-700 mt-2 leading-relaxed">
+                            {item.data.last_error}
+                          </p>
                         )}
                       </div>
                     </>

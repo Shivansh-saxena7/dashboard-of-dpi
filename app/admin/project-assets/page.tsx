@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import toast from "react-hot-toast";
-import { Plus, Trash2, ChevronDown, ChevronRight, Video, FileText, Upload, Tag, X } from "lucide-react";
+import { Plus, Trash2, ChevronDown, ChevronRight, Video, FileText, Upload, Tag, X, Link2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
 const BUCKET = "project-assets";
@@ -12,6 +12,12 @@ interface Project {
   id: string;
   name: string;
   is_active: boolean;
+  meta_dataset_id: string | null;
+}
+
+interface MetaDatasetOption {
+  id: string;
+  label: string;
 }
 
 interface Alias {
@@ -61,11 +67,44 @@ export default function ProjectAssetsPage() {
   const [videoUrl, setVideoUrl] = useState("");
   const [uploading, setUploading] = useState(false);
 
+  const [metaDatasets, setMetaDatasets] = useState<MetaDatasetOption[]>([]);
+  const [savingDatasetLink, setSavingDatasetLink] = useState(false);
+
   const selectedProject = projects.find((p) => p.id === selectedProjectId) || null;
 
   useEffect(() => {
     loadProjects();
+    loadMetaDatasets();
   }, []);
+
+  // Feature: meta-capi-integration (2026-08-19). Plain client-side
+  // read — meta_datasets carries no sensitive data itself (the access
+  // token lives only in Vault, referenced by id), same reasoning the
+  // admin_all RLS policy on that table already relies on.
+  async function loadMetaDatasets() {
+    const { data } = await supabase.from("meta_datasets").select("id, label").eq("is_active", true).order("label");
+    setMetaDatasets(data || []);
+  }
+
+  // Plain table write, not an RPC — meta_dataset_id is just a project-
+  // to-dataset link, not a secret, so this follows the exact same
+  // "plain writes under RLS" convention this whole page already uses
+  // for aliases/groups/assets (see the file-level comment above).
+  async function updateProjectMetaDataset(projectId: string, newDatasetId: string | null) {
+    setSavingDatasetLink(true);
+    const { error } = await supabase
+      .from("projects")
+      .update({ meta_dataset_id: newDatasetId })
+      .eq("id", projectId);
+
+    if (error) {
+      toast.error(error.message);
+    } else {
+      toast.success("Meta Dataset updated.");
+      await loadProjects();
+    }
+    setSavingDatasetLink(false);
+  }
 
   useEffect(() => {
     if (selectedProjectId) {
@@ -314,6 +353,29 @@ export default function ProjectAssetsPage() {
           </div>
         ) : (
           <div className="space-y-5">
+            {/* Meta Dataset link (feature: meta-capi-integration, 2026-08-19) */}
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Link2 size={14} className="text-slate-400" />
+                <h3 className="text-sm font-bold text-slate-700">Meta Dataset</h3>
+              </div>
+              <p className="text-xs text-slate-400 mb-3">
+                Leads is-project-se genuinely-jab CONNECTED/Follow-up/Visit/Booking hongi, tab is-Dataset-ko
+                Meta Conversions API signal jaayega. Blank = koi signal nahi jaayega is-project-ke-liye.
+              </p>
+              <select
+                value={selectedProject.meta_dataset_id || ""}
+                onChange={(e) => updateProjectMetaDataset(selectedProject.id, e.target.value || null)}
+                disabled={savingDatasetLink}
+                className="w-full h-9 rounded-lg bg-slate-50 border border-slate-200 px-3 text-xs outline-none focus:ring-2 focus:ring-cyan-200 disabled:opacity-60"
+              >
+                <option value="">— No Dataset linked —</option>
+                {metaDatasets.map((d) => (
+                  <option key={d.id} value={d.id}>{d.label}</option>
+                ))}
+              </select>
+            </div>
+
             {/* Aliases */}
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
               <div className="flex items-center gap-2 mb-3">

@@ -187,6 +187,7 @@ serve(async (req) => {
         // the stable "which platform did this CSV come from" value.
         source: row.source || source_name,
         status: "NEW",
+        meta_lead_id: row.meta_lead_id || null,
         extra_data: row.extra_data || null,
         lead_type: leadType,
         // Always explicit, for BOTH types — never omitted/left to the

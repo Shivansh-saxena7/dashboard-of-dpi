@@ -22,6 +22,7 @@ interface MappedRow {
   project: string | null;
   source: string | null;
   priority: string | null;
+  meta_lead_id: string | null;
   extra_data: Record<string, string> | null;
   isValid: boolean;
   isDuplicate: boolean;
@@ -465,6 +466,7 @@ export default function ImportLeadsPage() {
       let project: string | null = null;
       let source: string | null = null;
       let priority: string | null = null;
+      let metaLeadId: string | null = null;
       const extra: Record<string, string> = {};
 
       Object.entries(mapping).forEach(([header, field]) => {
@@ -477,6 +479,7 @@ export default function ImportLeadsPage() {
         else if (field === "project") project = value;
         else if (field === "source") source = value;
         else if (field === "priority") priority = value;
+        else if (field === "meta_lead_id") metaLeadId = value;
         else if (field === "lead_time") extra.original_lead_time = value;
         else if (field === "extra") extra[header] = value;
       });
@@ -496,6 +499,7 @@ export default function ImportLeadsPage() {
         project,
         source,
         priority,
+        meta_lead_id: metaLeadId,
         extra_data: Object.keys(extra).length > 0 ? extra : null,
         isValid: Boolean(mobile)
       };
@@ -598,6 +602,7 @@ export default function ImportLeadsPage() {
           project: r.project,
           source: r.source,
           priority: r.priority,
+          meta_lead_id: r.meta_lead_id,
           extra_data: r.extra_data
         }));
 

@@ -6,6 +6,7 @@ export type MappedField =
   | "source"
   | "lead_time"
   | "priority"
+  | "meta_lead_id"
   | "ignore"
   | "extra";
 
@@ -17,6 +18,7 @@ export const MAPPED_FIELD_OPTIONS: { value: MappedField; label: string }[] = [
   { value: "source", label: "Source" },
   { value: "lead_time", label: "Lead Time" },
   { value: "priority", label: "Priority (Hot/Warm/Cold)" },
+  { value: "meta_lead_id", label: "Meta Lead ID (for Conversions API)" },
   { value: "extra", label: "Keep as Extra Data" },
   { value: "ignore", label: "Ignore" }
 ];
@@ -34,7 +36,18 @@ const SYNONYMS: Record<Exclude<MappedField, "ignore" | "extra">, string[]> = {
   project: ["project", "projectname", "property", "propertyname"],
   source: ["source", "leadsource", "platform", "channel"],
   lead_time: ["leadtime", "date", "createdat", "receivedon", "enquirydate", "timestamp", "leaddate"],
-  priority: ["priority", "leadpriority", "temperature", "hotwarmcold", "leadtemp"]
+  priority: ["priority", "leadpriority", "temperature", "hotwarmcold", "leadtemp"],
+  // Deliberately empty, not "id" — this wizard supports "any source"
+  // (99Acres, Housing.com, Meta, or any future platform), and a bare
+  // "id" column shows up on plenty of non-Meta CSVs meaning something
+  // completely unrelated (a listing id, a row index). Auto-detecting
+  // it globally could silently map a non-Meta CSV's own "id" into
+  // meta_lead_id, which would then get sent to Meta's CAPI as a
+  // fabricated lead_id — a real, hard-to-notice failure mode. Manual
+  // mapping only; csv_import_mappings (see this wizard's own comment)
+  // already remembers the choice per source after the first import,
+  // so this costs one extra click ONCE per platform, not per import.
+  meta_lead_id: []
 };
 
 function normalizeHeader(header: string): string {

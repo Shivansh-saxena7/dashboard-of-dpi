@@ -105,6 +105,12 @@ icon:"📋"
 },
 
 {
+name:"Meta Datasets",
+href:"/admin/meta-datasets",
+icon:"🔗"
+},
+
+{
 name:"Tickets",
 href:"/admin/tickets",
 icon:"🎫"
