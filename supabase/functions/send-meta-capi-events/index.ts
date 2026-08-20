@@ -103,15 +103,28 @@ serve(async () => {
 
       const project = event.leads?.project;
 
-      // No project on the lead, or no dataset linked to it — a config
-      // gap, not a transient error. Retrying won't fix it, so this
-      // fails immediately (no attempt-count spent) and alerts once,
-      // same as the Google Sheets fix's non-retryable-4xx principle.
-      const { data: projectRow } = project
-        ? await supabase.from("projects").select("meta_dataset_id").eq("name", project).maybeSingle()
+      // Resolves via resolve_project_meta_dataset (2026-08-21) —
+      // matches this codebase's existing lead-project-matching
+      // convention (get_lead_project_assets: case/whitespace-
+      // insensitive exact match, then project_aliases fallback),
+      // rather than the raw case-sensitive .eq("name", project) this
+      // used before. Root-caused live: a lead's free-text project
+      // ("Kviraaj Mayfair") not exactly matching the canonical
+      // projects.name ("Kviraaj Mayfair Residency") produced false
+      // "no dataset linked" failures even though the Dataset was
+      // genuinely linked — this is exactly the class of mismatch
+      // project_aliases already exists to solve elsewhere in the app.
+      //
+      // No project on the lead, or genuinely no dataset resolvable —
+      // a config/data gap, not a transient error. Retrying won't fix
+      // it, so this fails immediately (no attempt-count spent) and
+      // alerts once, same as the Google Sheets fix's non-retryable-4xx
+      // principle.
+      const { data: resolvedDatasetId } = project
+        ? await supabase.rpc("resolve_project_meta_dataset", { p_project_text: project })
         : { data: null };
 
-      if (!projectRow?.meta_dataset_id) {
+      if (!resolvedDatasetId) {
         const reason = `No Meta Dataset linked to project "${project || "(lead has no project set)"}"`;
         await supabase
           .from("meta_capi_events_log")
@@ -124,7 +137,7 @@ serve(async () => {
       }
 
       const { data: credRows, error: credError } = await supabase.rpc("get_meta_dataset_credentials", {
-        p_dataset_row_id: projectRow.meta_dataset_id
+        p_dataset_row_id: resolvedDatasetId
       });
 
       const creds = Array.isArray(credRows) ? credRows[0] : null;
@@ -133,7 +146,7 @@ serve(async () => {
         const reason = credError?.message || "Meta Dataset not found or inactive";
         await supabase
           .from("meta_capi_events_log")
-          .update({ status: "FAILED", last_error: reason, resolved_dataset_id: projectRow.meta_dataset_id })
+          .update({ status: "FAILED", last_error: reason, resolved_dataset_id: resolvedDatasetId })
           .eq("id", event.id);
         await notifyAdminsOfFailure(supabase, event.lead_id, event.event_tier, reason);
         failedCount++;
@@ -177,7 +190,7 @@ serve(async () => {
           .update({
             status: "SENT",
             sent_at: new Date().toISOString(),
-            resolved_dataset_id: projectRow.meta_dataset_id,
+            resolved_dataset_id: resolvedDatasetId,
             meta_response_summary: `events_received=${responseJson.events_received}${responseJson.fbtrace_id ? `, fbtrace_id=${responseJson.fbtrace_id}` : ""}`
           })
           .eq("id", event.id);
@@ -193,28 +206,42 @@ serve(async () => {
         responseJson?.error?.message ||
         (responseJson ? `Unexpected response: ${JSON.stringify(responseJson).slice(0, 500)}` : "Empty/unparseable response from Meta");
 
+      // Meta's own error object says explicitly whether retrying could
+      // ever help (root-caused live, 2026-08-21: an invalid/fake
+      // lead_id came back with is_transient: false — retrying that 5
+      // times just burns 4 wasted cron cycles before landing on the
+      // exact same permanent rejection). A network error/unparseable
+      // response has no such field and is treated as potentially
+      // transient by default (undefined !== false), same as before.
+      const isPermanentFailure = responseJson?.error?.is_transient === false;
+
       const nextAttempts = (event.send_attempts || 0) + 1;
 
-      if (nextAttempts >= MAX_SEND_ATTEMPTS) {
+      if (isPermanentFailure || nextAttempts >= MAX_SEND_ATTEMPTS) {
         await supabase
           .from("meta_capi_events_log")
           .update({
             status: "FAILED",
             send_attempts: nextAttempts,
             last_error: errorMessage,
-            resolved_dataset_id: projectRow.meta_dataset_id
+            resolved_dataset_id: resolvedDatasetId
           })
           .eq("id", event.id);
         await notifyAdminsOfFailure(supabase, event.lead_id, event.event_tier, errorMessage);
         failedCount++;
-        diagnostics.push({ eventId: event.id, action: "FAILED", reason: errorMessage });
+        diagnostics.push({
+          eventId: event.id,
+          action: "FAILED",
+          reason: errorMessage,
+          cause: isPermanentFailure ? "permanent (Meta: not transient)" : "attempts exhausted"
+        });
       } else {
         await supabase
           .from("meta_capi_events_log")
           .update({
             send_attempts: nextAttempts,
             last_error: errorMessage,
-            resolved_dataset_id: projectRow.meta_dataset_id
+            resolved_dataset_id: resolvedDatasetId
           })
           .eq("id", event.id);
         retriedCount++;
