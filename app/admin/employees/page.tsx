@@ -5,12 +5,26 @@ import { supabase } from "@/lib/supabase";
 import AddEmployeeModal from "../components/AddEmployeeesModal";
 import DeleteModal from "../components/DeleteModal";
 import { useRouter } from "next/navigation";
+import { todayKey } from "@/lib/leaderboardWeek";
 
 export default function Employees(){
     const router = useRouter();
 
 const [employees,setEmployees]=useState<any[]>([]);
 const [loading,setLoading]=useState(true);
+
+// Shift Status Today (2026-08-21) — read-only, purely additive.
+// Deliberately its own state + its own fetch, never merged into
+// fetchEmployees()/the employees query above — this feature only
+// ever READS attendance, never writes it, and keeping it fully
+// separate means it can't accidentally affect the existing
+// employees-list logic (search/filter/add/delete/toggles), all of
+// which stay completely untouched. attendance's own RLS
+// (attendance_admin_all) already grants Admin full read access —
+// no new RPC needed, just a plain client-side select.
+const [shiftStatusToday, setShiftStatusToday] = useState<
+  Record<string, { started: boolean; ended: boolean }>
+>({});
 
 const [search,setSearch]=useState("");
 const [filter,setFilter]=useState("all");
@@ -22,8 +36,33 @@ const [selectedId,setSelectedId]=useState("");
 useEffect(()=>{
 
 fetchEmployees();
+fetchShiftStatusToday();
 
 },[]);
+
+// Read-only — selects only employee_id/shift_start_at/shift_end_at
+// for today's date (IST, via todayKey() — same helper the Leaderboard
+// already uses), nothing else. Never inserts/updates/deletes
+// attendance in any way.
+const fetchShiftStatusToday = async () => {
+
+  const { data, error } = await supabase
+    .from("attendance")
+    .select("employee_id, shift_start_at, shift_end_at")
+    .eq("date", todayKey());
+
+  if (!error && data) {
+    const map: Record<string, { started: boolean; ended: boolean }> = {};
+    data.forEach((row: any) => {
+      map[row.employee_id] = {
+        started: Boolean(row.shift_start_at),
+        ended: Boolean(row.shift_end_at)
+      };
+    });
+    setShiftStatusToday(map);
+  }
+
+};
 
 const fetchEmployees=async()=>{
 
@@ -640,6 +679,46 @@ employee.is_active
 
 {employee.is_active ? "Active" : "Inactive"}
 
+</span>
+
+{/* Shift Status Today (read-only) — distinct dot + label from the
+    account is_active badge above, so "account enabled" and "clocked
+    in today" are never visually confused with each other. Green =
+    started, still active; Slate = started, shift already ended;
+    Grey = hasn't started yet today (the ones Admin needs to remind). */}
+<span
+  className={`
+    px-4
+    py-2
+    rounded-full
+    text-xs
+    font-medium
+    inline-flex
+    items-center
+    gap-1.5
+    ${
+      shiftStatusToday[employee.id]?.started && !shiftStatusToday[employee.id]?.ended
+        ? "bg-green-100 text-green-700"
+        : shiftStatusToday[employee.id]?.started && shiftStatusToday[employee.id]?.ended
+        ? "bg-slate-200 text-slate-600"
+        : "bg-slate-100 text-slate-400"
+    }
+  `}
+>
+  <span
+    className={`h-2 w-2 rounded-full ${
+      shiftStatusToday[employee.id]?.started && !shiftStatusToday[employee.id]?.ended
+        ? "bg-green-500"
+        : shiftStatusToday[employee.id]?.started && shiftStatusToday[employee.id]?.ended
+        ? "bg-slate-400"
+        : "bg-slate-300"
+    }`}
+  />
+  {shiftStatusToday[employee.id]?.started && !shiftStatusToday[employee.id]?.ended
+    ? "Shift Active"
+    : shiftStatusToday[employee.id]?.started && shiftStatusToday[employee.id]?.ended
+    ? "Shift Ended"
+    : "Not Started Today"}
 </span>
 
 <span
