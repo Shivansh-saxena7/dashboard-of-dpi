@@ -7,7 +7,8 @@ import { supabase } from "@/lib/supabase";
 import LeadCard from "./LeadCard";
 import LeadDetailModal from "./LeadDetailModal";
 import SLABreachHistoryCard from "./SLABreachHistoryCard";
-import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
+import { LeadStatus, EMPLOYEE_SELECTABLE_STATUSES } from "@/lib/getValidNextLeadStatuses";
+import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
 
 interface LeadListProps {
@@ -105,6 +106,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
   const [sourceFilter, setSourceFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const [dateRangeFilter, setDateRangeFilter] = useState<DateRangeOption>("ALL");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
@@ -371,6 +373,10 @@ export default function LeadList({ employeeId }: LeadListProps) {
       result = result.filter((lead) => lead.source === sourceFilter);
     }
 
+    if (statusFilter) {
+      result = result.filter((lead) => lead.status === statusFilter);
+    }
+
     // This Week / This Month are simple rolling windows (last 7 / 30
     // days from now), not calendar-week/month boundaries — a
     // deliberate simplification, not a calendar-aware filter.
@@ -418,7 +424,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
 
     return result;
 
-  }, [leads, activeTab, searchQuery, projectFilter, sourceFilter, dateRangeFilter, customStart, customEnd, sortBy]);
+  }, [leads, activeTab, searchQuery, projectFilter, sourceFilter, statusFilter, dateRangeFilter, customStart, customEnd, sortBy]);
 
   if (loading) {
     return (
@@ -519,6 +525,13 @@ export default function LeadList({ employeeId }: LeadListProps) {
               <option value="">All Sources</option>
               {sourceOptions.map((s) => (
                 <option key={s} value={s}>{s}</option>
+              ))}
+            </FilterSelect>
+
+            <FilterSelect value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              <option value="">All Statuses</option>
+              {EMPLOYEE_SELECTABLE_STATUSES.map((status) => (
+                <option key={status} value={status}>{LEAD_STATUS_DISPLAY[status].label}</option>
               ))}
             </FilterSelect>
 

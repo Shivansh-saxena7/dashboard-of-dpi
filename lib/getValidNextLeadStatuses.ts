@@ -30,7 +30,11 @@ export type LeadStatus =
 //     second NOT_INTERESTED — Section 4.4), owned by the Phase 4
 //     recycling engine, not a raw call result an employee logs
 //     themselves.
-const EMPLOYEE_SELECTABLE_STATUSES: LeadStatus[] = [
+// Exported (not just used internally below) so the Employee Lead
+// Board's status FILTER (components/LeadList.tsx) can reuse this
+// exact set instead of hand-duplicating it — same 5 outcomes either
+// way, one owner.
+export const EMPLOYEE_SELECTABLE_STATUSES: LeadStatus[] = [
   "CONNECTED",
   "NOT_CONNECTED",
   "SWITCHED_OFF",
