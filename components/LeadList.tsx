@@ -226,9 +226,18 @@ export default function LeadList({ employeeId }: LeadListProps) {
   }
 
   async function loadSlaBreachHistory() {
+    // Explicit employee_id filter — the view itself has none, and for
+    // a team_leader, lead_history's RLS scope is "my whole team," not
+    // "just me" (lead_history_team_leader_select), so without this the
+    // view silently widens to the team for a team_leader session and
+    // this "my own History" tab leaks teammates' ended rows in with
+    // blank name/project (lead_project_source's own, stricter
+    // ownership check then correctly refuses to reveal a lead the
+    // viewer never personally owned).
     const { data, error } = await supabase
       .from("employee_sla_breach_history")
       .select("lead_history_id, assigned_at, ended_reason, reassign_note, project, source, name, mobile_last4")
+      .eq("employee_id", employeeId)
       .order("assigned_at", { ascending: false });
 
     if (!error && data) {
