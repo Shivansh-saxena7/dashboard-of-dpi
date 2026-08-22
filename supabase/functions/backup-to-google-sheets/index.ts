@@ -170,7 +170,14 @@ serve(async () => {
       { data: notes, error: notesError },
       { data: visits, error: visitsError }
     ] = await Promise.all([
-      supabase.from("employees").select("id, name").eq("is_active", true),
+      // .order("id") (2026-08-22): buildTabNames' name-collision
+      // suffix depends on iteration order, and Postgres doesn't
+      // guarantee row order without an explicit ORDER BY -- an
+      // unordered fetch means which of two same-named employees gets
+      // the plain tab name could flip between runs. Not implicated in
+      // the 2026-08-22 incident itself (no name collision involved),
+      // but a real latent risk found while root-causing that one.
+      supabase.from("employees").select("id, name").eq("is_active", true).order("id"),
       supabase.from("leads").select("id, name, mobile, project, source, status, board_stage, current_owner_id, lead_type"),
       supabase.from("lead_history").select("lead_id, employee_id, last_activity_at").eq("is_active", true),
       supabase.from("lead_notes").select("lead_id, note, created_at").order("created_at", { ascending: false }),
@@ -292,12 +299,83 @@ serve(async () => {
     const writeJson = await writeRes.json();
     if (!writeRes.ok) throw new Error(`Writing snapshot failed: ${JSON.stringify(writeJson)}`);
 
+    // Root-caused 2026-08-22: values:batchUpdate's outer HTTP 200 only
+    // means the REQUEST was well-formed -- unlike spreadsheets.batchUpdate
+    // (used for addSheet above, genuinely atomic), values:batchUpdate is
+    // NOT documented as atomic across ranges. Google returns one
+    // UpdateValuesResponse per range, in request order, each carrying
+    // its own updatedRows -- so a single tab's write can come back
+    // short (or missing from the array entirely) while every other
+    // tab succeeds and the overall call still reports success. This is
+    // exactly how one employee's tab went silently blank while
+    // `success: true` was returned and nothing ever alerted anyone.
+    // Compare each tab's actual updatedRows against what we intended
+    // to write for it, rather than trusting the outer status alone.
+    const responses = writeJson.responses || [];
+    const discrepancies: { tab: string; expectedRows: number; actualRows: number }[] = [];
+    allTabNames.forEach((tab, i) => {
+      const expectedRows = 1 + (rowsByTab.get(tab) || []).length; // 1 = header row
+      const actualRows = responses[i]?.updatedRows ?? 0;
+      if (actualRows !== expectedRows) {
+        discrepancies.push({ tab, expectedRows, actualRows });
+      }
+    });
+
+    const runStatus = discrepancies.length > 0 ? "PARTIAL_FAILURE" : "SUCCESS";
+
+    // Best-effort logging + alerting -- a backup_run_log/notification
+    // failure here must never mask the real per-tab result being
+    // returned below (same defensive shape as the catch block's own
+    // notify-on-failure, and as Meta CAPI's nested try/catch blocks
+    // elsewhere in this codebase).
+    try {
+      const supabaseLog = createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+      );
+
+      await supabaseLog.from("backup_run_log").insert({
+        status: runStatus,
+        tabs_written: allTabNames.length,
+        tabs_created: missingTabs.length,
+        total_leads_backed_up: (leads || []).length,
+        discrepancies: discrepancies.length > 0 ? discrepancies : null
+      });
+
+      if (discrepancies.length > 0) {
+        const { data: activeAdmins } = await supabaseLog
+          .from("employees")
+          .select("id, name")
+          .eq("role", "admin")
+          .eq("is_active", true);
+
+        const tabList = discrepancies
+          .map((d) => `${d.tab} (expected ${d.expectedRows} rows, got ${d.actualRows})`)
+          .join(", ");
+
+        for (const admin of activeAdmins || []) {
+          await supabaseLog.from("notification").insert({
+            employee_id: admin.id,
+            employee_name: admin.name || "",
+            title: "Google Sheets backup — discrepancy found",
+            message: `Tonight's backup completed but ${discrepancies.length} tab(s) didn't get the rows they should have: ${tabList}`,
+            type: "BACKUP_PARTIAL_FAILURE",
+            is_read: false
+          });
+        }
+      }
+    } catch (logError: any) {
+      console.error("backup-to-google-sheets: run-log/discrepancy-notify failed:", logError.message);
+    }
+
     return new Response(
       JSON.stringify({
-        success: true,
+        success: discrepancies.length === 0,
+        status: runStatus,
         tabsWritten: allTabNames.length,
         tabsCreated: missingTabs.length,
-        totalLeadsBackedUp: (leads || []).length
+        totalLeadsBackedUp: (leads || []).length,
+        discrepancies
       }),
       { headers: { "Content-Type": "application/json" }, status: 200 }
     );
@@ -316,6 +394,12 @@ serve(async () => {
         Deno.env.get("SUPABASE_URL")!,
         Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
       );
+
+      await supabase.from("backup_run_log").insert({
+        status: "FAILED",
+        error: error.message
+      });
+
       const { data: activeAdmins } = await supabase
         .from("employees")
         .select("id, name")

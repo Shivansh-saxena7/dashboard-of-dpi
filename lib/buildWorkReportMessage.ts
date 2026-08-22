@@ -11,7 +11,11 @@ export interface WorkReportSummary {
   employeeName: string;
   date: Date;
   calls: number;
+  connected: number;
+  notConnected: number;
+  switchedOff: number;
   notInterested: number;
+  converted: number;
   followUps: number;
   visits: number;
   bookings: number;
@@ -27,7 +31,11 @@ export function buildWorkReportMessage(report: WorkReportSummary): string {
   return [
     `📊 Daily Report – ${report.employeeName} – ${dateLabel}`,
     `📞 Calls: ${report.calls}`,
+    `✅ Connected: ${report.connected}`,
+    `📵 Not Connected: ${report.notConnected}`,
+    `📴 Switched Off: ${report.switchedOff}`,
     `❌ Not Interested: ${report.notInterested}`,
+    `🤝 Converted: ${report.converted}`,
     `➡️ Moved to Follow-up: ${report.followUps}`,
     `🏠 Visits: ${report.visits}`,
     `🎉 Bookings: ${report.bookings}`

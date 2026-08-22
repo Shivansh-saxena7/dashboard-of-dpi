@@ -15,8 +15,16 @@ interface DetailEntry {
 interface WorkReportData {
   calls: number;
   callDetails: DetailEntry[];
+  connected: number;
+  connectedDetails: DetailEntry[];
+  notConnected: number;
+  notConnectedDetails: DetailEntry[];
+  switchedOff: number;
+  switchedOffDetails: DetailEntry[];
   notInterested: number;
   notInterestedDetails: DetailEntry[];
+  converted: number;
+  convertedDetails: DetailEntry[];
   followUps: number;
   followUpDetails: DetailEntry[];
   visits: number;
@@ -32,8 +40,25 @@ interface WorkReportViewProps {
   whatsappGroupLabel?: string | null;
 }
 
-type MetricKey = "calls" | "notInterested" | "followUps" | "visits" | "bookings";
+type MetricKey =
+  | "calls"
+  | "connected"
+  | "notConnected"
+  | "switchedOff"
+  | "notInterested"
+  | "converted"
+  | "followUps"
+  | "visits"
+  | "bookings";
 
+// 2026-08-22 gap audit: Connected/Not Connected/Switched Off/Converted
+// were already being logged to lead_activity_log (Point 4's
+// STATUS_UPDATE tracking) but never surfaced here — only Not
+// Interested was. All 5 EMPLOYEE_SELECTABLE_STATUSES (see
+// lib/getValidNextLeadStatuses.ts) are now covered, alongside the 3
+// board-stage moves that were already complete (Follow-up/Visit/
+// Booking). Ordered as call-outcomes first, then pipeline progression
+// — matches how an employee actually narrates their day.
 const METRICS: {
   key: MetricKey;
   detailKey: keyof WorkReportData;
@@ -41,7 +66,11 @@ const METRICS: {
   emoji: string;
 }[] = [
   { key: "calls", detailKey: "callDetails", label: "Calls", emoji: "📞" },
+  { key: "connected", detailKey: "connectedDetails", label: "Connected", emoji: "✅" },
+  { key: "notConnected", detailKey: "notConnectedDetails", label: "Not Connected", emoji: "📵" },
+  { key: "switchedOff", detailKey: "switchedOffDetails", label: "Switched Off", emoji: "📴" },
   { key: "notInterested", detailKey: "notInterestedDetails", label: "Not Interested", emoji: "❌" },
+  { key: "converted", detailKey: "convertedDetails", label: "Converted", emoji: "🤝" },
   { key: "followUps", detailKey: "followUpDetails", label: "Follow-up", emoji: "➡️" },
   { key: "visits", detailKey: "visitDetails", label: "Visits", emoji: "🏠" },
   { key: "bookings", detailKey: "bookingDetails", label: "Bookings", emoji: "🎉" }
@@ -91,7 +120,11 @@ export default function WorkReportView({ employeeId, employeeName, date, whatsap
       employeeName,
       date: new Date(`${date}T00:00:00`),
       calls: report.calls,
+      connected: report.connected,
+      notConnected: report.notConnected,
+      switchedOff: report.switchedOff,
       notInterested: report.notInterested,
+      converted: report.converted,
       followUps: report.followUps,
       visits: report.visits,
       bookings: report.bookings

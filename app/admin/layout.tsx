@@ -151,6 +151,11 @@ icon:"🔔"
   icon: "📝"
 },
 {
+name:"Backup Status",
+href:"/admin/backup-status",
+icon:"🛟"
+},
+{
 name:"Settings",
 href:"/admin/settings",
 icon:"⚙️"
