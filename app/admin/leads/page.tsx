@@ -9,6 +9,7 @@ import { supabase } from "@/lib/supabase";
 import AdminLeadCard from "@/components/AdminLeadCard";
 import ExportPreviewTable from "@/components/ExportPreviewTable";
 import ManualLeadEntryModal from "@/components/ManualLeadEntryModal";
+import ManualBookingEntryModal from "@/components/ManualBookingEntryModal";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES } from "@/lib/leadBoardStageDisplay";
 import { exportLeadsToExcel, exportLeadsToPDF } from "@/lib/exportLeadsReport";
@@ -68,6 +69,7 @@ export default function AdminLeadsPage() {
   const [adminEmployeeId, setAdminEmployeeId] = useState<string | null>(null);
   const [showPreviewTable, setShowPreviewTable] = useState(false);
   const [manualEntryOpen, setManualEntryOpen] = useState(false);
+  const [manualBookingOpen, setManualBookingOpen] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [employeeFilter, setEmployeeFilter] = useState("");
@@ -440,6 +442,13 @@ export default function AdminLeadsPage() {
               🎣 Add Manual Lead
             </button>
 
+            <button
+              onClick={() => setManualBookingOpen(true)}
+              className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition"
+            >
+              🏆 Manual Booking Entry
+            </button>
+
             <Link
               href="/admin/leads/import"
               className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition"
@@ -455,6 +464,14 @@ export default function AdminLeadsPage() {
         <ManualLeadEntryModal
           employees={employees}
           onClose={() => setManualEntryOpen(false)}
+          onCreated={loadLeads}
+        />
+      )}
+
+      {manualBookingOpen && (
+        <ManualBookingEntryModal
+          employees={employees}
+          onClose={() => setManualBookingOpen(false)}
           onCreated={loadLeads}
         />
       )}
