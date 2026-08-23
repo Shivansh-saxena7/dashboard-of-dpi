@@ -13,7 +13,8 @@ export async function POST(req: Request) {
     const {
       sla_office_start_time,
       sla_office_end_time,
-      sla_weekly_off_day
+      sla_weekly_off_day,
+      sla_first_contact_minutes
     } = await req.json();
 
     if (
@@ -47,12 +48,24 @@ export async function POST(req: Request) {
       );
     }
 
+    if (
+      typeof sla_first_contact_minutes !== "number" ||
+      !Number.isInteger(sla_first_contact_minutes) ||
+      sla_first_contact_minutes <= 0
+    ) {
+      return NextResponse.json(
+        { error: "sla_first_contact_minutes must be a whole number of minutes greater than 0" },
+        { status: 400 }
+      );
+    }
+
     const { error } = await supabaseAdmin
       .from("lead_engine_settings")
       .update({
         sla_office_start_time,
         sla_office_end_time,
-        sla_weekly_off_day
+        sla_weekly_off_day,
+        sla_first_contact_minutes
       })
       .eq("id", 1);
 

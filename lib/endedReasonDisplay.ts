@@ -9,7 +9,15 @@
 // history or someone else's — each caller adds its own subject
 // ("You" vs an employee's name) around this text.
 export const ENDED_REASON_TEXT: Record<string, string> = {
-  SLA_BREACHED: "No contact within 2 hours of assignment — reassigned to another team member.",
+  // Deliberately duration-neutral (2026-08-23) — this used to hardcode
+  // "2 hours", which would have silently gone wrong the moment Admin
+  // changes lead_engine_settings.sla_first_contact_minutes from the
+  // new Settings-page field. Wiring the live minutes value in here
+  // would mean plumbing a settings fetch into every consumer
+  // (SLABreachHistoryCard, AdminLeadHistoryModal) for one sentence —
+  // not worth it; "the SLA window" reads correctly regardless of what
+  // that window is currently configured to.
+  SLA_BREACHED: "No contact within the SLA window of assignment — reassigned to another team member.",
   RECYCLE_READY: "No further contact after the last update — reassigned to another team member.",
   JUNK: "Marked Junk and closed.",
   TEAM_LEADER_REASSIGNED: "Manually reassigned to another team member by the Team Leader."

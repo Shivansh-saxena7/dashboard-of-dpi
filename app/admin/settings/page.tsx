@@ -33,6 +33,7 @@ export default function SettingsPage() {
   const [slaOfficeStart, setSlaOfficeStart] = useState("");
   const [slaOfficeEnd, setSlaOfficeEnd] = useState("");
   const [slaWeeklyOffDay, setSlaWeeklyOffDay] = useState("1");
+  const [slaFirstContactMinutes, setSlaFirstContactMinutes] = useState("120");
   const [slaHoursLoading, setSlaHoursLoading] = useState(false);
 
   const WEEKDAY_OPTIONS = [
@@ -94,7 +95,7 @@ export default function SettingsPage() {
   async function loadSlaOfficeHours() {
     const { data } = await supabase
       .from("lead_engine_settings")
-      .select("sla_office_start_time, sla_office_end_time, sla_weekly_off_day")
+      .select("sla_office_start_time, sla_office_end_time, sla_weekly_off_day, sla_first_contact_minutes")
       .eq("id", 1)
       .single();
 
@@ -104,12 +105,19 @@ export default function SettingsPage() {
       setSlaOfficeStart((data.sla_office_start_time || "").slice(0, 5));
       setSlaOfficeEnd((data.sla_office_end_time || "").slice(0, 5));
       setSlaWeeklyOffDay(String(data.sla_weekly_off_day ?? 1));
+      setSlaFirstContactMinutes(String(data.sla_first_contact_minutes ?? 120));
     }
   }
 
   async function saveSlaOfficeHours() {
     if (!slaOfficeStart || !slaOfficeEnd) {
       toast.error("Enter both office start and end times.");
+      return;
+    }
+
+    const firstContactMinutes = parseInt(slaFirstContactMinutes, 10);
+    if (!Number.isInteger(firstContactMinutes) || firstContactMinutes <= 0) {
+      toast.error("First-contact SLA must be a whole number of minutes greater than 0.");
       return;
     }
 
@@ -124,7 +132,8 @@ export default function SettingsPage() {
         body: JSON.stringify({
           sla_office_start_time: slaOfficeStart,
           sla_office_end_time: slaOfficeEnd,
-          sla_weekly_off_day: parseInt(slaWeeklyOffDay, 10)
+          sla_weekly_off_day: parseInt(slaWeeklyOffDay, 10),
+          sla_first_contact_minutes: firstContactMinutes
         })
       });
 
@@ -866,10 +875,31 @@ mb-5
         </h2>
 
         <p className="text-sm text-slate-500 mb-4">
-          The 2-hour first-contact SLA timer only counts minutes inside this window, and skips the weekly off-day below entirely. A lead assigned outside it, or with time left over at closing, carries the remainder into the next working day.
+          The {slaFirstContactMinutes || "…"}-minute first-contact SLA timer only counts minutes inside this window, and skips the weekly off-day below entirely. A lead assigned outside it, or with time left over at closing, carries the remainder into the next working day. Changing the SLA minutes below only affects leads assigned from that point on — it never moves the deadline already set on a currently-active lead.
         </p>
 
         <div className="space-y-4">
+          <div>
+            <label className="text-xs font-semibold text-slate-500 mb-1 block">First-Contact SLA (minutes)</label>
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={slaFirstContactMinutes}
+              onChange={(e) => setSlaFirstContactMinutes(e.target.value)}
+              className="
+w-full
+h-12
+rounded-xl
+bg-slate-50
+border
+border-slate-200
+px-4
+outline-none
+"
+            />
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-semibold text-slate-500 mb-1 block">Office Start</label>
