@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Search, ChevronDown } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -101,6 +101,13 @@ export default function LeadList({ employeeId }: LeadListProps) {
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(new Date());
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+
+  // 2026-08-27 perf pass — one stable reference passed to every
+  // LeadCard, instead of a fresh inline arrow per card per render
+  // (`onOpen={() => setSelectedLeadId(lead.id)}`), which is what
+  // actually lets LeadCard's own React.memo wrap skip re-rendering
+  // cards unaffected by a search/filter/sort change.
+  const handleOpenLead = useCallback((id: string) => setSelectedLeadId(id), []);
 
   const [activeTab, setActiveTab] = useState<ActiveTab>("LEADS");
   const [searchQuery, setSearchQuery] = useState("");
@@ -606,7 +613,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
               key={lead.id}
               now={now}
               index={index}
-              onOpen={() => setSelectedLeadId(lead.id)}
+              onOpen={handleOpenLead}
               lead={{
                 id: lead.id,
                 leadHistoryId: lead.lead_history[0]?.id,

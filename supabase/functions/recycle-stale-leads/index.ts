@@ -160,6 +160,136 @@ serve(async () => {
 
     const shiftStartedEmployeeIds = new Set((todaysAttendance || []).map((row) => row.employee_id));
 
+    // Employee Leave/Holiday gap (2026-08-23) — fetched once per sweep
+    // (not per-lead) into a Set, same "fetch once, look up in memory"
+    // shape as projectRules/projectExclusions above. Reuses `today`
+    // (already computed for the attendance check just above — kept as
+    // one shared value rather than a second, separately-computed
+    // "today" string). Open-ended rows (end_date IS NULL) count as
+    // currently-on-leave, per employee_leave_periods' own design
+    // (Point C) — the `.or(...)` covers both "still open" and "end
+    // date hasn't passed yet".
+    const { data: activeLeaveRows, error: leaveError } = await supabase
+      .from("employee_leave_periods")
+      .select("id, employee_id, start_date, end_date, open_ended_nudge_sent_at")
+      .lte("start_date", today)
+      .or(`end_date.is.null,end_date.gte.${today}`);
+
+    if (leaveError) {
+      return new Response(
+        JSON.stringify({ success: false, step: "FETCH_ACTIVE_LEAVE", error: leaveError.message }),
+        { headers: { "Content-Type": "application/json" }, status: 500 }
+      );
+    }
+
+    const onLeaveEmployeeIds = new Set((activeLeaveRows || []).map((r) => r.employee_id));
+
+    // Piece 5 (2026-08-23) — two admin nudges. Both are best-effort: a
+    // failure here must never block the real recycling work below, so
+    // every step is wrapped and only logged, never returned as a
+    // top-level error.
+    try {
+      const { data: admins } = await supabase
+        .from("employees")
+        .select("id, name")
+        .eq("role", "admin")
+        .eq("is_active", true);
+
+      // Nudge 1: an open-ended leave period that's gone 14+ days
+      // without Admin setting a real end date. De-duped on the row
+      // itself (open_ended_nudge_sent_at) — fires once per open
+      // period, not once per sweep.
+      const fourteenDaysAgo = new Date();
+      fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+      const fourteenDaysAgoStr = fourteenDaysAgo.toISOString().slice(0, 10);
+
+      // activeLeaveRows also contains currently-active FIXED-date
+      // leaves (end_date in the future, per the .or() above) — those
+      // already have a real return date and must never get this
+      // "needs a return date" nudge, hence the explicit end_date ===
+      // null check here, not just open_ended_nudge_sent_at.
+      const staleOpenEndedRows = (activeLeaveRows || []).filter(
+        (r) => r.end_date === null && !r.open_ended_nudge_sent_at && r.start_date <= fourteenDaysAgoStr
+      );
+
+      for (const row of staleOpenEndedRows) {
+        const { data: emp } = await supabase.from("employees").select("name").eq("id", row.employee_id).single();
+        const daysSinceStart = Math.floor((Date.now() - new Date(row.start_date).getTime()) / (1000 * 60 * 60 * 24));
+
+        for (const admin of admins || []) {
+          await supabase.from("notification").insert({
+            employee_id: admin.id,
+            employee_name: admin.name || "",
+            title: "Open-ended leave needs a return date",
+            message: `${emp?.name || "An employee"} has been on open-ended leave for ${daysSinceStart} days — confirm or update their return date on the Leave page.`,
+            type: "LEAVE_OPEN_ENDED_NUDGE",
+            is_read: false
+          });
+        }
+
+        await supabase
+          .from("employee_leave_periods")
+          .update({ open_ended_nudge_sent_at: new Date().toISOString() })
+          .eq("id", row.id);
+      }
+
+      // Nudge 2: an active employee (not already marked on leave) with
+      // zero attendance rows over the last 3 calendar days — might be
+      // unmarked leave, might be genuine absence, Admin decides which.
+      // De-duped via attendance_gap_nudge_log (no existing row an
+      // absence can attach a sent-flag to, unlike Nudge 1 above) — one
+      // nudge per employee per rolling 3-day window, not one per sweep.
+      const threeDaysAgo = new Date();
+      threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+      const threeDaysAgoStr = threeDaysAgo.toISOString().slice(0, 10);
+
+      const { data: recentAttendance } = await supabase
+        .from("attendance")
+        .select("employee_id")
+        .gte("date", threeDaysAgoStr);
+      const recentlyPresentEmployeeIds = new Set((recentAttendance || []).map((r) => r.employee_id));
+
+      const { data: recentNudges } = await supabase
+        .from("attendance_gap_nudge_log")
+        .select("employee_id")
+        .gte("notified_at", threeDaysAgo.toISOString());
+      const recentlyNudgedEmployeeIds = new Set((recentNudges || []).map((r) => r.employee_id));
+
+      // role IN ('employee', 'team_leader') — the two roles that
+      // actually do field/lead work and are expected to Start Shift.
+      // Caught via a live preview before this ever ran for real:
+      // without this filter, admin and sales_coordinator accounts
+      // (who never clock in — pure oversight roles) got flagged as
+      // "hasn't started a shift," which is meaningless noise, not a
+      // genuine attendance gap.
+      const { data: allActiveRoster } = await supabase
+        .from("employees")
+        .select("id, name")
+        .eq("is_active", true)
+        .in("role", ["employee", "team_leader"]);
+
+      for (const emp of allActiveRoster || []) {
+        if (recentlyPresentEmployeeIds.has(emp.id)) continue;
+        if (onLeaveEmployeeIds.has(emp.id)) continue;
+        if (recentlyNudgedEmployeeIds.has(emp.id)) continue;
+
+        for (const admin of admins || []) {
+          await supabase.from("notification").insert({
+            employee_id: admin.id,
+            employee_name: admin.name || "",
+            title: "No attendance in 3+ days",
+            message: `${emp.name || "An employee"} hasn't started a shift in at least 3 days — check if they need to be marked On Leave.`,
+            type: "ATTENDANCE_GAP_NUDGE",
+            is_read: false
+          });
+        }
+
+        await supabase.from("attendance_gap_nudge_log").insert({ employee_id: emp.id });
+      }
+    } catch (nudgeErr: any) {
+      console.error("recycle-stale-leads: leave-nudge step failed (non-fatal):", nudgeErr.message);
+    }
+
     const { data: allActiveEmployees, error: employeesError } = await supabase
       .from("employees")
       .select("id, team_id")
@@ -469,7 +599,16 @@ serve(async () => {
           assigned_at: activeHistory.assigned_at
         },
         activeHistory.outcome_at,
-        notInterestedCount || 0
+        notInterestedCount || 0,
+        // Employee Leave/Holiday gap (2026-08-23) — when true,
+        // calculateSLAStatus short-circuits the Follow-up inactivity
+        // branch to FOLLOWUP_WITHIN_WINDOW regardless of
+        // daysSinceActivity, which also means the day-3 warning
+        // notification below never fires for it (slaStatus simply
+        // never becomes FOLLOWUP_INACTIVITY_WARNING) — one flag closes
+        // both the recycle-prevention and the warning-suppression,
+        // no separate skip needed here.
+        onLeaveEmployeeIds.has(lead.current_owner_id)
       );
 
       if (slaStatus === "JUNK_ELIGIBLE") {

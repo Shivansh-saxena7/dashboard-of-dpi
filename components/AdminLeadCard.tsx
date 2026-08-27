@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { History } from "lucide-react";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
@@ -58,6 +58,13 @@ interface AdminLeadCardProps {
   // plain read-only text instead of merely no-op'ing onReserveTeam.
   // Also hides the JUNK-recovery Reassign control (Admin-only power).
   readOnly?: boolean;
+  // Employee Leave/Holiday gap (2026-08-23, Point A) — resolved by the
+  // PARENT page from employee_leave_periods (one query per page load,
+  // not per card) and passed in as a plain boolean, same shape as
+  // every other derived flag this card receives rather than fetching.
+  // Optional/defaults false so every other existing caller of this
+  // card is unaffected.
+  isOwnerOnLeave?: boolean;
 }
 
 // Read-only — Admin never logs updates or moves a lead through the
@@ -96,14 +103,22 @@ interface AdminLeadCardProps {
 // drawer resolve against the viewport, not this card's transformed
 // (animated) box — that was the cause of the drawer sometimes
 // rendering as if it were a small centered card.
-export default function AdminLeadCard({
+// Wrapped in memo (2026-08-27 perf pass) — skips re-rendering a card
+// whose own props are unchanged when an unrelated parent state change
+// (search/filter/sort) triggers a re-render. Effective as long as the
+// parent passes reference-stable handlers — app/admin/leads/page.tsx
+// already does (named functions, not per-card inline arrows);
+// app/coordinator/page.tsx's onReserveTeam no-op was switched to a
+// stable reference for the same reason.
+function AdminLeadCard({
   lead,
   teams,
   onReserveTeam,
   index = 0,
   employees = [],
   onUnjunkReassign,
-  readOnly = false
+  readOnly = false,
+  isOwnerOnLeave = false
 }: AdminLeadCardProps) {
 
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -169,8 +184,16 @@ export default function AdminLeadCard({
     ? (Date.now() - new Date(lead.lastActivityAt).getTime()) / (1000 * 60 * 60 * 24)
     : null;
   const isBeyondLeadsStage = lead.leadType !== "DATA" && lead.boardStage !== "LEADS";
-  const isStale = !isTerminal && !isPaused && isBeyondLeadsStage && daysSinceActivity !== null && daysSinceActivity >= FOLLOWUP_INACTIVITY_WARNING_DAYS;
+  // Employee Leave/Holiday gap (2026-08-23, Point A) — mirrors
+  // calculateSLAStatus.ts's own isOwnerOnLeave precedence exactly: on
+  // leave overrides the inactivity evaluation entirely, not just caps
+  // the badge. Without the !isOwnerOnLeave guard here too, this card
+  // would keep showing "Needs follow-up"/"Going stale" even though
+  // the backend has already stopped counting toward recycling for
+  // it — actively misleading, not just a missing badge.
+  const isStale = !isTerminal && !isPaused && !isOwnerOnLeave && isBeyondLeadsStage && daysSinceActivity !== null && daysSinceActivity >= FOLLOWUP_INACTIVITY_WARNING_DAYS;
   const isGoingStale = isStale && daysSinceActivity !== null && daysSinceActivity >= FOLLOWUP_INACTIVITY_RECYCLE_DAYS;
+  const showOnLeaveBadge = isOwnerOnLeave && !isTerminal && isBeyondLeadsStage;
 
   return (
     <motion.div
@@ -275,6 +298,19 @@ export default function AdminLeadCard({
             }`}
           >
             {isGoingStale ? "⚠️ Going stale" : "⏳ Needs follow-up"}
+          </span>
+        )}
+
+        {/* Employee Leave/Holiday gap (2026-08-23, Point A) — shown
+            instead of (never alongside) isStale/isGoingStale above,
+            since showOnLeaveBadge and isStale can't both be true
+            (isStale is gated on !isOwnerOnLeave). Compatible with
+            isPaused though — a Snooze/Visit-lock pause and an owner
+            being on leave are independent, genuinely-different reasons
+            a lead isn't moving, so both can legitimately show together. */}
+        {showOnLeaveBadge && (
+          <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-teal-50 text-teal-700">
+            🌴 Timer Paused — Owner on Leave
           </span>
         )}
 
@@ -415,3 +451,5 @@ export default function AdminLeadCard({
     </motion.div>
   );
 }
+
+export default memo(AdminLeadCard);

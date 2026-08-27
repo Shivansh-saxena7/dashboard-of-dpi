@@ -26,6 +26,14 @@ type SummaryGroupBy = "EMPLOYEE" | "TEAM";
 
 const ALL_STATUSES = Object.keys(LEAD_STATUS_DISPLAY);
 
+// Module-level, not inline in JSX (2026-08-27 perf pass) — Coordinator
+// view is read-only, this handler is never actually called, but a
+// fresh `() => {}` per render/per card would still give AdminLeadCard's
+// React.memo wrap a new prop reference every time, defeating it for no
+// reason. One stable reference, created once, for a no-op that never
+// needs to differ.
+const noopReserveTeam = () => {};
+
 interface SiteVisitRow {
   id: string;
   event_type: string;
@@ -149,6 +157,11 @@ export default function CoordinatorDashboard() {
   const [viewerEmployeeId, setViewerEmployeeId] = useState<string | null>(null);
 
   const [leads, setLeads] = useState<any[]>([]);
+  // Employee Leave/Holiday gap (2026-08-23, Point A) — same lookup
+  // Admin's Leads page uses, so this exact card reads identically for
+  // both readers rather than one showing a stale/misleading badge the
+  // other doesn't.
+  const [onLeaveEmployeeIds, setOnLeaveEmployeeIds] = useState<Set<string>>(new Set());
   const [employees, setEmployees] = useState<{ id: string; name: string; is_active: boolean; team_id: string | null }[]>([]);
   const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
   const [siteVisits, setSiteVisits] = useState<SiteVisitRow[]>([]);
@@ -263,8 +276,24 @@ export default function CoordinatorDashboard() {
 
   async function loadAll() {
     setLoading(true);
-    await Promise.all([loadViewerRole(), loadLeads(), loadEmployees(), loadTeams(), loadSiteVisits(), loadSnoozeLog(), loadRemarks()]);
+    await Promise.all([loadViewerRole(), loadLeads(), loadEmployees(), loadTeams(), loadSiteVisits(), loadSnoozeLog(), loadRemarks(), loadOnLeaveEmployees()]);
     setLoading(false);
+  }
+
+  async function loadOnLeaveEmployees() {
+    const today = new Date().toISOString().slice(0, 10);
+
+    const { data, error } = await supabase
+      .from("employee_leave_periods")
+      .select("employee_id")
+      .lte("start_date", today)
+      .or(`end_date.is.null,end_date.gte.${today}`);
+
+    if (error) {
+      console.error("coordinator: loadOnLeaveEmployees failed:", error.message);
+      return;
+    }
+    if (data) setOnLeaveEmployeeIds(new Set(data.map((r) => r.employee_id)));
   }
 
   async function loadViewerRole() {
@@ -1260,8 +1289,9 @@ export default function CoordinatorDashboard() {
                   key={lead.id}
                   index={index}
                   teams={[]}
-                  onReserveTeam={() => {}}
+                  onReserveTeam={noopReserveTeam}
                   readOnly
+                  isOwnerOnLeave={lead.current_owner_id ? onLeaveEmployeeIds.has(lead.current_owner_id) : false}
                   lead={{
                     id: lead.id,
                     name: lead.name,

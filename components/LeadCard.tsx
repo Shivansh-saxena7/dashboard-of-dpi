@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { motion } from "framer-motion";
 import { Phone, Timer, Repeat, MessageCircle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -37,7 +38,15 @@ interface LeadCardLead {
 interface LeadCardProps {
   lead: LeadCardLead;
   now: Date;
-  onOpen: () => void;
+  // Takes the lead id (2026-08-27 perf pass) rather than a bare
+  // () => void — lets the parent (LeadList.tsx) pass ONE stable
+  // useCallback-wrapped handler to every card instead of a fresh
+  // inline arrow per card per render, which is what actually makes
+  // the React.memo wrap below effective. A per-card inline arrow
+  // (`onOpen={() => setSelectedLeadId(lead.id)}`) would give memo a
+  // new prop reference every render regardless of whether this card's
+  // own data changed, silently defeating it.
+  onOpen: (id: string) => void;
   index?: number;
 }
 
@@ -66,7 +75,16 @@ function formatCountdown(msRemaining: number): string {
 // list of many cards, so a repeating background glow would read as
 // clutter rather than premium. Touch targets sized for the ~95%
 // mobile usage this screen gets.
-export default function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps) {
+// Wrapped in memo (2026-08-27 perf pass) — LeadList.tsx's shared
+// 30-second countdown tick (setNow) intentionally re-renders every
+// visible card (the countdown text genuinely needs to refresh), but
+// any OTHER LeadList state change (search, filter, sort, tab switch)
+// used to re-render every card too, even ones whose own `lead` data
+// hadn't changed. memo skips those. Requires the parent to pass
+// reference-stable props — see onOpen's own comment above; `lead`
+// itself is already a stable object reference between renders unless
+// its actual data changed, straight from the Supabase response.
+function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps) {
 
   const slaStatus = calculateSLAStatus(
     {
@@ -154,7 +172,7 @@ export default function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps
       transition={{ duration: 0.5, delay: Math.min(index, 8) * 0.05 }}
       whileHover={{ y: -3 }}
       whileTap={{ scale: 0.99 }}
-      onClick={onOpen}
+      onClick={() => onOpen(lead.id)}
       className="rounded-[22px] bg-white border border-slate-100 shadow-[0_4px_20px_rgba(15,23,42,0.06)] hover:shadow-[0_10px_30px_rgba(15,23,42,0.1)] transition-shadow p-4 sm:p-5 cursor-pointer"
     >
       <div className="flex items-start gap-3">
@@ -277,3 +295,5 @@ export default function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps
     </motion.div>
   );
 }
+
+export default memo(LeadCard);

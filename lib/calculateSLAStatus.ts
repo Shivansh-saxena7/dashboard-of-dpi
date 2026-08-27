@@ -72,7 +72,17 @@ interface LeadForSLA {
 export function calculateSLAStatus(
   lead: LeadForSLA,
   lastOutcomeAt: string | null,
-  notInterestedCount: number = 0
+  notInterestedCount: number = 0,
+  // Employee Leave/Holiday gap (2026-08-23) — an employee on approved
+  // leave shouldn't have their Follow-up leads silently recycled just
+  // because they're not at work. Deliberately a plain boolean the
+  // CALLER resolves (who's on leave changes constantly, this function
+  // stays a pure "no DB access" calculation like every other
+  // lib/calculate*.ts file) rather than this function knowing
+  // anything about employee_leave_periods itself. Optional, defaults
+  // to false — every pre-existing caller (LeadCard.tsx) that doesn't
+  // pass it behaves exactly as before.
+  isOwnerOnLeave: boolean = false
 ): SLAStatus {
 
   const now = new Date();
@@ -183,6 +193,17 @@ export function calculateSLAStatus(
     new Date(lead.last_activity_at as string).getTime() > new Date(lead.assigned_at as string).getTime();
 
   if ((lead.board_stage && lead.board_stage !== "LEADS") || lead.status === "CONNECTED" || hasGenuineActivitySinceAssignment) {
+
+    // On approved leave — the inactivity clock (warning at 3 days,
+    // recycle-ready at 6) is deliberately not even evaluated below,
+    // not just capped: it doesn't matter how many days daysSinceActivity
+    // would otherwise be, none of it counts while the owner is away.
+    // The same override guards PAUSED above for the identical reason
+    // (a planned absence is not neglect) — this is that same principle
+    // applied per-employee instead of per-lead.
+    if (isOwnerOnLeave) {
+      return "FOLLOWUP_WITHIN_WINDOW";
+    }
 
     const lastActivity = lead.last_activity_at ? new Date(lead.last_activity_at) : null;
 

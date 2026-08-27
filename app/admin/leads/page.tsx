@@ -66,6 +66,12 @@ export default function AdminLeadsPage() {
   // since the whole point is picking someone who doesn't own this
   // lead yet).
   const [employees, setEmployees] = useState<{ id: string; name: string; is_active: boolean }[]>([]);
+  // Employee Leave/Holiday gap (2026-08-23, Point A) — who's currently
+  // on leave, fetched once per page load (not per card) and looked up
+  // by current_owner_id when rendering each AdminLeadCard below. Same
+  // "still on leave" definition recycle-stale-leads uses:
+  // start_date <= today AND (end_date IS NULL OR end_date >= today).
+  const [onLeaveEmployeeIds, setOnLeaveEmployeeIds] = useState<Set<string>>(new Set());
   const [adminEmployeeId, setAdminEmployeeId] = useState<string | null>(null);
   const [showPreviewTable, setShowPreviewTable] = useState(false);
   const [manualEntryOpen, setManualEntryOpen] = useState(false);
@@ -89,7 +95,22 @@ export default function AdminLeadsPage() {
     loadTeams();
     loadEmployees();
     loadAdminEmployeeId();
+    loadOnLeaveEmployees();
   }, []);
+
+  async function loadOnLeaveEmployees() {
+    const today = new Date().toISOString().slice(0, 10);
+
+    const { data } = await supabase
+      .from("employee_leave_periods")
+      .select("employee_id")
+      .lte("start_date", today)
+      .or(`end_date.is.null,end_date.gte.${today}`);
+
+    if (data) {
+      setOnLeaveEmployeeIds(new Set(data.map((r) => r.employee_id)));
+    }
+  }
 
   // Needed as reserved_by_employee_id when logging a team reservation
   // — this page's own layout only tracks the admin's display name
@@ -635,6 +656,7 @@ export default function AdminLeadsPage() {
               employees={employees}
               onReserveTeam={handleReserveTeam}
               onUnjunkReassign={handleUnjunkReassign}
+              isOwnerOnLeave={lead.current_owner_id ? onLeaveEmployeeIds.has(lead.current_owner_id) : false}
               lead={{
                 id: lead.id,
                 name: lead.name,

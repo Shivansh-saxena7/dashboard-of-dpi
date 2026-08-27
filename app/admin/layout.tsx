@@ -156,6 +156,11 @@ href:"/admin/backup-status",
 icon:"🛟"
 },
 {
+name:"Leave",
+href:"/admin/leave",
+icon:"🌴"
+},
+{
 name:"Settings",
 href:"/admin/settings",
 icon:"⚙️"
