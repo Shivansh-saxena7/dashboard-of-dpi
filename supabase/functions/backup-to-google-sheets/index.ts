@@ -69,6 +69,32 @@ async function fetchWithRetry(url: string, init: RequestInit, maxAttempts = 3): 
   throw lastError;
 }
 
+// Root-caused 2026-08-27: the nightly run failed when all 5 of the
+// initial Supabase reads below hit PGRST303 ("JWT issued at future")
+// simultaneously -- a transient clock-skew mismatch between Supabase's
+// Auth layer and the PostgREST instance serving this request (a known
+// class of Supabase-infra issue -- this function's service_role key is
+// static, read from a secret, never a JWT we mint or timestamp
+// ourselves, so this isn't something our own code causes). fetchWithRetry
+// above already covered this function's Google Sheets/OAuth half, but
+// never this Supabase-read half -- that gap is exactly what let this
+// run fail outright instead of quietly succeeding on a retry.
+//
+// Unconditional retry-on-any-error (no status-code distinction like
+// fetchWithRetry's 4xx/5xx split above) is deliberately safe here: all
+// 5 calls this wraps are plain reads with no side effects, so retrying
+// blindly can never double-apply anything, unlike the Sheets writes
+// further down which do need that distinction.
+async function withRetry(fn: () => any, maxAttempts = 3) {
+  let last: { data: any; error: any } = { data: null, error: null };
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    last = await fn();
+    if (!last.error) return last;
+    if (attempt < maxAttempts) await sleep(1000 * attempt); // 1s, 2s backoff
+  }
+  return last;
+}
+
 function base64url(input: string | ArrayBuffer): string {
   const bytes = typeof input === "string" ? new TextEncoder().encode(input) : new Uint8Array(input);
   let binary = "";
@@ -177,11 +203,13 @@ serve(async () => {
       // the plain tab name could flip between runs. Not implicated in
       // the 2026-08-22 incident itself (no name collision involved),
       // but a real latent risk found while root-causing that one.
-      supabase.from("employees").select("id, name").eq("is_active", true).order("id"),
-      supabase.from("leads").select("id, name, mobile, project, source, status, board_stage, current_owner_id, lead_type"),
-      supabase.from("lead_history").select("lead_id, employee_id, last_activity_at").eq("is_active", true),
-      supabase.from("lead_notes").select("lead_id, note, created_at").order("created_at", { ascending: false }),
-      supabase.from("site_visits").select("lead_id, verified_at, denied_at")
+      // withRetry (2026-08-27): all 5 of these wrapped after the
+      // PGRST303 clock-skew incident -- see withRetry's own comment.
+      withRetry(() => supabase.from("employees").select("id, name").eq("is_active", true).order("id")),
+      withRetry(() => supabase.from("leads").select("id, name, mobile, project, source, status, board_stage, current_owner_id, lead_type")),
+      withRetry(() => supabase.from("lead_history").select("lead_id, employee_id, last_activity_at").eq("is_active", true)),
+      withRetry(() => supabase.from("lead_notes").select("lead_id, note, created_at").order("created_at", { ascending: false })),
+      withRetry(() => supabase.from("site_visits").select("lead_id, verified_at, denied_at"))
     ]);
 
     if (employeesError || leadsError || historyError || notesError || visitsError) {
