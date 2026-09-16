@@ -7,9 +7,23 @@ import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
-import { FOLLOWUP_INACTIVITY_WARNING_DAYS, FOLLOWUP_INACTIVITY_RECYCLE_DAYS } from "@/lib/calculateSLAStatus";
+import { FOLLOWUP_INACTIVITY_WARNING_DAYS, FOLLOWUP_INACTIVITY_RECYCLE_DAYS, getRecycleCutoff, RecycleCutoffReason } from "@/lib/calculateSLAStatus";
 import { isLeadTerminal } from "@/lib/isLeadTerminal";
 import AdminLeadHistoryModal from "./AdminLeadHistoryModal";
+
+const RECYCLE_REASON_LABEL: Record<RecycleCutoffReason, string> = {
+  FOLLOWUP_INACTIVITY: "Follow-up inactivity",
+  NOT_CONNECTED_COOLDOWN: "Not Connected cooldown",
+  SWITCHED_OFF_COOLDOWN: "Switched Off cooldown",
+  NOT_INTERESTED_COOLDOWN: "Not Interested cooldown"
+};
+
+function formatDaysHoursLeft(msRemaining: number): string {
+  const totalHours = Math.max(0, Math.floor(msRemaining / (1000 * 60 * 60)));
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  return days > 0 ? `${days}d ${hours}h left` : `${hours}h left`;
+}
 
 interface AdminLeadCardLead {
   id: string;
@@ -32,6 +46,11 @@ interface AdminLeadCardLead {
   pausedUntil: string | null;
   pauseReason: string | null;
   lastActivityAt: string | null;
+  // Stale/Recycle-Warning filter (2026-09-16) — optional so every
+  // pre-existing caller not yet updated (Coordinator page) still works
+  // unchanged; undefined just means the cooldown-based reason (Leads-
+  // stage NOT_CONNECTED/SWITCHED_OFF/NOT_INTERESTED) can't be shown.
+  outcomeAt?: string | null;
 }
 
 interface AdminLeadCardProps {
@@ -195,6 +214,32 @@ function AdminLeadCard({
   const isGoingStale = isStale && daysSinceActivity !== null && daysSinceActivity >= FOLLOWUP_INACTIVITY_RECYCLE_DAYS;
   const showOnLeaveBadge = isOwnerOnLeave && !isTerminal && isBeyondLeadsStage;
 
+  // Stale/Recycle-Warning filter (2026-09-16) — additive alongside
+  // isStale/isGoingStale above, which stay untouched (still what
+  // decides whether THAT badge shows at all). Reuses getRecycleCutoff
+  // (same helper the employee side uses) rather than hand-duplicating
+  // the cooldown math a third time — also covers the Leads-stage
+  // NOT_CONNECTED/SWITCHED_OFF/NOT_INTERESTED cooldown case isStale
+  // never did (it's gated on isBeyondLeadsStage only).
+  const recycleCutoff =
+    !isTerminal && !isPaused && !isOwnerOnLeave
+      ? getRecycleCutoff(
+          {
+            status: lead.status,
+            sla_deadline: null,
+            recycle_count: lead.recycleCount,
+            board_stage: lead.boardStage,
+            paused_until: lead.pausedUntil,
+            last_activity_at: lead.lastActivityAt,
+            pause_reason: lead.pauseReason,
+            assigned_at: lead.assignedAt,
+            lead_type: lead.leadType
+          },
+          lead.outcomeAt ?? null
+        )
+      : null;
+  const recycleCutoffMsRemaining = recycleCutoff ? recycleCutoff.cutoffAt.getTime() - Date.now() : 0;
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 16 }}
@@ -293,11 +338,33 @@ function AdminLeadCard({
 
         {isStale && (
           <span
+            title={recycleCutoff ? `Exact time: ${recycleCutoff.cutoffAt.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}` : undefined}
             className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
               isGoingStale ? "bg-red-100 text-red-700 animate-pulse" : "bg-amber-50 text-amber-600"
             }`}
           >
-            {isGoingStale ? "⚠️ Going stale" : "⏳ Needs follow-up"}
+            {isGoingStale
+              ? `⚠️ Recycling now — ${recycleCutoff ? RECYCLE_REASON_LABEL[recycleCutoff.reason] : "Going stale"}`
+              : recycleCutoff
+              ? `⏳ ${formatDaysHoursLeft(recycleCutoffMsRemaining)} — ${RECYCLE_REASON_LABEL[recycleCutoff.reason]}`
+              : "⏳ Needs follow-up"}
+          </span>
+        )}
+
+        {/* Stale/Recycle-Warning filter (2026-09-16) — the Leads-stage
+            NOT_CONNECTED/SWITCHED_OFF/NOT_INTERESTED cooldown case
+            isStale above never covers (it's gated on isBeyondLeadsStage
+            only). Independent condition, own badge slot. */}
+        {!isStale && recycleCutoff && (
+          <span
+            title={`Exact time: ${recycleCutoff.cutoffAt.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`}
+            className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
+              recycleCutoffMsRemaining <= 0 ? "bg-red-100 text-red-700 animate-pulse" : "bg-slate-100 text-slate-500"
+            }`}
+          >
+            {recycleCutoffMsRemaining <= 0
+              ? `⚠️ Recycling now — ${RECYCLE_REASON_LABEL[recycleCutoff.reason]}`
+              : `⏳ ${formatDaysHoursLeft(recycleCutoffMsRemaining)} — ${RECYCLE_REASON_LABEL[recycleCutoff.reason]}`}
           </span>
         )}
 

@@ -8,6 +8,7 @@ import LeadCard from "./LeadCard";
 import LeadDetailModal from "./LeadDetailModal";
 import SLABreachHistoryCard from "./SLABreachHistoryCard";
 import { LeadStatus, EMPLOYEE_SELECTABLE_STATUSES } from "@/lib/getValidNextLeadStatuses";
+import { getRecycleCutoff } from "@/lib/calculateSLAStatus";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
 
@@ -115,6 +116,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
   const [sourceFilter, setSourceFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [dateRangeFilter, setDateRangeFilter] = useState<DateRangeOption>("ALL");
+  const [recyclingSoonFilter, setRecyclingSoonFilter] = useState(false);
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("NEWEST");
@@ -384,6 +386,25 @@ export default function LeadList({ employeeId }: LeadListProps) {
       result = result.filter((lead) => lead.status === statusFilter);
     }
 
+    if (recyclingSoonFilter) {
+      result = result.filter((lead) => {
+        const h = lead.lead_history[0];
+        return getRecycleCutoff(
+          {
+            status: lead.status,
+            sla_deadline: lead.sla_deadline,
+            recycle_count: lead.recycle_count,
+            board_stage: lead.board_stage,
+            paused_until: h?.paused_until ?? null,
+            last_activity_at: h?.last_activity_at ?? null,
+            pause_reason: h?.pause_reason ?? null,
+            assigned_at: h?.assigned_at ?? null
+          },
+          h?.outcome_at ?? null
+        ) !== null;
+      });
+    }
+
     // This Week / This Month are simple rolling windows (last 7 / 30
     // days from now), not calendar-week/month boundaries — a
     // deliberate simplification, not a calendar-aware filter.
@@ -431,7 +452,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
 
     return result;
 
-  }, [leads, activeTab, searchQuery, projectFilter, sourceFilter, statusFilter, dateRangeFilter, customStart, customEnd, sortBy]);
+  }, [leads, activeTab, searchQuery, projectFilter, sourceFilter, statusFilter, recyclingSoonFilter, dateRangeFilter, customStart, customEnd, sortBy]);
 
   if (loading) {
     return (
@@ -541,6 +562,18 @@ export default function LeadList({ employeeId }: LeadListProps) {
                 <option key={status} value={status}>{LEAD_STATUS_DISPLAY[status].label}</option>
               ))}
             </FilterSelect>
+
+            <button
+              type="button"
+              onClick={() => setRecyclingSoonFilter((v) => !v)}
+              className={`h-11 sm:h-10 rounded-xl px-3 text-xs font-semibold border transition ${
+                recyclingSoonFilter
+                  ? "bg-amber-100 border-amber-300 text-amber-700"
+                  : "bg-white border-slate-200 text-slate-600"
+              }`}
+            >
+              ⚠️ Recycling Soon
+            </button>
 
             <FilterSelect
               value={dateRangeFilter}

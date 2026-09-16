@@ -4,7 +4,7 @@ import { memo } from "react";
 import { motion } from "framer-motion";
 import { Phone, Timer, Repeat, MessageCircle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { calculateSLAStatus } from "@/lib/calculateSLAStatus";
+import { calculateSLAStatus, getRecycleCutoff, RecycleCutoffReason } from "@/lib/calculateSLAStatus";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
@@ -49,6 +49,24 @@ interface LeadCardProps {
   onOpen: (id: string) => void;
   index?: number;
 }
+
+// Stale/Recycle-Warning filter (2026-09-16) — days+hours, distinct
+// from formatCountdown below (hours+minutes, sized for the 2h SLA
+// timer only — a multi-day cooldown/inactivity window needs its own
+// granularity).
+function formatDaysHoursLeft(msRemaining: number): string {
+  const totalHours = Math.max(0, Math.floor(msRemaining / (1000 * 60 * 60)));
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  return days > 0 ? `${days}d ${hours}h left` : `${hours}h left`;
+}
+
+const RECYCLE_REASON_LABEL: Record<RecycleCutoffReason, string> = {
+  FOLLOWUP_INACTIVITY: "Follow-up inactivity",
+  NOT_CONNECTED_COOLDOWN: "Not Connected cooldown",
+  SWITCHED_OFF_COOLDOWN: "Switched Off cooldown",
+  NOT_INTERESTED_COOLDOWN: "Not Interested cooldown"
+};
 
 function formatCountdown(msRemaining: number): string {
   const totalMinutes = Math.max(0, Math.floor(msRemaining / 60000));
@@ -104,6 +122,22 @@ function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps) {
     0
   );
 
+  // Stale/Recycle-Warning filter (2026-09-16) — same inputs already
+  // built above for calculateSLAStatus, reused as-is.
+  const recycleCutoff = getRecycleCutoff(
+    {
+      status: lead.status,
+      sla_deadline: lead.sla_deadline,
+      recycle_count: lead.recycle_count,
+      board_stage: lead.board_stage,
+      paused_until: lead.paused_until,
+      last_activity_at: lead.last_activity_at,
+      pause_reason: lead.pause_reason,
+      assigned_at: lead.assigned_at
+    },
+    lead.outcome_at
+  );
+
   const statusDisplay = LEAD_STATUS_DISPLAY[lead.status];
   const priorityDisplay = LEAD_PRIORITY_DISPLAY[lead.priority];
 
@@ -117,8 +151,15 @@ function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps) {
     };
   } else if (slaStatus === "SLA_BREACHED") {
     slaBadge = { label: "Overdue", className: "bg-red-100 text-red-700", pulse: true };
+  } else if (slaStatus === "COOLDOWN" && recycleCutoff) {
+    slaBadge = {
+      label: `${formatDaysHoursLeft(recycleCutoff.cutoffAt.getTime() - now.getTime())} — ${RECYCLE_REASON_LABEL[recycleCutoff.reason]}`,
+      className: "bg-slate-100 text-slate-500"
+    };
   } else if (slaStatus === "COOLDOWN") {
     slaBadge = { label: "Cooling down", className: "bg-slate-100 text-slate-500" };
+  } else if ((slaStatus === "RECYCLE_READY" || slaStatus === "JUNK_ELIGIBLE") && recycleCutoff) {
+    slaBadge = { label: `Recycling now — ${RECYCLE_REASON_LABEL[recycleCutoff.reason]}`, className: "bg-amber-50 text-amber-600" };
   } else if (slaStatus === "RECYCLE_READY" || slaStatus === "JUNK_ELIGIBLE") {
     slaBadge = { label: "Awaiting follow-up", className: "bg-amber-50 text-amber-600" };
   } else if (slaStatus === "PAUSED" && lead.paused_until) {
@@ -129,8 +170,15 @@ function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps) {
         : lead.pause_reason === "VISIT_PENDING_VERIFICATION"
         ? { label: "⏳ Pending verification", className: "bg-amber-50 text-amber-700" }
         : { label: `😴 Snoozed until ${untilLabel}`, className: "bg-indigo-50 text-indigo-700" };
+  } else if (slaStatus === "FOLLOWUP_INACTIVITY_WARNING" && recycleCutoff) {
+    slaBadge = {
+      label: `${formatDaysHoursLeft(recycleCutoff.cutoffAt.getTime() - now.getTime())} — ${RECYCLE_REASON_LABEL[recycleCutoff.reason]}`,
+      className: "bg-amber-50 text-amber-600"
+    };
   } else if (slaStatus === "FOLLOWUP_INACTIVITY_WARNING") {
     slaBadge = { label: "Needs follow-up", className: "bg-amber-50 text-amber-600" };
+  } else if (slaStatus === "FOLLOWUP_INACTIVITY_RECYCLE_READY" && recycleCutoff) {
+    slaBadge = { label: `Recycling now — ${RECYCLE_REASON_LABEL[recycleCutoff.reason]}`, className: "bg-red-100 text-red-700", pulse: true };
   } else if (slaStatus === "FOLLOWUP_INACTIVITY_RECYCLE_READY") {
     slaBadge = { label: "Going stale", className: "bg-red-100 text-red-700", pulse: true };
   }
@@ -227,6 +275,11 @@ function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps) {
 
         {slaBadge && (
           <span
+            title={
+              recycleCutoff
+                ? `Exact time: ${recycleCutoff.cutoffAt.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`
+                : undefined
+            }
             className={`flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full ${slaBadge.className} ${
               slaBadge.pulse ? "animate-pulse" : ""
             }`}

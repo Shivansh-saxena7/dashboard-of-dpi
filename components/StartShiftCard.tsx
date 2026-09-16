@@ -92,13 +92,35 @@ export default function StartShiftCard({ employeeId, compact = false }: StartShi
   const [startWindow, setStartWindow] = useState<StartShiftWindowResult | null>(null);
   const [endWindow, setEndWindow] = useState<EndShiftWindowResult | null>(null);
   const [geoStatus, setGeoStatus] = useState<GeoStatus>("checking");
+  const [isFieldEmployee, setIsFieldEmployee] = useState(false);
   const [geoDistanceMeters, setGeoDistanceMeters] = useState<number | null>(null);
   const [geoAccuracyMeters, setGeoAccuracyMeters] = useState<number | null>(null);
 
   useEffect(() => {
     checkTodaysShift();
     loadShiftTimingConfig();
+    loadIsFieldEmployee();
   }, [employeeId]);
+
+  // Field-Employee geofence exemption (2026-09-16 bug fix) — the
+  // backend fix (start-shift Edge Function) was correct and deployed,
+  // but this card runs its OWN independent client-side geofence check
+  // below purely for instant button feedback (see that effect's own
+  // comment) — it never learned about is_field_employee, so an
+  // exempted employee's button stayed disabled client-side and the
+  // request never even reached the (already-fixed) server. This is
+  // what that check was missing.
+  async function loadIsFieldEmployee() {
+    const { data, error } = await supabase
+      .from("employees")
+      .select("is_field_employee")
+      .eq("id", employeeId)
+      .single();
+
+    if (!error && data) {
+      setIsFieldEmployee(data.is_field_employee);
+    }
+  }
 
   async function checkTodaysShift() {
     setChecking(true);
@@ -198,6 +220,19 @@ export default function StartShiftCard({ employeeId, compact = false }: StartShi
       return;
     }
 
+    // Genuinely never evaluated for a Field Employee, matching the
+    // server exactly (start-shift doesn't compute a distance for one
+    // either) — not just "always pass": no geolocation permission
+    // prompt, no distance shown, nothing to reconcile with a server
+    // check that was never going to run. geoStatus stays at its
+    // default "checking", which canStart below already treats as
+    // non-blocking (only "outside" blocks), and startBlockedReason
+    // already falls through to the time-window reason for any
+    // non-"outside" state — both pre-existing, unchanged.
+    if (isFieldEmployee) {
+      return;
+    }
+
     if (!navigator.geolocation || config.office_lat === null || config.office_lng === null) {
       setGeoStatus("unavailable");
       return;
@@ -221,7 +256,7 @@ export default function StartShiftCard({ employeeId, compact = false }: StartShi
       () => setGeoStatus("unavailable"),
       { enableHighAccuracy: true, timeout: 15000 }
     );
-  }, [config, shiftStartAt, shiftEndAt]);
+  }, [config, shiftStartAt, shiftEndAt, isFieldEmployee]);
 
   // Both Start Shift and End Shift need the current session's access
   // token — Edge Functions require it in the Authorization header,
@@ -537,7 +572,9 @@ export default function StartShiftCard({ employeeId, compact = false }: StartShi
                   Shift Not Started
                 </p>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Start your shift from the office to unlock new leads
+                  {isFieldEmployee
+                    ? "Start your shift from your current location — no office visit needed"
+                    : "Start your shift from the office to unlock new leads"}
                 </p>
               </div>
             </div>

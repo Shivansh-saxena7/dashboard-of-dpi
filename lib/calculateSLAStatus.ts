@@ -279,3 +279,56 @@ export function calculateSLAStatus(
 
   return "NOT_APPLICABLE";
 }
+
+export type RecycleCutoffReason =
+  | "FOLLOWUP_INACTIVITY"
+  | "NOT_CONNECTED_COOLDOWN"
+  | "SWITCHED_OFF_COOLDOWN"
+  | "NOT_INTERESTED_COOLDOWN";
+
+// Stale/Recycle-Warning filter (2026-09-16) — calculateSLAStatus above
+// already computes every threshold this needs (FOLLOWUP_INACTIVITY_*,
+// RECYCLE_COOLDOWN_DAYS) but only returns a bucket label, not the
+// actual cutoff timestamp the UI needs for "2d 4h left"/exact-time
+// display — it computes cooldownEnd/lastActivity+N internally then
+// discards it. Same inputs, same constants, no new logic: this just
+// surfaces the timestamp calculateSLAStatus already throws away.
+// Returns null when no recycle clock is running at all (terminal,
+// paused, on leave, NEW/2h-timer, or genuinely within-window) — callers
+// should treat null as "not applicable to this filter."
+export function getRecycleCutoff(
+  lead: LeadForSLA,
+  lastOutcomeAt: string | null
+): { cutoffAt: Date; reason: RecycleCutoffReason } | null {
+
+  if (isLeadTerminal(lead.status, lead.board_stage)) return null;
+  if (lead.pause_reason === "VISIT_PENDING_VERIFICATION") return null;
+  if (lead.paused_until && new Date() < new Date(lead.paused_until)) return null;
+
+  const hasGenuineActivitySinceAssignment =
+    lead.lead_type !== "DATA" &&
+    Boolean(lead.assigned_at) &&
+    Boolean(lead.last_activity_at) &&
+    new Date(lead.last_activity_at as string).getTime() > new Date(lead.assigned_at as string).getTime();
+
+  if ((lead.board_stage && lead.board_stage !== "LEADS") || lead.status === "CONNECTED" || hasGenuineActivitySinceAssignment) {
+    if (!lead.last_activity_at) return null;
+    const cutoffAt = new Date(lead.last_activity_at);
+    cutoffAt.setDate(cutoffAt.getDate() + FOLLOWUP_INACTIVITY_RECYCLE_DAYS);
+    return { cutoffAt, reason: "FOLLOWUP_INACTIVITY" };
+  }
+
+  if (
+    (lead.status === "NOT_CONNECTED" || lead.status === "SWITCHED_OFF" || lead.status === "NOT_INTERESTED") &&
+    lastOutcomeAt
+  ) {
+    const cutoffAt = new Date(lastOutcomeAt);
+    cutoffAt.setDate(cutoffAt.getDate() + RECYCLE_COOLDOWN_DAYS[lead.status as keyof typeof RECYCLE_COOLDOWN_DAYS]);
+    const reason: RecycleCutoffReason =
+      lead.status === "NOT_CONNECTED" ? "NOT_CONNECTED_COOLDOWN" :
+      lead.status === "SWITCHED_OFF" ? "SWITCHED_OFF_COOLDOWN" : "NOT_INTERESTED_COOLDOWN";
+    return { cutoffAt, reason };
+  }
+
+  return null;
+}

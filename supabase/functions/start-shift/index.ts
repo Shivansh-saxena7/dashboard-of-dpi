@@ -78,6 +78,26 @@ serve(async (req) => {
 
     const employee_id = auth.employeeId;
 
+    // Field-Employee geofence exemption (2026-09-16) — self-contained
+    // to this function rather than added to resolveCallingEmployeeId
+    // (shared by other Edge Functions too, e.g. end-shift) to keep the
+    // blast radius of this change to exactly where it's needed. Admin-
+    // set only (employees.is_field_employee) — for staff who work
+    // directly from client sites and never come to the office, so the
+    // office-radius requirement never blocks them.
+    const { data: employeeRow, error: employeeError } = await supabase
+      .from("employees")
+      .select("is_field_employee")
+      .eq("id", employee_id)
+      .single();
+
+    if (employeeError || !employeeRow) {
+      return respond(
+        { success: false, step: "FETCH_EMPLOYEE", error: employeeError?.message || "employee not found" },
+        500
+      );
+    }
+
     const { data: settings, error: settingsError } = await supabase
       .from("lead_engine_settings")
       .select("*")
@@ -153,32 +173,39 @@ serve(async (req) => {
       });
     }
 
-    const geofence = calculateGeofenceStatus(
-      lat,
-      lng,
-      settings.office_lat,
-      settings.office_lng,
-      settings.geofence_radius_meters
-    );
+    // Field-Employee exemption — skips the geofence check entirely for
+    // a flagged employee; everyone else goes through it exactly as
+    // before. Not just "always pass" — genuinely never evaluated, so
+    // no distance/accuracy computation happens for this employee at
+    // all.
+    if (!employeeRow.is_field_employee) {
+      const geofence = calculateGeofenceStatus(
+        lat,
+        lng,
+        settings.office_lat,
+        settings.office_lng,
+        settings.geofence_radius_meters
+      );
 
-    if (!geofence.withinGeofence) {
-      const roundedAccuracy = typeof accuracy === "number" ? Math.round(accuracy) : null;
-      // >50m accuracy is a real, common signal for "Approximate" (not
-      // "Precise") location permission on iOS 14+/Android 12+, which
-      // deliberately fuzzes the coordinate — surfaced here so an
-      // employee genuinely at the office has something actionable to
-      // check, instead of a flatly confusing "you're 44m away".
-      const accuracyNote =
-        roundedAccuracy !== null && roundedAccuracy > 50
-          ? ` Your device reported ±${roundedAccuracy}m location accuracy — if you're actually at the office, check that Precise/Exact Location is enabled for this site in your phone's location settings.`
-          : "";
-      return respond({
-        success: false,
-        withinGeofence: false,
-        distanceMeters: Math.round(geofence.distanceMeters),
-        accuracyMeters: roundedAccuracy,
-        message: `You are ${Math.round(geofence.distanceMeters)}m from the office — must be within ${settings.geofence_radius_meters}m to start your shift.${accuracyNote}`
-      });
+      if (!geofence.withinGeofence) {
+        const roundedAccuracy = typeof accuracy === "number" ? Math.round(accuracy) : null;
+        // >50m accuracy is a real, common signal for "Approximate" (not
+        // "Precise") location permission on iOS 14+/Android 12+, which
+        // deliberately fuzzes the coordinate — surfaced here so an
+        // employee genuinely at the office has something actionable to
+        // check, instead of a flatly confusing "you're 44m away".
+        const accuracyNote =
+          roundedAccuracy !== null && roundedAccuracy > 50
+            ? ` Your device reported ±${roundedAccuracy}m location accuracy — if you're actually at the office, check that Precise/Exact Location is enabled for this site in your phone's location settings.`
+            : "";
+        return respond({
+          success: false,
+          withinGeofence: false,
+          distanceMeters: Math.round(geofence.distanceMeters),
+          accuracyMeters: roundedAccuracy,
+          message: `You are ${Math.round(geofence.distanceMeters)}m from the office — must be within ${settings.geofence_radius_meters}m to start your shift.${accuracyNote}`
+        });
+      }
     }
 
     const attendanceType = window.half === "FIRST" ? "FULL_DAY" : "HALF_DAY_SECOND";
@@ -191,7 +218,11 @@ serve(async (req) => {
         shift_start_at: now.toISOString(),
         shift_start_lat: lat,
         shift_start_lng: lng,
-        geofence_pass: true,
+        // null (not true) for an exempted employee — true would
+        // misrepresent "the check ran and passed" when it never ran
+        // at all; null keeps that genuinely distinguishable in
+        // reporting from a real, evaluated pass.
+        geofence_pass: employeeRow.is_field_employee ? null : true,
         attendance_type: attendanceType
       })
       .select()

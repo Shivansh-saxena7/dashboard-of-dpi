@@ -126,6 +126,28 @@ const toggleRREligible = async (
   }
 
 };
+
+// Field-Employee geofence exemption (2026-09-16) — Admin-only, same
+// direct-update pattern as toggleRREligible above. Skips the office
+// geofence check on Start Shift for staff who work directly from
+// client sites and never come to the office.
+const toggleFieldEmployee = async (
+  id: string,
+  currentStatus: boolean
+) => {
+
+  const { error } = await supabase
+    .from("employees")
+    .update({
+      is_field_employee: !currentStatus,
+    })
+    .eq("id", id);
+
+  if (!error) {
+    fetchEmployees();
+  }
+
+};
 // Sales Coordinator role toggle (V2 Follow-up-Stale-Recycling module).
 // Deliberately only offered for employees currently "employee" or
 // "sales_coordinator" — never shown for "admin"/"team_leader" rows,
@@ -818,6 +840,48 @@ employee.rr_eligible
 ? "Remove from RR"
 
 : "Add to RR"
+
+}
+
+</button>
+
+<button
+onClick={async (e) => {
+
+e.stopPropagation();
+
+await toggleFieldEmployee(
+employee.id,
+employee.is_field_employee
+);
+
+}}
+
+className={`
+px-4
+py-2
+rounded-xl
+text-xs
+font-semibold
+transition
+
+${
+employee.is_field_employee
+
+? "bg-teal-100 text-teal-700 hover:bg-teal-200"
+
+: "bg-slate-100 text-slate-600 hover:bg-slate-200"
+
+}
+
+`}
+>
+
+{employee.is_field_employee
+
+? "🚗 Field Employee"
+
+: "Mark Field Employee"
 
 }
 

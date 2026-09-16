@@ -14,6 +14,7 @@ import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES } from "@/lib/leadBoardStageDisplay";
 import { exportLeadsToExcel, exportLeadsToPDF } from "@/lib/exportLeadsReport";
 import { DateRangeOption, isWithinDateRange, dateRangeFilterLabel } from "@/lib/dateRangeFilter";
+import { getRecycleCutoff } from "@/lib/calculateSLAStatus";
 
 type SortOption = "NEWEST" | "OLDEST" | "SLA_URGENCY";
 
@@ -83,6 +84,7 @@ export default function AdminLeadsPage() {
   const [sourceFilter, setSourceFilter] = useState("");
   const [boardStageFilter, setBoardStageFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [recyclingSoonFilter, setRecyclingSoonFilter] = useState(false);
   const [typeFilter, setTypeFilter] = useState("");
   const [dateRangeFilter, setDateRangeFilter] = useState<DateRangeOption>("ALL");
   const [customStart, setCustomStart] = useState("");
@@ -159,7 +161,7 @@ export default function AdminLeadsPage() {
         pending_team:teams ( name ),
         lead_history (
           assigned_at, is_active, first_call_at, first_whatsapp_at, assigned_by_type, call_count,
-          last_activity_at, paused_until, pause_reason, pause_note,
+          last_activity_at, paused_until, pause_reason, pause_note, outcome_at,
           assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)
         )
       `
@@ -315,6 +317,26 @@ export default function AdminLeadsPage() {
       result = result.filter((lead) => (lead.lead_type || "LEAD") === typeFilter);
     }
 
+    if (recyclingSoonFilter) {
+      result = result.filter((lead) => {
+        const h = lead.lead_history?.[0];
+        return getRecycleCutoff(
+          {
+            status: lead.status,
+            sla_deadline: null,
+            recycle_count: lead.recycle_count,
+            board_stage: lead.board_stage,
+            paused_until: h?.paused_until ?? null,
+            last_activity_at: h?.last_activity_at ?? null,
+            pause_reason: h?.pause_reason ?? null,
+            assigned_at: h?.assigned_at ?? null,
+            lead_type: lead.lead_type
+          },
+          h?.outcome_at ?? null
+        ) !== null;
+      });
+    }
+
     if (dateRangeFilter !== "ALL") {
       result = result.filter((lead) =>
         isWithinDateRange(lead.lead_history?.[0]?.assigned_at, dateRangeFilter, customStart, customEnd)
@@ -345,6 +367,7 @@ export default function AdminLeadsPage() {
     sourceFilter,
     boardStageFilter,
     statusFilter,
+    recyclingSoonFilter,
     typeFilter,
     dateRangeFilter,
     customStart,
@@ -548,6 +571,18 @@ export default function AdminLeadsPage() {
             ))}
           </FilterSelect>
 
+          <button
+            type="button"
+            onClick={() => setRecyclingSoonFilter((v) => !v)}
+            className={`h-10 rounded-lg px-3 text-xs font-semibold border transition ${
+              recyclingSoonFilter
+                ? "bg-amber-100 border-amber-300 text-amber-700"
+                : "bg-slate-50 border-slate-200 text-slate-600"
+            }`}
+          >
+            ⚠️ Recycling Soon
+          </button>
+
           <FilterSelect value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
             <option value="">All Types</option>
             <option value="LEAD">Leads</option>
@@ -677,7 +712,8 @@ export default function AdminLeadsPage() {
                 callCount: lead.lead_history?.[0]?.call_count ?? 0,
                 pausedUntil: lead.lead_history?.[0]?.paused_until ?? null,
                 pauseReason: lead.lead_history?.[0]?.pause_reason ?? null,
-                lastActivityAt: lead.lead_history?.[0]?.last_activity_at ?? null
+                lastActivityAt: lead.lead_history?.[0]?.last_activity_at ?? null,
+                outcomeAt: lead.lead_history?.[0]?.outcome_at ?? null
               }}
             />
           ))}
