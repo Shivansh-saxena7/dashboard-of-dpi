@@ -8,6 +8,7 @@ import DataCard from "./DataCard";
 import DataDetailModal from "./DataDetailModal";
 import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { BoardStage } from "@/lib/leadBoardStageDisplay";
+import { consumeRecentlyCalledCardId, scrollToAndHighlightCard } from "@/lib/lastCalledLead";
 
 interface DataListProps {
   employeeId: string;
@@ -79,6 +80,15 @@ export default function DataList({ employeeId }: DataListProps) {
   useEffect(() => {
     loadLeads();
   }, [employeeId]);
+
+  // Scroll-to-called-lead (2026-09-16) — same as LeadList.tsx's own,
+  // see lib/lastCalledLead.ts for why. Fires once the list has
+  // actually rendered (loading -> false).
+  useEffect(() => {
+    if (loading) return;
+    const id = consumeRecentlyCalledCardId();
+    if (id) scrollToAndHighlightCard(`data-card-${id}`);
+  }, [loading]);
 
   async function loadLeads() {
     setLoading(true);

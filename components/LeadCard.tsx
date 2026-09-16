@@ -10,6 +10,7 @@ import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { AssignedBySource } from "@/lib/assignedByDisplay";
 import { buildWhatsAppLink } from "@/lib/buildWhatsAppLink";
+import { rememberCalledCard } from "@/lib/lastCalledLead";
 
 interface LeadCardLead {
   id: string;
@@ -193,6 +194,7 @@ function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps) {
   // interrupt the actual call.
   function handleCallClick(e: React.MouseEvent) {
     e.stopPropagation();
+    rememberCalledCard(lead.id);
     supabase
       .rpc("log_call_click_atomic", { p_lead_history_id: lead.leadHistoryId })
       .then(({ error }) => {
@@ -215,6 +217,7 @@ function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps) {
 
   return (
     <motion.div
+      id={`lead-card-${lead.id}`}
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, delay: Math.min(index, 8) * 0.05 }}

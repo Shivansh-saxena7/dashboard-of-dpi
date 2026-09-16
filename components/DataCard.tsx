@@ -7,6 +7,7 @@ import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { MAX_DATA_ATTEMPTS } from "@/lib/calculateSLAStatus";
 import { buildWhatsAppLink } from "@/lib/buildWhatsAppLink";
+import { rememberCalledCard } from "@/lib/lastCalledLead";
 
 interface DataCardLead {
   id: string;
@@ -58,6 +59,7 @@ export default function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
   // tel:/wa.me link itself from opening.
   function handleCallClick(e: React.MouseEvent) {
     e.stopPropagation();
+    rememberCalledCard(lead.id);
     supabase
       .rpc("log_call_click_atomic", { p_lead_history_id: lead.leadHistoryId })
       .then(({ error }) => {
@@ -76,6 +78,7 @@ export default function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
 
   return (
     <motion.div
+      id={`data-card-${lead.id}`}
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5, delay: Math.min(index, 8) * 0.05 }}

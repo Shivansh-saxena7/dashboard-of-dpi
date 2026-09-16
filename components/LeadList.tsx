@@ -9,6 +9,7 @@ import LeadDetailModal from "./LeadDetailModal";
 import SLABreachHistoryCard from "./SLABreachHistoryCard";
 import { LeadStatus, EMPLOYEE_SELECTABLE_STATUSES } from "@/lib/getValidNextLeadStatuses";
 import { getRecycleCutoff } from "@/lib/calculateSLAStatus";
+import { consumeRecentlyCalledCardId, scrollToAndHighlightCard } from "@/lib/lastCalledLead";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
 
@@ -125,6 +126,18 @@ export default function LeadList({ employeeId }: LeadListProps) {
     loadLeads();
     loadSlaBreachHistory();
   }, [employeeId]);
+
+  // Scroll-to-called-lead (2026-09-16) — fires once the list has
+  // actually rendered (loading -> false), not on the mount effect
+  // above directly, since the card needs to exist in the DOM for
+  // getElementById to find it. One-time consume — see
+  // lib/lastCalledLead.ts's own comment for why this exists and why
+  // it's ID-based rather than a raw scroll-position restore.
+  useEffect(() => {
+    if (loading) return;
+    const id = consumeRecentlyCalledCardId();
+    if (id) scrollToAndHighlightCard(`lead-card-${id}`);
+  }, [loading]);
 
   // Realtime — same proven pattern already used by Header.tsx
   // (notification bell) and SessionGuard.tsx (live deactivation),
