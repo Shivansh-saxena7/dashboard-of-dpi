@@ -192,7 +192,24 @@ export function calculateSLAStatus(
     Boolean(lead.last_activity_at) &&
     new Date(lead.last_activity_at as string).getTime() > new Date(lead.assigned_at as string).getTime();
 
-  if ((lead.board_stage && lead.board_stage !== "LEADS") || lead.status === "CONNECTED" || hasGenuineActivitySinceAssignment) {
+  // 2026-09-16 bug fix: this whole branch (time-based Follow-up
+  // inactivity — warning at 3 days, recycle-ready at 6) must never
+  // apply to a DATA lead, no matter which of the three disjuncts below
+  // would otherwise trigger it — DATA is attempt-count-governed only
+  // (MAX_DATA_ATTEMPTS, further down). Previously only the third
+  // disjunct (hasGenuineActivitySinceAssignment) excluded DATA; the
+  // first (board_stage moved to Follow-up/Visit/Booking) didn't, so a
+  // DATA lead moved there got recycled on the same 6-day timer a LEAD
+  // gets — a real behavior bug, not just a wrong badge (recycle-stale-
+  // leads actually acts on this return value). Gating the whole
+  // condition here, not just patching the first disjunct, since
+  // status==="CONNECTED" on a still-LEADS-stage DATA lead had the
+  // identical gap otherwise. Matches AdminLeadCard.tsx's own
+  // isBeyondLeadsStage, which already excludes DATA correctly.
+  if (
+    lead.lead_type !== "DATA" &&
+    ((lead.board_stage && lead.board_stage !== "LEADS") || lead.status === "CONNECTED" || hasGenuineActivitySinceAssignment)
+  ) {
 
     // On approved leave — the inactivity clock (warning at 3 days,
     // recycle-ready at 6) is deliberately not even evaluated below,
@@ -311,11 +328,29 @@ export function getRecycleCutoff(
     Boolean(lead.last_activity_at) &&
     new Date(lead.last_activity_at as string).getTime() > new Date(lead.assigned_at as string).getTime();
 
-  if ((lead.board_stage && lead.board_stage !== "LEADS") || lead.status === "CONNECTED" || hasGenuineActivitySinceAssignment) {
+  // Same 2026-09-16 fix as calculateSLAStatus's identical condition
+  // above — DATA must never get a Follow-up-inactivity cutoff either.
+  if (
+    lead.lead_type !== "DATA" &&
+    ((lead.board_stage && lead.board_stage !== "LEADS") || lead.status === "CONNECTED" || hasGenuineActivitySinceAssignment)
+  ) {
     if (!lead.last_activity_at) return null;
     const cutoffAt = new Date(lead.last_activity_at);
     cutoffAt.setDate(cutoffAt.getDate() + FOLLOWUP_INACTIVITY_RECYCLE_DAYS);
     return { cutoffAt, reason: "FOLLOWUP_INACTIVITY" };
+  }
+
+  // Found while fixing the above, same class of gap (not explicitly
+  // asked for, fixing since it's the same function/bug) —
+  // calculateSLAStatus's own DATA branch (further down in this file)
+  // intercepts NOT_CONNECTED/SWITCHED_OFF for DATA leads BEFORE they'd
+  // ever reach cooldown logic, governing them by call_count instead —
+  // this function had no equivalent, so it computed a cooldown cutoff
+  // calculateSLAStatus itself would never actually apply. NOT_INTERESTED
+  // deliberately excluded from this guard: calculateSLAStatus treats it
+  // as a real outcome for DATA too, still genuinely cooldown-governed.
+  if (lead.lead_type === "DATA" && (lead.status === "NOT_CONNECTED" || lead.status === "SWITCHED_OFF")) {
+    return null;
   }
 
   if (

@@ -7,7 +7,7 @@ import { supabase } from "@/lib/supabase";
 import DataCard from "./DataCard";
 import DataDetailModal from "./DataDetailModal";
 import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
-import { BoardStage } from "@/lib/leadBoardStageDisplay";
+import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
 import { consumeRecentlyCalledCardId, scrollToAndHighlightCard } from "@/lib/lastCalledLead";
 
 interface DataListProps {
@@ -56,9 +56,10 @@ function FilterSelect({
 // review). Deliberately NOT a Project filter: a live check found 0 of
 // 341 current DATA rows have `project` populated (100% have `source`)
 // — a Project dropdown here would just be a permanently-empty no-op
-// control, so it's left out. Still no board-stage tabs (Data has no
-// Follow-up/Visit/Booking workflow yet — see Point 2, not yet
-// shipped), still no SLA-Urgency sort (Data has no SLA deadline).
+// control, so it's left out. Board-stage tabs added 2026-09-16 (bug
+// fix — DataDetailModal's Move-to-Follow-up/Visit/Booking already
+// worked server-side, this list just never grew the tabs to show it).
+// Still no SLA-Urgency sort (Data has no SLA deadline).
 //
 // `.eq("lead_type", "DATA")` here is the other half of the fix that
 // also went into LeadList.tsx (`.eq("lead_type", "LEAD")` there) —
@@ -69,6 +70,17 @@ export default function DataList({ employeeId }: DataListProps) {
   const [leads, setLeads] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+
+  // Board-stage tabs (2026-09-16 bug fix) — DataDetailModal's Move-to-
+  // Follow-up/Visit/Booking actions genuinely worked server-side all
+  // along (verified live: board_stage really does update in the DB),
+  // but this list never got the corresponding tabs to show a moved
+  // lead anywhere — it shipped later than the "no workflow yet" state
+  // this file's own top comment still described, and this side was
+  // never completed to match. Mirrors LeadList.tsx's identical tabs
+  // exactly (same BOARD_STAGES, same filter-first-in-visibleLeads
+  // shape) — no History tab, Data has no SLA-breach concept.
+  const [activeTab, setActiveTab] = useState<BoardStage>("LEADS");
 
   const [searchQuery, setSearchQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState("");
@@ -135,9 +147,18 @@ export default function DataList({ employeeId }: DataListProps) {
   // (This Week/This Month are the last 7/30 days, not calendar
   // boundaries — same simplification LeadList already makes), then
   // sort. No SLA-Urgency option here — Data has no sla_deadline.
+  const tabCounts = useMemo(() => {
+    const counts: Record<BoardStage, number> = { LEADS: 0, FOLLOW_UP: 0, VISIT: 0, BOOKING: 0 };
+    leads.forEach((lead) => {
+      const stage = (lead.board_stage as BoardStage) || "LEADS";
+      counts[stage] = (counts[stage] || 0) + 1;
+    });
+    return counts;
+  }, [leads]);
+
   const visibleLeads = useMemo(() => {
 
-    let result = leads;
+    let result = leads.filter((lead) => (lead.board_stage || "LEADS") === activeTab);
 
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
@@ -188,7 +209,7 @@ export default function DataList({ employeeId }: DataListProps) {
 
     return result;
 
-  }, [leads, searchQuery, sourceFilter, dateRangeFilter, customStart, customEnd, sortBy]);
+  }, [leads, activeTab, searchQuery, sourceFilter, dateRangeFilter, customStart, customEnd, sortBy]);
 
   // Optimistic local patch after a successful log_lead_update_atomic
   // call — same idea as LeadList's handleLeadUpdated, no full refetch
@@ -244,6 +265,39 @@ export default function DataList({ employeeId }: DataListProps) {
         </div>
       ) : (
         <>
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+            className="mx-4 mt-4 flex gap-2 overflow-x-auto pb-1"
+          >
+            {BOARD_STAGES.map((tab) => {
+              const active = activeTab === tab.stage;
+
+              return (
+                <button
+                  key={tab.stage}
+                  onClick={() => setActiveTab(tab.stage)}
+                  className={`flex items-center gap-1.5 shrink-0 px-3.5 py-2.5 sm:py-2 rounded-xl text-sm font-bold transition ${
+                    active
+                      ? "bg-gradient-to-r from-yellow-400 to-amber-500 text-slate-900 shadow-[0_4px_12px_rgba(217,119,6,0.3)]"
+                      : "bg-white text-slate-600 border border-slate-200"
+                  }`}
+                >
+                  <span>{tab.emoji}</span>
+                  {tab.label}
+                  <span
+                    className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full ${
+                      active ? "bg-black/10 text-slate-900" : "bg-slate-100 text-slate-500"
+                    }`}
+                  >
+                    {tabCounts[tab.stage]}
+                  </span>
+                </button>
+              );
+            })}
+          </motion.div>
+
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
