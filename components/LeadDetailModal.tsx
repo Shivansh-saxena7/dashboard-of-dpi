@@ -86,9 +86,38 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
   const [snoozing, setSnoozing] = useState(false);
   const [cancellingSnooze, setCancellingSnooze] = useState(false);
 
+  // Request Transfer — an employee-initiated ask for Admin to hand this
+  // lead to someone else (wrong project fit, etc.). Same "reason always
+  // required" posture as Snooze above, enforced both here and server-side
+  // by request_lead_transfer_atomic. pendingTransfer is loaded up front so
+  // reopening this modal after already requesting shows the waiting state
+  // instead of letting the employee fire a second request blind (the RPC
+  // itself blocks duplicates, but surfacing that only as a toast error
+  // after the fact would be a worse experience than just showing it).
+  const [pendingTransfer, setPendingTransfer] = useState<{ id: string; reason: string } | null>(null);
+  const [loadingTransfer, setLoadingTransfer] = useState(true);
+  const [transferFormOpen, setTransferFormOpen] = useState(false);
+  const [transferReason, setTransferReason] = useState("");
+  const [requestingTransfer, setRequestingTransfer] = useState(false);
+
   useEffect(() => {
     loadNotes();
+    loadPendingTransfer();
   }, [lead.leadHistoryId]);
+
+  async function loadPendingTransfer() {
+    setLoadingTransfer(true);
+
+    const { data, error } = await supabase
+      .from("lead_transfer_requests")
+      .select("id, reason")
+      .eq("lead_id", lead.id)
+      .eq("status", "PENDING")
+      .maybeSingle();
+
+    setPendingTransfer(!error && data ? data : null);
+    setLoadingTransfer(false);
+  }
 
   async function loadNotes() {
     setLoadingNotes(true);
@@ -329,6 +358,40 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
       toast.error("Something went wrong.");
     } finally {
       setCancellingSnooze(false);
+    }
+  }
+
+  async function submitTransferRequest() {
+
+    if (!transferReason.trim()) {
+      toast.error("A reason is required to request a transfer.");
+      return;
+    }
+
+    setRequestingTransfer(true);
+
+    try {
+
+      const { data, error } = await supabase.rpc("request_lead_transfer_atomic", {
+        p_lead_id: lead.id,
+        p_reason: transferReason.trim()
+      });
+
+      if (error) {
+        toast.error(error.message || "Could not submit the transfer request.");
+        return;
+      }
+
+      toast.success("Transfer request sent to Admin.");
+      setPendingTransfer({ id: data as string, reason: transferReason.trim() });
+      setTransferFormOpen(false);
+      setTransferReason("");
+
+    } catch (err) {
+      console.log(err);
+      toast.error("Something went wrong requesting this transfer.");
+    } finally {
+      setRequestingTransfer(false);
     }
   }
 
@@ -666,6 +729,62 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
                 )}
               </div>
             )
+          )}
+
+          {!isTerminal && !loadingTransfer && (
+            <div className="rounded-2xl bg-white border border-slate-100 shadow-md p-5">
+              {pendingTransfer ? (
+                <div>
+                  <p className="text-sm font-bold text-slate-800 mb-1">🔀 Transfer requested</p>
+                  <p className="text-xs text-slate-500">
+                    Waiting for Admin to review
+                    {pendingTransfer.reason && (
+                      <> — <span className="italic">&ldquo;{pendingTransfer.reason}&rdquo;</span></>
+                    )}
+                    .
+                  </p>
+                </div>
+              ) : transferFormOpen ? (
+                <div>
+                  <p className="text-sm font-bold text-slate-800 mb-3">Request Transfer</p>
+
+                  <textarea
+                    value={transferReason}
+                    onChange={(e) => setTransferReason(e.target.value)}
+                    placeholder="Reason (required) — e.g. Wrong project fit for this client"
+                    rows={2}
+                    className="w-full rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-sm outline-none resize-none"
+                  />
+
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      disabled={requestingTransfer}
+                      onClick={submitTransferRequest}
+                      className="flex-1 h-10 rounded-xl text-sm font-semibold bg-slate-800 text-white disabled:opacity-60"
+                    >
+                      {requestingTransfer ? "Sending..." : "Send Request"}
+                    </button>
+                    <button
+                      disabled={requestingTransfer}
+                      onClick={() => {
+                        setTransferFormOpen(false);
+                        setTransferReason("");
+                      }}
+                      className="flex-1 h-10 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 disabled:opacity-60"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setTransferFormOpen(true)}
+                  className="w-full flex items-center justify-center gap-2 h-10 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200"
+                >
+                  🔀 Request Transfer
+                </button>
+              )}
+            </div>
           )}
 
           {isTerminal ? (

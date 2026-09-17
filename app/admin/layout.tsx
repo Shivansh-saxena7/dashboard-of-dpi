@@ -161,6 +161,11 @@ href:"/admin/leave",
 icon:"🌴"
 },
 {
+name:"Lead Transfers",
+href:"/admin/lead-transfers",
+icon:"🔀"
+},
+{
 name:"Settings",
 href:"/admin/settings",
 icon:"⚙️"
