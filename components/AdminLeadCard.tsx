@@ -2,7 +2,7 @@
 
 import { memo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { History } from "lucide-react";
+import { Check, History } from "lucide-react";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
@@ -84,6 +84,17 @@ interface AdminLeadCardProps {
   // Optional/defaults false so every other existing caller of this
   // card is unaffected.
   isOwnerOnLeave?: boolean;
+  // Bulk Reassign checkbox — selection state itself lives in the
+  // parent (app/admin/leads/page.tsx), same split as onReserveTeam
+  // above; this card only ever renders the box and reports taps.
+  // Deliberately never offered on a terminal lead (JUNK/BOOKING) —
+  // force_reassign_lead_atomic's terminal branch only moves ownership,
+  // it doesn't unjunk, so bulk-selecting a JUNK lead here would look
+  // like it worked but silently leave it junked under the new owner.
+  // JUNK recovery stays on the existing per-card onUnjunkReassign flow.
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (leadId: string) => void;
 }
 
 // Read-only — Admin never logs updates or moves a lead through the
@@ -137,7 +148,10 @@ function AdminLeadCard({
   employees = [],
   onUnjunkReassign,
   readOnly = false,
-  isOwnerOnLeave = false
+  isOwnerOnLeave = false,
+  selectable = false,
+  selected = false,
+  onToggleSelect
 }: AdminLeadCardProps) {
 
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -251,6 +265,34 @@ function AdminLeadCard({
       <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-blue-600 via-cyan-400 to-blue-600" />
 
       <div className="flex items-start gap-3">
+        {selectable && !isTerminal && !readOnly && (
+          // Custom button, not a native <input type="checkbox"> — the
+          // native element's checkmark glyph is drawn by the browser's
+          // own widget rendering (combined with accent-color), which
+          // turned out inconsistent enough to be invisible in real
+          // testing despite the element being fully functional. This
+          // renders the check mark ourselves (a lucide icon), so its
+          // visibility is never dependent on browser/OS checkbox theming.
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={selected}
+            aria-label={selected ? "Deselect lead" : "Select lead"}
+            onClick={() => onToggleSelect?.(lead.id)}
+            // No transition-colors here (2026-09-18) — Tailwind's
+            // transition utilities default to a 150ms eased fade, which
+            // is exactly the kind of small-but-visible gap between
+            // click and checkmark the "instant" requirement rules out.
+            // The color/icon flip below is a plain synchronous class
+            // swap, so it paints in the very next frame.
+            className={`mt-1 h-5 w-5 shrink-0 rounded border-2 flex items-center justify-center ${
+              selected ? "bg-blue-600 border-blue-600" : "bg-white border-slate-400"
+            }`}
+          >
+            {selected && <Check size={13} strokeWidth={3} className="text-white" />}
+          </button>
+        )}
+
         <div className="shrink-0 h-11 w-11 rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 shadow-[0_4px_12px_rgba(37,99,235,0.35)] flex items-center justify-center text-white font-bold text-sm">
           {initial}
         </div>

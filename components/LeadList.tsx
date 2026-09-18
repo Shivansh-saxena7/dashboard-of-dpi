@@ -467,6 +467,47 @@ export default function LeadList({ employeeId }: LeadListProps) {
 
   }, [leads, activeTab, searchQuery, projectFilter, sourceFilter, statusFilter, recyclingSoonFilter, dateRangeFilter, customStart, customEnd, sortBy]);
 
+  // Same fix as app/admin/leads/page.tsx's cardLeads (2026-09-18) — the
+  // render loop below used to build `lead={{ ...inline object... }}`
+  // fresh on every render, which defeats LeadCard's memo() exactly like
+  // it did for AdminLeadCard. This screen is worse hit by it than the
+  // admin one was: the 30s SLA-recheck interval (line ~197) re-renders
+  // LeadList continuously all day, every employee, every shift — before
+  // this fix, every single one of those ticks rebuilt every visible
+  // lead's object and forced every card to re-render regardless of
+  // whether anything about that lead actually changed. Deliberately
+  // keyed on visibleLeads only, NOT now — `now` still legitimately
+  // reaches LeadCard as its own prop (the countdown genuinely needs to
+  // tick), this only stops that tick from ALSO rebuilding data that
+  // hasn't changed.
+  const cardLeads = useMemo(
+    () =>
+      visibleLeads.map((lead: any) => ({
+        id: lead.id,
+        leadHistoryId: lead.lead_history[0]?.id,
+        name: lead.name,
+        mobile: lead.mobile,
+        project: lead.project,
+        source: lead.source,
+        catcher_name: lead.catcher_name,
+        status: lead.status,
+        priority: lead.priority,
+        board_stage: lead.board_stage,
+        sla_deadline: lead.sla_deadline,
+        recycle_count: lead.recycle_count,
+        call_count: lead.lead_history[0]?.call_count ?? 0,
+        outcome_at: lead.lead_history[0]?.outcome_at ?? null,
+        assigned_at: lead.lead_history[0]?.assigned_at ?? null,
+        assigned_by_type: lead.lead_history[0]?.assigned_by_type ?? null,
+        assigned_by: lead.lead_history[0]?.assigned_by ?? null,
+        reassign_note: lead.lead_history[0]?.reassign_note ?? null,
+        last_activity_at: lead.lead_history[0]?.last_activity_at ?? null,
+        paused_until: lead.lead_history[0]?.paused_until ?? null,
+        pause_reason: lead.lead_history[0]?.pause_reason ?? null
+      })),
+    [visibleLeads]
+  );
+
   if (loading) {
     return (
       <div className="mx-4 mt-6 text-center text-sm text-slate-400">
@@ -654,35 +695,13 @@ export default function LeadList({ employeeId }: LeadListProps) {
         </div>
       ) : (
         <div className="mx-4 mt-4 space-y-3 pb-6">
-          {visibleLeads.map((lead: any, index: number) => (
+          {cardLeads.map((cardLead, index) => (
             <LeadCard
-              key={lead.id}
+              key={cardLead.id}
               now={now}
               index={index}
               onOpen={handleOpenLead}
-              lead={{
-                id: lead.id,
-                leadHistoryId: lead.lead_history[0]?.id,
-                name: lead.name,
-                mobile: lead.mobile,
-                project: lead.project,
-                source: lead.source,
-                catcher_name: lead.catcher_name,
-                status: lead.status,
-                priority: lead.priority,
-                board_stage: lead.board_stage,
-                sla_deadline: lead.sla_deadline,
-                recycle_count: lead.recycle_count,
-                call_count: lead.lead_history[0]?.call_count ?? 0,
-                outcome_at: lead.lead_history[0]?.outcome_at ?? null,
-                assigned_at: lead.lead_history[0]?.assigned_at ?? null,
-                assigned_by_type: lead.lead_history[0]?.assigned_by_type ?? null,
-                assigned_by: lead.lead_history[0]?.assigned_by ?? null,
-                reassign_note: lead.lead_history[0]?.reassign_note ?? null,
-                last_activity_at: lead.lead_history[0]?.last_activity_at ?? null,
-                paused_until: lead.lead_history[0]?.paused_until ?? null,
-                pause_reason: lead.lead_history[0]?.pause_reason ?? null
-              }}
+              lead={cardLead}
             />
           ))}
         </div>

@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { motion } from "framer-motion";
 import { Phone, MessageCircle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -22,7 +23,12 @@ interface DataCardLead {
 
 interface DataCardProps {
   lead: DataCardLead;
-  onOpen: () => void;
+  // Takes the id, not a no-arg closure (2026-09-18, matches LeadCard's
+  // own onOpen exactly) — lets DataList pass one stable useCallback
+  // reference for every card instead of a fresh `() => setSelectedLeadId(lead.id)`
+  // arrow per card per render, which is what let memo below actually
+  // skip re-rendering unchanged cards.
+  onOpen: (id: string) => void;
   index?: number;
 }
 
@@ -34,7 +40,15 @@ interface DataCardProps {
 // MAX_DATA_ATTEMPTS while status is still NEW/NOT_CONNECTED/
 // SWITCHED_OFF (see lib/calculateSLAStatus.ts), so that's what gets
 // the prominent warning treatment once it's close.
-export default function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
+//
+// Wrapped in memo() (2026-09-18 perf audit) — this card had no
+// re-render protection at all before, unlike LeadCard/AdminLeadCard
+// which at least had memo (even if unstable props were defeating it
+// too). Paired with DataList.tsx now passing a stable onOpen + a
+// memoized per-card lead object, this actually skips unchanged cards
+// instead of re-rendering the whole visible list on every DataList
+// state change (search, filter, tab switch).
+function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
 
   const statusDisplay = LEAD_STATUS_DISPLAY[lead.status];
   const initial = lead.name?.charAt(0)?.toUpperCase() || "?";
@@ -84,7 +98,7 @@ export default function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
       transition={{ duration: 0.5, delay: Math.min(index, 8) * 0.05 }}
       whileHover={{ y: -3 }}
       whileTap={{ scale: 0.99 }}
-      onClick={onOpen}
+      onClick={() => onOpen(lead.id)}
       className="rounded-[22px] bg-white border border-slate-100 shadow-[0_4px_20px_rgba(15,23,42,0.06)] hover:shadow-[0_10px_30px_rgba(15,23,42,0.1)] transition-shadow p-4 sm:p-5 cursor-pointer"
     >
       <div className="flex items-center gap-3">
@@ -164,3 +178,5 @@ export default function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
     </motion.div>
   );
 }
+
+export default memo(DataCard);

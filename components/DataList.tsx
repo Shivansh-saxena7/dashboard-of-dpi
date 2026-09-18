@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Search, ChevronDown } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -211,6 +211,31 @@ export default function DataList({ employeeId }: DataListProps) {
 
   }, [leads, activeTab, searchQuery, sourceFilter, dateRangeFilter, customStart, customEnd, sortBy]);
 
+  // Same fix as LeadList.tsx/app/admin/leads/page.tsx (2026-09-18 perf
+  // audit) — DataCard had NO re-render protection at all before this
+  // (not even a memo() to defeat), so every DataList state change
+  // (search, filter, tab switch) re-rendered every visible card
+  // unconditionally. Now paired with DataCard's new memo() wrap: a
+  // stable per-card lead object here plus a stable onOpen callback
+  // below means an unrelated state change no longer touches cards
+  // whose own data hasn't changed.
+  const cardLeads = useMemo(
+    () =>
+      visibleLeads.map((lead: any) => ({
+        id: lead.id,
+        leadHistoryId: lead.lead_history[0]?.id,
+        name: lead.name,
+        mobile: lead.mobile,
+        source: lead.source,
+        status: lead.status,
+        board_stage: lead.board_stage,
+        call_count: lead.lead_history[0]?.call_count ?? 0
+      })),
+    [visibleLeads]
+  );
+
+  const handleOpenLead = useCallback((id: string) => setSelectedLeadId(id), []);
+
   // Optimistic local patch after a successful log_lead_update_atomic
   // call — same idea as LeadList's handleLeadUpdated, no full refetch
   // needed since the RPC already tells us exactly what changed.
@@ -367,21 +392,12 @@ export default function DataList({ employeeId }: DataListProps) {
             </div>
           ) : (
             <div className="mx-4 mt-4 space-y-3 pb-6">
-              {visibleLeads.map((lead: any, index: number) => (
+              {cardLeads.map((cardLead, index) => (
                 <DataCard
-                  key={lead.id}
+                  key={cardLead.id}
                   index={index}
-                  onOpen={() => setSelectedLeadId(lead.id)}
-                  lead={{
-                    id: lead.id,
-                    leadHistoryId: lead.lead_history[0]?.id,
-                    name: lead.name,
-                    mobile: lead.mobile,
-                    source: lead.source,
-                    status: lead.status,
-                    board_stage: lead.board_stage,
-                    call_count: lead.lead_history[0]?.call_count ?? 0
-                  }}
+                  onOpen={handleOpenLead}
+                  lead={cardLead}
                 />
               ))}
             </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Search, ChevronDown, Target, FileSpreadsheet, FileText, Upload, Table2 } from "lucide-react";
 import Link from "next/link";
@@ -15,10 +15,24 @@ import { BOARD_STAGES } from "@/lib/leadBoardStageDisplay";
 import { exportLeadsToExcel, exportLeadsToPDF } from "@/lib/exportLeadsReport";
 import { DateRangeOption, isWithinDateRange, dateRangeFilterLabel } from "@/lib/dateRangeFilter";
 import { getRecycleCutoff } from "@/lib/calculateSLAStatus";
+import { isLeadTerminal } from "@/lib/isLeadTerminal";
 
 type SortOption = "NEWEST" | "OLDEST" | "SLA_URGENCY";
 
 const ALL_STATUSES = Object.keys(LEAD_STATUS_DISPLAY);
+
+// Card-grid page size (2026-09-18 perf fix) — this page has no upper
+// bound on how many leads it can match (unlike the employee-side
+// LeadList, which is naturally capped to one employee's own leads via
+// RLS). Rendering every matching lead as a full AdminLeadCard at once
+// is the real bottleneck measured on this page (confirmed: ~1,900
+// leads today, zero pagination anywhere in the fetch/render path,
+// unlike admin/teams and admin/backup-status which already paginate).
+// This ONLY caps what's mounted in the grid — filtering, search, sort,
+// Select-All-Filtered, and the Excel/PDF/Report-Table export all keep
+// operating on the full filtered set (visibleLeads/cardLeads), exactly
+// as before. Matches admin/backup-status's own .limit(60) convention.
+const LEADS_PAGE_SIZE = 60;
 
 // Same appearance-none + overlaid chevron treatment as the
 // employee-side LeadList — native <select> underneath (best mobile
@@ -77,6 +91,23 @@ export default function AdminLeadsPage() {
   const [showPreviewTable, setShowPreviewTable] = useState(false);
   const [manualEntryOpen, setManualEntryOpen] = useState(false);
   const [manualBookingOpen, setManualBookingOpen] = useState(false);
+
+  // Bulk Reassign — selection lives here (parent), same split as every
+  // other cross-card state on this page (see AdminLeadCard's own
+  // comment). Selected IDs persist across filter changes on purpose —
+  // a lead scrolled out of view by a filter is still a deliberate
+  // choice Admin made, not a stale artifact. The bar's always-visible
+  // "N selected" count + Clear button is what surfaces that instead.
+  // Cleared automatically only after a successful bulk action.
+  // Which page of the (already filtered) card grid is currently
+  // rendered — independent of selection, filters, or export, all of
+  // which still see the complete filtered set regardless of this.
+  const [visiblePage, setVisiblePage] = useState(1);
+
+  const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
+  const [bulkTargetEmployeeId, setBulkTargetEmployeeId] = useState("");
+  const [bulkReason, setBulkReason] = useState("");
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [employeeFilter, setEmployeeFilter] = useState("");
@@ -199,7 +230,7 @@ export default function AdminLeadsPage() {
   // LEADS status, recycle_count reset, working-hours-aware SLA
   // deadline, full lead_history audit trail preserved) — this just
   // calls it and refetches so the card reflects the new state.
-  async function handleUnjunkReassign(leadId: string, employeeId: string, reason: string) {
+  const handleUnjunkReassign = useCallback(async (leadId: string, employeeId: string, reason: string) => {
     const { error } = await supabase.rpc("unjunk_and_reassign_lead_atomic", {
       p_lead_id: leadId,
       p_new_employee_id: employeeId,
@@ -213,6 +244,63 @@ export default function AdminLeadsPage() {
 
     toast.success("Lead recovered and reassigned.");
     loadLeads();
+  }, []);
+
+  const handleToggleSelect = useCallback((leadId: string) => {
+    setSelectedLeadIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(leadId)) next.delete(leadId);
+      else next.add(leadId);
+      return next;
+    });
+  }, []);
+
+  // One RPC call for the whole batch (bulk_reassign_leads_atomic),
+  // not a client-side loop — it does its own per-lead try/catch
+  // internally (a real Postgres savepoint per lead), so one bad lead
+  // in the batch can't abort the others. The per-lead results it
+  // returns are surfaced as a single summary toast rather than one
+  // toast per lead, which would be noise for a 50-lead batch.
+  async function handleBulkReassign() {
+    if (selectedLeadIds.size === 0 || !bulkTargetEmployeeId || !bulkReason.trim()) return;
+
+    setBulkSubmitting(true);
+    try {
+      const { data, error } = await supabase.rpc("bulk_reassign_leads_atomic", {
+        p_lead_ids: Array.from(selectedLeadIds),
+        p_new_employee_id: bulkTargetEmployeeId,
+        p_reason: bulkReason.trim()
+      });
+
+      if (error) {
+        toast.error(error.message || "Could not bulk-reassign these leads.");
+        return;
+      }
+
+      const results = (data || []) as { lead_id: string; success: boolean; error?: string }[];
+      const failed = results.filter((r) => !r.success);
+
+      if (failed.length === 0) {
+        toast.success(`Reassigned ${results.length} lead${results.length === 1 ? "" : "s"}.`);
+      } else {
+        toast.error(
+          `${results.length - failed.length} reassigned, ${failed.length} failed: ${failed
+            .map((f) => f.error)
+            .join("; ")}`,
+          { duration: 8000 }
+        );
+      }
+
+      setSelectedLeadIds(new Set());
+      setBulkTargetEmployeeId("");
+      setBulkReason("");
+      loadLeads();
+    } catch (err) {
+      console.error(err);
+      toast.error("Something went wrong bulk-reassigning these leads.");
+    } finally {
+      setBulkSubmitting(false);
+    }
   }
 
   // Reserving a lead for a team is a plain client-side update (not an
@@ -229,7 +317,14 @@ export default function AdminLeadsPage() {
   // logged when actually reserving for a team, not when clearing back
   // to "No team reserved" — there's no assignment-shaped event to
   // record in that direction.
-  async function handleReserveTeam(leadId: string, teamId: string | null) {
+  // Wrapped in useCallback (2026-09-18 perf fix) -- AdminLeadCard is
+  // memo()'d, but a plain function declaration here is a NEW reference
+  // every render, which defeats that memo entirely: every card was
+  // re-rendering on every single checkbox click (confirmed root cause
+  // of the reported click lag -- this page had no useCallback usage at
+  // all before this). Stable references here mean only the one card
+  // whose own props actually changed re-renders.
+  const handleReserveTeam = useCallback(async (leadId: string, teamId: string | null) => {
     const { error } = await supabase
       .from("leads")
       .update({ pending_team_id: teamId })
@@ -257,7 +352,7 @@ export default function AdminLeadsPage() {
           : lead
       )
     );
-  }
+  }, [adminEmployeeId, teams]);
 
   const employeeOptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -374,6 +469,101 @@ export default function AdminLeadsPage() {
     customEnd,
     sortBy
   ]);
+
+  // Select All (Filtered) — exactly the ids visibleLeads would already
+  // render a checkbox for (same isLeadTerminal exclusion AdminLeadCard
+  // itself uses, single source of truth, not reimplemented). Recomputes
+  // whenever the filters change visibleLeads, so "Select All" always
+  // means "all of what's on screen right now under the current filters"
+  // — never a stale set from a previous filter combination.
+  const selectableVisibleIds = useMemo(
+    () => visibleLeads.filter((lead) => !isLeadTerminal(lead.status, lead.board_stage || "LEADS")).map((lead) => lead.id),
+    [visibleLeads]
+  );
+
+  const allVisibleSelected =
+    selectableVisibleIds.length > 0 && selectableVisibleIds.every((id) => selectedLeadIds.has(id));
+
+  // The actual remaining re-render culprit (2026-09-18 perf follow-up):
+  // even after handleReserveTeam/handleUnjunkReassign/handleToggleSelect
+  // became stable via useCallback, every card below still received a
+  // BRAND NEW `lead={{ ...inline object literal... }}` on every single
+  // render of this page — a fresh object reference every time,
+  // regardless of whether that specific lead's data actually changed.
+  // AdminLeadCard's memo() shallow-compares props by reference, so a
+  // new object every render defeats it exactly as badly as the unstable
+  // callbacks did — every card was still re-rendering on every checkbox
+  // click even after the previous fix. Hoisting the transform here
+  // means each card's `lead` object is only rebuilt when visibleLeads
+  // itself changes (a real data/filter change), not on every keystroke
+  // in the bulk-reassign reason box or every other click on the page.
+  const cardLeads = useMemo(
+    () =>
+      visibleLeads.map((lead: any) => ({
+        id: lead.id,
+        name: lead.name,
+        mobile: lead.mobile,
+        project: lead.project,
+        source: lead.source,
+        status: lead.status,
+        priority: lead.priority,
+        boardStage: lead.board_stage || "LEADS",
+        recycleCount: lead.recycle_count,
+        ownerName: lead.employees?.name ?? null,
+        currentOwnerId: lead.current_owner_id ?? null,
+        catcherName: lead.catcher_name ?? null,
+        assignedAt: lead.lead_history?.[0]?.assigned_at ?? null,
+        pendingTeamId: lead.pending_team_id ?? null,
+        pendingTeamName: lead.pending_team?.name ?? null,
+        leadType: lead.lead_type || "LEAD",
+        callCount: lead.lead_history?.[0]?.call_count ?? 0,
+        pausedUntil: lead.lead_history?.[0]?.paused_until ?? null,
+        pauseReason: lead.lead_history?.[0]?.pause_reason ?? null,
+        lastActivityAt: lead.lead_history?.[0]?.last_activity_at ?? null,
+        outcomeAt: lead.lead_history?.[0]?.outcome_at ?? null
+      })),
+    [visibleLeads]
+  );
+
+  const totalPages = Math.max(1, Math.ceil(cardLeads.length / LEADS_PAGE_SIZE));
+
+  // Snap back to page 1 whenever the underlying filtered set changes
+  // (a filter/search/sort edit, or a reload after an admin action) —
+  // cardLeads only gets a new reference on those events (loadLeads is
+  // called just 3 times in this file: mount, after unjunk-reassign,
+  // after bulk-reassign), never on an interval/realtime tick, so this
+  // can't fight with normal browsing. Without it, narrowing a filter
+  // while on page 5 could land Admin on an empty page even though
+  // matching leads exist on page 1. Adjusted during render (React's own
+  // documented pattern for "reset state when a value changes"), not via
+  // a useEffect -- an effect would run one paint late, letting page 5's
+  // stale grid flash briefly before snapping to page 1.
+  const [prevCardLeads, setPrevCardLeads] = useState(cardLeads);
+  if (cardLeads !== prevCardLeads) {
+    setPrevCardLeads(cardLeads);
+    setVisiblePage(1);
+  }
+
+  const paginatedCardLeads = useMemo(
+    () => cardLeads.slice((visiblePage - 1) * LEADS_PAGE_SIZE, visiblePage * LEADS_PAGE_SIZE),
+    [cardLeads, visiblePage]
+  );
+
+  // Toggle, not just "add all" — lets Admin flip a full filtered batch
+  // back off in one click too. Only ever touches the currently-visible
+  // selectable ids; any selection made under a different filter (see
+  // the "persists across filters" comment above) is left untouched.
+  const handleToggleSelectAll = useCallback(() => {
+    setSelectedLeadIds((prev) => {
+      const next = new Set(prev);
+      const allSelected = selectableVisibleIds.length > 0 && selectableVisibleIds.every((id) => next.has(id));
+      for (const id of selectableVisibleIds) {
+        if (allSelected) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
+  }, [selectableVisibleIds]);
 
   // Report-header content — Employee gets its own labeled line (per
   // spec), the other four filters bundle into one "Filters: ..."
@@ -682,42 +872,115 @@ export default function AdminLeadsPage() {
           <h2 className="text-lg font-semibold text-gray-700">No leads match these filters</h2>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {visibleLeads.map((lead: any, index: number) => (
+        <>
+          {selectableVisibleIds.length > 0 && (
+            <div className="flex items-center justify-between">
+              <button
+                onClick={handleToggleSelectAll}
+                className="text-xs font-bold text-blue-700 hover:text-blue-900"
+              >
+                {allVisibleSelected
+                  ? `Deselect All (${selectableVisibleIds.length})`
+                  : `Select All Filtered (${selectableVisibleIds.length})`}
+              </button>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {paginatedCardLeads.map((cardLead, index) => (
             <AdminLeadCard
-              key={lead.id}
+              key={cardLead.id}
               index={index}
               teams={teams}
               employees={employees}
               onReserveTeam={handleReserveTeam}
               onUnjunkReassign={handleUnjunkReassign}
-              isOwnerOnLeave={lead.current_owner_id ? onLeaveEmployeeIds.has(lead.current_owner_id) : false}
-              lead={{
-                id: lead.id,
-                name: lead.name,
-                mobile: lead.mobile,
-                project: lead.project,
-                source: lead.source,
-                status: lead.status,
-                priority: lead.priority,
-                boardStage: lead.board_stage || "LEADS",
-                recycleCount: lead.recycle_count,
-                ownerName: lead.employees?.name ?? null,
-                currentOwnerId: lead.current_owner_id ?? null,
-                catcherName: lead.catcher_name ?? null,
-                assignedAt: lead.lead_history?.[0]?.assigned_at ?? null,
-                pendingTeamId: lead.pending_team_id ?? null,
-                pendingTeamName: lead.pending_team?.name ?? null,
-                leadType: lead.lead_type || "LEAD",
-                callCount: lead.lead_history?.[0]?.call_count ?? 0,
-                pausedUntil: lead.lead_history?.[0]?.paused_until ?? null,
-                pauseReason: lead.lead_history?.[0]?.pause_reason ?? null,
-                lastActivityAt: lead.lead_history?.[0]?.last_activity_at ?? null,
-                outcomeAt: lead.lead_history?.[0]?.outcome_at ?? null
-              }}
+              isOwnerOnLeave={cardLead.currentOwnerId ? onLeaveEmployeeIds.has(cardLead.currentOwnerId) : false}
+              selectable
+              selected={selectedLeadIds.has(cardLead.id)}
+              onToggleSelect={handleToggleSelect}
+              lead={cardLead}
             />
           ))}
-        </div>
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-4 pt-2">
+              <button
+                onClick={() => setVisiblePage((p) => Math.max(1, p - 1))}
+                disabled={visiblePage === 1}
+                className="h-9 px-4 rounded-lg text-xs font-bold bg-white border border-slate-200 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 transition"
+              >
+                Previous
+              </button>
+              <span className="text-xs font-semibold text-slate-500">
+                Page {visiblePage} of {totalPages} — showing{" "}
+                {(visiblePage - 1) * LEADS_PAGE_SIZE + 1}
+                {"–"}
+                {Math.min(visiblePage * LEADS_PAGE_SIZE, cardLeads.length)} of {cardLeads.length}
+              </span>
+              <button
+                onClick={() => setVisiblePage((p) => Math.min(totalPages, p + 1))}
+                disabled={visiblePage === totalPages}
+                className="h-9 px-4 rounded-lg text-xs font-bold bg-white border border-slate-200 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 transition"
+              >
+                Next
+              </button>
+            </div>
+          )}
+        </>
+      )}
+
+      {selectedLeadIds.size > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 w-[min(640px,calc(100vw-2rem))] rounded-2xl bg-white border border-slate-200 shadow-[0_12px_36px_rgba(15,23,42,0.18)] p-4"
+        >
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <p className="text-sm font-bold text-slate-800">
+              {selectedLeadIds.size} lead{selectedLeadIds.size === 1 ? "" : "s"} selected
+            </p>
+            <button
+              onClick={() => setSelectedLeadIds(new Set())}
+              className="text-xs font-semibold text-slate-400 hover:text-slate-600"
+            >
+              Clear
+            </button>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-2">
+            <FilterSelect
+              value={bulkTargetEmployeeId}
+              onChange={(e) => setBulkTargetEmployeeId(e.target.value)}
+              className="sm:w-48"
+            >
+              <option value="">Assign to...</option>
+              {employees
+                .filter((e) => e.is_active)
+                .map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.name}
+                  </option>
+                ))}
+            </FilterSelect>
+
+            <input
+              value={bulkReason}
+              onChange={(e) => setBulkReason(e.target.value)}
+              placeholder="Reason (required)"
+              className="flex-1 h-10 rounded-lg bg-slate-50 border border-slate-200 px-3 text-xs outline-none"
+            />
+
+            <button
+              onClick={handleBulkReassign}
+              disabled={bulkSubmitting || !bulkTargetEmployeeId || !bulkReason.trim()}
+              className="h-10 px-4 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60 transition shrink-0"
+            >
+              {bulkSubmitting ? "Reassigning..." : `Reassign (${selectedLeadIds.size})`}
+            </button>
+          </div>
+        </motion.div>
       )}
     </div>
   );

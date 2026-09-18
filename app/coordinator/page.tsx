@@ -591,6 +591,39 @@ export default function CoordinatorDashboard() {
     sortBy
   ]);
 
+  // Same fix as app/admin/leads/page.tsx's cardLeads (2026-09-18) — the
+  // noopReserveTeam stable-reference fix above (2026-08-27) only solved
+  // half of what was defeating AdminLeadCard's memo() here; the
+  // `lead={{ ...inline object... }}` below was still a fresh reference
+  // every render, for every card, on this read-only reporting view
+  // Sales Coordinator has open all day.
+  const cardLeads = useMemo(
+    () =>
+      visibleLeads.map((lead: any) => ({
+        id: lead.id,
+        name: lead.name,
+        mobile: lead.mobile,
+        project: lead.project,
+        source: lead.source,
+        catcherName: lead.catcher_name ?? null,
+        status: lead.status,
+        priority: lead.priority,
+        boardStage: lead.board_stage || "LEADS",
+        recycleCount: lead.recycle_count,
+        ownerName: lead.employees?.name ?? null,
+        currentOwnerId: lead.current_owner_id ?? null,
+        assignedAt: lead.lead_history?.[0]?.assigned_at ?? null,
+        pendingTeamId: null,
+        pendingTeamName: null,
+        leadType: lead.lead_type || "LEAD",
+        callCount: lead.lead_history?.[0]?.call_count ?? 0,
+        pausedUntil: lead.lead_history?.[0]?.paused_until ?? null,
+        pauseReason: lead.lead_history?.[0]?.pause_reason ?? null,
+        lastActivityAt: lead.lead_history?.[0]?.last_activity_at ?? null
+      })),
+    [visibleLeads]
+  );
+
   const leadsReportMeta = useMemo(() => {
     const employeeLabel = employeeFilter
       ? employeeOptions.find((e) => e.id === employeeFilter)?.name ?? null
@@ -1284,35 +1317,15 @@ export default function CoordinatorDashboard() {
             <EmptyState emoji="🎯" text="No leads match these filters." />
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {visibleLeads.map((lead: any, index: number) => (
+              {cardLeads.map((cardLead, index) => (
                 <AdminLeadCard
-                  key={lead.id}
+                  key={cardLead.id}
                   index={index}
                   teams={[]}
                   onReserveTeam={noopReserveTeam}
                   readOnly
-                  isOwnerOnLeave={lead.current_owner_id ? onLeaveEmployeeIds.has(lead.current_owner_id) : false}
-                  lead={{
-                    id: lead.id,
-                    name: lead.name,
-                    mobile: lead.mobile,
-                    project: lead.project,
-                    source: lead.source,
-                    catcherName: lead.catcher_name ?? null,
-                    status: lead.status,
-                    priority: lead.priority,
-                    boardStage: lead.board_stage || "LEADS",
-                    recycleCount: lead.recycle_count,
-                    ownerName: lead.employees?.name ?? null,
-                    assignedAt: lead.lead_history?.[0]?.assigned_at ?? null,
-                    pendingTeamId: null,
-                    pendingTeamName: null,
-                    leadType: lead.lead_type || "LEAD",
-                    callCount: lead.lead_history?.[0]?.call_count ?? 0,
-                    pausedUntil: lead.lead_history?.[0]?.paused_until ?? null,
-                    pauseReason: lead.lead_history?.[0]?.pause_reason ?? null,
-                    lastActivityAt: lead.lead_history?.[0]?.last_activity_at ?? null
-                  }}
+                  isOwnerOnLeave={cardLead.currentOwnerId ? onLeaveEmployeeIds.has(cardLead.currentOwnerId) : false}
+                  lead={cardLead}
                 />
               ))}
             </div>
