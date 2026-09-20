@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { CheckCircle2, AlertTriangle, XCircle, RefreshCw } from "lucide-react";
+import { CheckCircle2, AlertTriangle, XCircle, RefreshCw, Play } from "lucide-react";
+import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
 
 interface Discrepancy {
@@ -43,6 +44,7 @@ export default function BackupStatusPage() {
 
   const [runs, setRuns] = useState<BackupRun[]>([]);
   const [loading, setLoading] = useState(true);
+  const [triggering, setTriggering] = useState(false);
 
   useEffect(() => {
     loadRuns();
@@ -60,6 +62,52 @@ export default function BackupStatusPage() {
     if (!error && data) setRuns(data);
 
     setLoading(false);
+  }
+
+  // Proxies through app/api/admin/trigger-backup rather than calling
+  // the Edge Function directly -- see that route's own comment for
+  // why (it does the real Admin-role check; the Edge Function itself
+  // has none). Awaits the full run (same request the route makes to
+  // the Edge Function, which itself only returns once the backup has
+  // actually finished), so a plain loadRuns() after it resolves
+  // already has the new row -- no polling needed.
+  async function handleTriggerNow() {
+    setTriggering(true);
+    try {
+      const {
+        data: { session }
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        toast.error("Not logged in.");
+        return;
+      }
+
+      const res = await fetch("/api/admin/trigger-backup", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}` }
+      });
+
+      const body = await res.json();
+
+      if (!res.ok) {
+        toast.error(body.error || body.message || "Backup run failed.");
+        return;
+      }
+
+      if (body.success) {
+        toast.success(`Backup complete — ${body.totalLeadsBackedUp} leads, ${body.tabsWritten} tabs.`);
+      } else {
+        toast.error(`Backup finished with ${body.discrepancies?.length || 0} discrepancy(ies) — see the log below.`);
+      }
+
+      await loadRuns();
+    } catch (err) {
+      console.error(err);
+      toast.error("Something went wrong triggering the backup.");
+    } finally {
+      setTriggering(false);
+    }
   }
 
   const latest = runs[0];
@@ -83,13 +131,23 @@ export default function BackupStatusPage() {
             </p>
           </div>
 
-          <button
-            onClick={loadRuns}
-            className="shrink-0 flex items-center gap-1.5 h-9 px-3.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-xs font-semibold transition"
-          >
-            <RefreshCw size={13} />
-            Refresh
-          </button>
+          <div className="flex gap-2 shrink-0">
+            <button
+              onClick={handleTriggerNow}
+              disabled={triggering}
+              className="flex items-center gap-1.5 h-9 px-3.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-xs font-semibold transition disabled:opacity-50 disabled:cursor-wait"
+            >
+              <Play size={13} />
+              {triggering ? "Running..." : "Trigger Now"}
+            </button>
+            <button
+              onClick={loadRuns}
+              className="flex items-center gap-1.5 h-9 px-3.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-xs font-semibold transition"
+            >
+              <RefreshCw size={13} />
+              Refresh
+            </button>
+          </div>
         </div>
 
         {latest && (

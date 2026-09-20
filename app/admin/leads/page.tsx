@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Search, ChevronDown, Target, FileSpreadsheet, FileText, Upload, Table2 } from "lucide-react";
 import Link from "next/link";
@@ -13,7 +13,7 @@ import ManualBookingEntryModal from "@/components/ManualBookingEntryModal";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES } from "@/lib/leadBoardStageDisplay";
 import { exportLeadsToExcel, exportLeadsToPDF } from "@/lib/exportLeadsReport";
-import { DateRangeOption, isWithinDateRange, dateRangeFilterLabel } from "@/lib/dateRangeFilter";
+import { DateRangeOption, dateRangeFilterLabel } from "@/lib/dateRangeFilter";
 import { getRecycleCutoff } from "@/lib/calculateSLAStatus";
 import { isLeadTerminal } from "@/lib/isLeadTerminal";
 
@@ -21,18 +21,40 @@ type SortOption = "NEWEST" | "OLDEST" | "SLA_URGENCY";
 
 const ALL_STATUSES = Object.keys(LEAD_STATUS_DISPLAY);
 
-// Card-grid page size (2026-09-18 perf fix) — this page has no upper
-// bound on how many leads it can match (unlike the employee-side
-// LeadList, which is naturally capped to one employee's own leads via
-// RLS). Rendering every matching lead as a full AdminLeadCard at once
-// is the real bottleneck measured on this page (confirmed: ~1,900
-// leads today, zero pagination anywhere in the fetch/render path,
-// unlike admin/teams and admin/backup-status which already paginate).
-// This ONLY caps what's mounted in the grid — filtering, search, sort,
-// Select-All-Filtered, and the Excel/PDF/Report-Table export all keep
-// operating on the full filtered set (visibleLeads/cardLeads), exactly
-// as before. Matches admin/backup-status's own .limit(60) convention.
-const LEADS_PAGE_SIZE = 60;
+// Server-side pagination + filtering (2026-09-20 rework, 4 pieces,
+// all landed) — replaces the old "fetch everything, filter/sort/
+// paginate in the browser" design entirely. That approach silently
+// capped at PostgREST's default 1000-row response limit (the critical
+// bug fixed just before this rework), and even once corrected to fetch
+// everything via a .range() loop, it meant downloading the ENTIRE
+// company-wide leads table on every single page load — fine at ~2,200
+// rows, genuinely bad at the 50,000-100,000 this table is expected to
+// reach. Every filter below is now a real SQL condition (see
+// applyLeadFilters), and only the current PAGE_SIZE-row page is ever
+// fetched, with a `{ count: "exact" }` riding along on the SAME
+// request (not a second one) for the "Showing X-Y of Z" total.
+//
+// recyclingSoonFilter is the one deliberate, permanent exception, kept
+// client-side (see cardLeads below) — getRecycleCutoff() is
+// time-dependent, multi-branch business logic already shared with the
+// live SLA-countdown display; reimplementing it in SQL risks it
+// drifting out of sync with the TS version. When this toggle is on, it
+// filters only the current page's already-fetched rows, so the "of Z"
+// total isn't authoritative and Select-All/Export/Preview all fall
+// back to page-scoped for that one view specifically (labeled "(This
+// Page)"/"(Page)" in the UI) — there's no server-side "full matching
+// set" to fetch for a condition that's never sent as a query.
+//
+// Select-All-Filtered and Excel/PDF export/Report-Table fetch the full
+// matching set via fetchAllMatching (a .range()-loop scoped through
+// applyLeadFilters, same idiom as the emergency fix that started this
+// rework, just scoped to the — usually much smaller — filtered result
+// instead of the whole table) rather than just the visible page.
+// project/source filter options come from dedicated
+// leads_distinct_projects/leads_distinct_sources DB views, independent
+// of pagination and filters entirely.
+const PAGE_SIZE = 60;
+const SEARCH_DEBOUNCE_MS = 300;
 
 // Same appearance-none + overlaid chevron treatment as the
 // employee-side LeadList — native <select> underneath (best mobile
@@ -75,12 +97,12 @@ export default function AdminLeadsPage() {
   const [leads, setLeads] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
-  // Full active-employee roster — separate from employeeOptions below
-  // (which only lists employees who currently OWN a lead, fine for
-  // filtering but useless as a JUNK-recovery reassign-target picker,
-  // since the whole point is picking someone who doesn't own this
-  // lead yet).
+  // Full active-employee roster — used both as the JUNK-recovery
+  // reassign-target picker and (via employeeOptions below) the
+  // Employee filter dropdown.
   const [employees, setEmployees] = useState<{ id: string; name: string; is_active: boolean }[]>([]);
+  const [projectOptions, setProjectOptions] = useState<string[]>([]);
+  const [sourceOptions, setSourceOptions] = useState<string[]>([]);
   // Employee Leave/Holiday gap (2026-08-23, Point A) — who's currently
   // on leave, fetched once per page load (not per card) and looked up
   // by current_owner_id when rendering each AdminLeadCard below. Same
@@ -99,10 +121,11 @@ export default function AdminLeadsPage() {
   // choice Admin made, not a stale artifact. The bar's always-visible
   // "N selected" count + Clear button is what surfaces that instead.
   // Cleared automatically only after a successful bulk action.
-  // Which page of the (already filtered) card grid is currently
-  // rendered — independent of selection, filters, or export, all of
-  // which still see the complete filtered set regardless of this.
-  const [visiblePage, setVisiblePage] = useState(1);
+  // Current page of the SERVER-side filtered+paginated result set —
+  // changing this now triggers a real refetch (see the loadLeads
+  // effect below), not a client-side slice of an already-loaded array.
+  const [page, setPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
 
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
   const [bulkTargetEmployeeId, setBulkTargetEmployeeId] = useState("");
@@ -110,6 +133,11 @@ export default function AdminLeadsPage() {
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
+  // Debounced separately from searchQuery itself so every keystroke
+  // doesn't fire a server query — same setTimeout/clearTimeout-in-a-
+  // useEffect idiom, same 300ms, already proven in
+  // ManualBookingEntryModal.tsx's own lead search.
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [employeeFilter, setEmployeeFilter] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
   const [sourceFilter, setSourceFilter] = useState("");
@@ -123,13 +151,73 @@ export default function AdminLeadsPage() {
   const [sortBy, setSortBy] = useState<SortOption>("NEWEST");
   const [exporting, setExporting] = useState(false);
 
+  // Piece 2 — lazily-fetched full matching id list, cached so a second
+  // "Select All Filtered" click (or the toggle back to "Deselect All
+  // Filtered") doesn't re-fetch. null = not fetched yet for the
+  // current filters. Invalidated (set back to null) whenever the
+  // filters actually change, and after a bulk action that could shrink
+  // the true matching set (see handleBulkReassign/handleUnjunkReassign)
+  // — never used stale across either of those.
+  const [fullMatchingIds, setFullMatchingIds] = useState<string[] | null>(null);
+  const [selectAllFetching, setSelectAllFetching] = useState(false);
+
   useEffect(() => {
-    loadLeads();
+    const timer = setTimeout(() => setDebouncedSearchQuery(searchQuery.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Any filter/sort change should snap back to page 1 (a stale page 3
+  // under a new, narrower filter could be empty even though matches
+  // exist on page 1) — adjusted during render, same established idiom
+  // this page already used for its old client-side pagination reset
+  // (see the git history), so the corrected page is what the fetch
+  // effect below actually sees, not one paint behind.
+  const filtersSignature = JSON.stringify([
+    debouncedSearchQuery,
+    employeeFilter,
+    projectFilter,
+    sourceFilter,
+    boardStageFilter,
+    statusFilter,
+    typeFilter,
+    dateRangeFilter,
+    customStart,
+    customEnd,
+    sortBy
+  ]);
+  const [prevFiltersSignature, setPrevFiltersSignature] = useState(filtersSignature);
+  if (filtersSignature !== prevFiltersSignature) {
+    setPrevFiltersSignature(filtersSignature);
+    if (page !== 1) setPage(1);
+    if (fullMatchingIds !== null) setFullMatchingIds(null);
+  }
+
+  useEffect(() => {
     loadTeams();
     loadEmployees();
     loadAdminEmployeeId();
     loadOnLeaveEmployees();
+    loadFilterOptions();
   }, []);
+
+  async function loadFilterOptions() {
+    const [{ data: projects, error: projectsError }, { data: sources, error: sourcesError }] = await Promise.all([
+      supabase.from("leads_distinct_projects").select("project").order("project"),
+      supabase.from("leads_distinct_sources").select("source").order("source")
+    ]);
+
+    if (!projectsError && projects) {
+      setProjectOptions(projects.map((r) => r.project).filter(Boolean));
+    }
+    if (!sourcesError && sources) {
+      setSourceOptions(sources.map((r) => r.source).filter(Boolean));
+    }
+  }
+
+  useEffect(() => {
+    loadLeads();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, filtersSignature]);
 
   async function loadOnLeaveEmployees() {
     const today = new Date().toISOString().slice(0, 10);
@@ -166,13 +254,7 @@ export default function AdminLeadsPage() {
     }
   }
 
-  async function loadLeads() {
-    setLoading(true);
-
-    const { data, error } = await supabase
-      .from("leads")
-      .select(
-        `
+  const LEADS_SELECT = `
         id,
         name,
         mobile,
@@ -195,17 +277,136 @@ export default function AdminLeadsPage() {
           last_activity_at, paused_until, pause_reason, pause_note, outcome_at,
           assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)
         )
-      `
-      )
-      .eq("lead_history.is_active", true)
-      .order("created_at", { ascending: false });
+      `;
+
+  // Every filter is now a real SQL condition, applied identically here
+  // and in the (usually much smaller, post-filter) full-set fetches
+  // piece 2 adds for Select-All/export — one function, so the two can
+  // never drift into showing/exporting different rows than what's
+  // actually on screen.
+  //
+  // board_stage/lead_type default handling: existing rows use NULL to
+  // mean "LEADS"/"LEAD" respectively (never backfilled), so selecting
+  // the default option in either filter must match NULL too, not just
+  // the literal string — same shape the old client-side
+  // `lead.board_stage || "LEADS"` fallback used to paper over.
+  //
+  // Search reuses ManualBookingEntryModal.tsx's exact `.or(ilike)`
+  // shape (including not bothering to escape commas/parens in the
+  // term) — an already-shipped precedent in this codebase, not a new
+  // pattern.
+  function applyLeadFilters(query: any) {
+    let q = query.eq("lead_history.is_active", true);
+
+    if (debouncedSearchQuery) {
+      q = q.or(`name.ilike.%${debouncedSearchQuery}%,mobile.ilike.%${debouncedSearchQuery}%,project.ilike.%${debouncedSearchQuery}%`);
+    }
+
+    if (employeeFilter) q = q.eq("current_owner_id", employeeFilter);
+    if (projectFilter) q = q.eq("project", projectFilter);
+    if (sourceFilter) q = q.eq("source", sourceFilter);
+
+    if (boardStageFilter) {
+      q = boardStageFilter === "LEADS" ? q.or("board_stage.eq.LEADS,board_stage.is.null") : q.eq("board_stage", boardStageFilter);
+    }
+
+    if (statusFilter) q = q.eq("status", statusFilter);
+
+    if (typeFilter) {
+      q = typeFilter === "LEAD" ? q.or("lead_type.eq.LEAD,lead_type.is.null") : q.eq("lead_type", typeFilter);
+    }
+
+    if (dateRangeFilter === "THIS_WEEK") {
+      q = q.gte("lead_history.assigned_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString());
+    } else if (dateRangeFilter === "THIS_MONTH") {
+      q = q.gte("lead_history.assigned_at", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
+    } else if (dateRangeFilter === "CUSTOM" && customStart && customEnd) {
+      q = q
+        .gte("lead_history.assigned_at", new Date(customStart).toISOString())
+        .lte("lead_history.assigned_at", new Date(new Date(customEnd).getTime() + 24 * 60 * 60 * 1000 - 1).toISOString());
+    }
+
+    return q;
+  }
+
+  // Sort maps straight to .order() on the real column now instead of
+  // a client-side Array.sort. "id" is always appended as a final
+  // tiebreaker — without it, rows sharing the same sort value (e.g.
+  // several leads assigned in the same second, or several with no
+  // sla_deadline) could shuffle between adjacent pages as new rows
+  // are inserted between fetches, silently duplicating or skipping a
+  // row across a Next click.
+  function applySort(query: any) {
+    if (sortBy === "SLA_URGENCY") {
+      return query.order("sla_deadline", { ascending: true, nullsFirst: false }).order("id", { ascending: true });
+    }
+    return query
+      .order("assigned_at", { ascending: sortBy === "OLDEST", foreignTable: "lead_history" })
+      .order("id", { ascending: true });
+  }
+
+  // Piece 2 — the full matching set, for Select-All-Filtered and
+  // Excel/PDF/Report-Table, which genuinely need every row (not just
+  // the visible page). Same .range()-loop idiom as the emergency fix
+  // that started this whole rework, just scoped through
+  // applyLeadFilters now instead of the unbounded whole table — safe
+  // precisely because a filtered/searched set is, in the overwhelming
+  // majority of real use, far smaller than the full ~2,200-100,000+
+  // row table. FETCH_ALL_PAGE_SIZE matches PostgREST's own per-request
+  // row cap, minimizing round-trips.
+  const FETCH_ALL_PAGE_SIZE = 1000;
+
+  async function fetchAllMatching(selectString: string): Promise<any[]> {
+    let all: any[] = [];
+    let from = 0;
+
+    while (true) {
+      let query = supabase.from("leads").select(selectString);
+      query = applyLeadFilters(query);
+      query = applySort(query);
+      query = query.range(from, from + FETCH_ALL_PAGE_SIZE - 1);
+
+      const { data, error } = await query;
+      if (error || !data || data.length === 0) break;
+
+      all = all.concat(data);
+
+      if (data.length < FETCH_ALL_PAGE_SIZE) break;
+      from += FETCH_ALL_PAGE_SIZE;
+    }
+
+    return all;
+  }
+
+  async function loadLeads() {
+    setLoading(true);
+
+    let query = supabase.from("leads").select(LEADS_SELECT, { count: "exact" });
+    query = applyLeadFilters(query);
+    query = applySort(query);
+    query = query.range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
+
+    const { data, error, count } = await query;
 
     if (!error && data) {
       setLeads(data);
+      setTotalCount(count ?? 0);
     }
 
     setLoading(false);
   }
+
+  // loadLeads now closes over page/filter state (it didn't before this
+  // rework — the old version had no dependency on any component state
+  // at all). handleUnjunkReassign below is deliberately stable
+  // (useCallback([]) — AdminLeadCard is memo()'d, see its own 2026-09-18
+  // perf comment) so it can't itself depend on loadLeads directly
+  // without capturing a stale mount-time closure (page 1, no filters)
+  // forever. A ref updated every render sidesteps that — the callback
+  // stays stable, but always calls whichever loadLeads closure is
+  // actually current.
+  const loadLeadsRef = useRef(loadLeads);
+  loadLeadsRef.current = loadLeads;
 
   async function loadTeams() {
     const { data, error } = await supabase.from("teams").select("id, name").order("name");
@@ -243,7 +444,8 @@ export default function AdminLeadsPage() {
     }
 
     toast.success("Lead recovered and reassigned.");
-    loadLeads();
+    setFullMatchingIds(null);
+    loadLeadsRef.current();
   }, []);
 
   const handleToggleSelect = useCallback((leadId: string) => {
@@ -294,6 +496,7 @@ export default function AdminLeadsPage() {
       setSelectedLeadIds(new Set());
       setBulkTargetEmployeeId("");
       setBulkReason("");
+      setFullMatchingIds(null);
       loadLeads();
     } catch (err) {
       console.error(err);
@@ -354,68 +557,32 @@ export default function AdminLeadsPage() {
     );
   }, [adminEmployeeId, teams]);
 
-  const employeeOptions = useMemo(() => {
-    const map = new Map<string, string>();
-    leads.forEach((lead) => {
-      if (lead.current_owner_id && lead.employees?.name) {
-        map.set(lead.current_owner_id, lead.employees.name);
-      }
-    });
-    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [leads]);
+  // Simplified (piece 1) — the full active employee roster, already
+  // loaded via loadEmployees(), rather than deriving "employees who
+  // currently own a lead" from whatever's on the loaded page. Arguably
+  // more correct besides: an employee with zero current leads is still
+  // a meaningful thing to filter by ("confirm they truly have none"),
+  // and this removes a dependency on the full leads set being in
+  // memory at all.
+  const employeeOptions = useMemo(() => employees.filter((e) => e.is_active), [employees]);
 
-  const projectOptions = useMemo(
-    () => Array.from(new Set(leads.map((l) => l.project).filter(Boolean))) as string[],
-    [leads]
-  );
+  // Piece 3 — loaded once on mount from dedicated leads_distinct_projects/
+  // leads_distinct_sources views (security_invoker=true, same convention
+  // as employee_sla_breach_history/employee_advances_with_balance),
+  // independent of both pagination and any filter. Real distinct-at-the-
+  // database-level values (34 projects / 5 sources today) rather than
+  // "whatever happens to be on the current page" — replaces piece 1's
+  // deliberately-flagged-incomplete stopgap.
 
-  const sourceOptions = useMemo(
-    () => Array.from(new Set(leads.map((l) => l.source).filter(Boolean))) as string[],
-    [leads]
-  );
-
-  const visibleLeads = useMemo(() => {
-
-    let result = leads;
-
-    if (searchQuery.trim()) {
-      const q = searchQuery.trim().toLowerCase();
-      result = result.filter(
-        (lead) =>
-          lead.name?.toLowerCase().includes(q) ||
-          lead.mobile?.toLowerCase().includes(q) ||
-          lead.project?.toLowerCase().includes(q)
-      );
-    }
-
-    if (employeeFilter) {
-      result = result.filter((lead) => lead.current_owner_id === employeeFilter);
-    }
-
-    if (projectFilter) {
-      result = result.filter((lead) => lead.project === projectFilter);
-    }
-
-    if (sourceFilter) {
-      result = result.filter((lead) => lead.source === sourceFilter);
-    }
-
-    if (boardStageFilter) {
-      result = result.filter((lead) => (lead.board_stage || "LEADS") === boardStageFilter);
-    }
-
-    if (statusFilter) {
-      result = result.filter((lead) => lead.status === statusFilter);
-    }
-
-    if (typeFilter) {
-      result = result.filter((lead) => (lead.lead_type || "LEAD") === typeFilter);
-    }
-
-    if (recyclingSoonFilter) {
-      result = result.filter((lead) => {
-        const h = lead.lead_history?.[0];
-        return getRecycleCutoff(
+  // recyclingSoonFilter stays client-side by design (see the top-of-
+  // file comment) — applied here, after the server has already
+  // returned the current page, never sent as a query condition.
+  const recyclingFilteredLeads = useMemo(() => {
+    if (!recyclingSoonFilter) return leads;
+    return leads.filter((lead: any) => {
+      const h = lead.lead_history?.[0];
+      return (
+        getRecycleCutoff(
           {
             status: lead.status,
             sla_deadline: null,
@@ -428,78 +595,40 @@ export default function AdminLeadsPage() {
             lead_type: lead.lead_type
           },
           h?.outcome_at ?? null
-        ) !== null;
-      });
-    }
-
-    if (dateRangeFilter !== "ALL") {
-      result = result.filter((lead) =>
-        isWithinDateRange(lead.lead_history?.[0]?.assigned_at, dateRangeFilter, customStart, customEnd)
+        ) !== null
       );
-    }
-
-    result = [...result].sort((a, b) => {
-
-      if (sortBy === "SLA_URGENCY") {
-        const aDeadline = a.sla_deadline ? new Date(a.sla_deadline).getTime() : Infinity;
-        const bDeadline = b.sla_deadline ? new Date(b.sla_deadline).getTime() : Infinity;
-        return aDeadline - bDeadline;
-      }
-
-      const aAssigned = new Date(a.lead_history?.[0]?.assigned_at || a.created_at).getTime();
-      const bAssigned = new Date(b.lead_history?.[0]?.assigned_at || b.created_at).getTime();
-
-      return sortBy === "OLDEST" ? aAssigned - bAssigned : bAssigned - aAssigned;
     });
+  }, [leads, recyclingSoonFilter]);
 
-    return result;
-
-  }, [
-    leads,
-    searchQuery,
-    employeeFilter,
-    projectFilter,
-    sourceFilter,
-    boardStageFilter,
-    statusFilter,
-    recyclingSoonFilter,
-    typeFilter,
-    dateRangeFilter,
-    customStart,
-    customEnd,
-    sortBy
-  ]);
-
-  // Select All (Filtered) — exactly the ids visibleLeads would already
-  // render a checkbox for (same isLeadTerminal exclusion AdminLeadCard
-  // itself uses, single source of truth, not reimplemented). Recomputes
-  // whenever the filters change visibleLeads, so "Select All" always
-  // means "all of what's on screen right now under the current filters"
-  // — never a stale set from a previous filter combination.
-  const selectableVisibleIds = useMemo(
-    () => visibleLeads.filter((lead) => !isLeadTerminal(lead.status, lead.board_stage || "LEADS")).map((lead) => lead.id),
-    [visibleLeads]
+  // Piece 2 — current page's selectable ids (used as-is when
+  // recyclingSoonFilter is active, since that condition can't be
+  // evaluated server-side — see the top-of-file comment — so the true
+  // full matching set genuinely can't be known in that case; Select-
+  // All stays page-scoped there, same as piece 1). Otherwise this is
+  // just the fallback shown before the full set has been fetched.
+  const pageSelectableIds = useMemo(
+    () => recyclingFilteredLeads.filter((lead: any) => !isLeadTerminal(lead.status, lead.board_stage || "LEADS")).map((lead: any) => lead.id),
+    [recyclingFilteredLeads]
   );
 
-  const allVisibleSelected =
-    selectableVisibleIds.length > 0 && selectableVisibleIds.every((id) => selectedLeadIds.has(id));
+  const selectAllIsFullSet = !recyclingSoonFilter;
+  const selectableIds = selectAllIsFullSet ? fullMatchingIds ?? pageSelectableIds : pageSelectableIds;
 
-  // The actual remaining re-render culprit (2026-09-18 perf follow-up):
-  // even after handleReserveTeam/handleUnjunkReassign/handleToggleSelect
-  // became stable via useCallback, every card below still received a
-  // BRAND NEW `lead={{ ...inline object literal... }}` on every single
-  // render of this page — a fresh object reference every time,
-  // regardless of whether that specific lead's data actually changed.
-  // AdminLeadCard's memo() shallow-compares props by reference, so a
-  // new object every render defeats it exactly as badly as the unstable
-  // callbacks did — every card was still re-rendering on every checkbox
-  // click even after the previous fix. Hoisting the transform here
-  // means each card's `lead` object is only rebuilt when visibleLeads
-  // itself changes (a real data/filter change), not on every keystroke
-  // in the bulk-reassign reason box or every other click on the page.
+  // Deliberately NOT inferred from the current page alone when the
+  // full set applies but hasn't been fetched yet — otherwise a page
+  // that happens to be fully (individually) selected would show
+  // "Deselect All Filtered" even though other pages have unselected
+  // matches. Only true once fullMatchingIds is actually known.
+  const allVisibleSelected = selectAllIsFullSet
+    ? fullMatchingIds !== null && fullMatchingIds.length > 0 && fullMatchingIds.every((id) => selectedLeadIds.has(id))
+    : pageSelectableIds.length > 0 && pageSelectableIds.every((id) => selectedLeadIds.has(id));
+
+  // Same perf-motivated hoist as before (2026-09-18) — only now
+  // rebuilt when the current PAGE's data changes, not a client-side
+  // filtered view of the whole table.
   const cardLeads = useMemo(
     () =>
-      visibleLeads.map((lead: any) => ({
+      recyclingFilteredLeads.map((lead: any) => ({
         id: lead.id,
         name: lead.name,
         mobile: lead.mobile,
@@ -522,53 +651,52 @@ export default function AdminLeadsPage() {
         lastActivityAt: lead.lead_history?.[0]?.last_activity_at ?? null,
         outcomeAt: lead.lead_history?.[0]?.outcome_at ?? null
       })),
-    [visibleLeads]
+    [recyclingFilteredLeads]
   );
 
-  const totalPages = Math.max(1, Math.ceil(cardLeads.length / LEADS_PAGE_SIZE));
-
-  // Snap back to page 1 whenever the underlying filtered set changes
-  // (a filter/search/sort edit, or a reload after an admin action) —
-  // cardLeads only gets a new reference on those events (loadLeads is
-  // called just 3 times in this file: mount, after unjunk-reassign,
-  // after bulk-reassign), never on an interval/realtime tick, so this
-  // can't fight with normal browsing. Without it, narrowing a filter
-  // while on page 5 could land Admin on an empty page even though
-  // matching leads exist on page 1. Adjusted during render (React's own
-  // documented pattern for "reset state when a value changes"), not via
-  // a useEffect -- an effect would run one paint late, letting page 5's
-  // stale grid flash briefly before snapping to page 1.
-  const [prevCardLeads, setPrevCardLeads] = useState(cardLeads);
-  if (cardLeads !== prevCardLeads) {
-    setPrevCardLeads(cardLeads);
-    setVisiblePage(1);
-  }
-
-  const paginatedCardLeads = useMemo(
-    () => cardLeads.slice((visiblePage - 1) * LEADS_PAGE_SIZE, visiblePage * LEADS_PAGE_SIZE),
-    [cardLeads, visiblePage]
-  );
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   // Toggle, not just "add all" — lets Admin flip a full filtered batch
-  // back off in one click too. Only ever touches the currently-visible
-  // selectable ids; any selection made under a different filter (see
-  // the "persists across filters" comment above) is left untouched.
-  const handleToggleSelectAll = useCallback(() => {
+  // back off in one click too. Not useCallback-wrapped: unlike
+  // handleUnjunkReassign/handleReserveTeam/handleToggleSelect, this is
+  // only ever used directly in this page's own JSX below, never passed
+  // into memo()'d AdminLeadCard, so it doesn't need a stable identity
+  // — and it needs to do an async fetch + see fresh state every call.
+  //
+  // Lazily fetches the full matching id list on first use (cached in
+  // fullMatchingIds after), rather than eagerly on every filter change
+  // — most filter changes are never followed by a Select-All click, so
+  // fetching up front would waste bandwidth on ids nobody asked for.
+  async function handleToggleSelectAll() {
+    let ids = selectableIds;
+
+    if (selectAllIsFullSet && fullMatchingIds === null) {
+      setSelectAllFetching(true);
+      try {
+        const rows = await fetchAllMatching("id, status, board_stage");
+        const fetchedIds = rows.filter((r: any) => !isLeadTerminal(r.status, r.board_stage || "LEADS")).map((r: any) => r.id);
+        setFullMatchingIds(fetchedIds);
+        ids = fetchedIds;
+      } finally {
+        setSelectAllFetching(false);
+      }
+    }
+
     setSelectedLeadIds((prev) => {
       const next = new Set(prev);
-      const allSelected = selectableVisibleIds.length > 0 && selectableVisibleIds.every((id) => next.has(id));
-      for (const id of selectableVisibleIds) {
+      const allSelected = ids.length > 0 && ids.every((id) => next.has(id));
+      for (const id of ids) {
         if (allSelected) next.delete(id);
         else next.add(id);
       }
       return next;
     });
-  }, [selectableVisibleIds]);
+  }
 
   // Report-header content — Employee gets its own labeled line (per
   // spec), the other four filters bundle into one "Filters: ..."
-  // line. Built from the same filter state driving visibleLeads, so
-  // the report header can never drift out of sync with what's
+  // line. Built from the same filter state driving the server query,
+  // so the report header can never drift out of sync with what's
   // actually in the export.
   const reportMeta = useMemo(() => {
     const employeeLabel = employeeFilter
@@ -622,26 +750,66 @@ export default function AdminLeadsPage() {
     employeeOptions
   ]);
 
-  // Exports exactly visibleLeads (already filtered/searched/sorted
-  // above) — never the full leads array. Both exceljs and jspdf are
-  // dynamically imported inside lib/exportLeadsReport.ts, so their
-  // weight only loads once one of these is actually clicked, not on
-  // every Admin Leads page load.
+  // Piece 2 — exports the full server-side-filtered set via
+  // fetchAllMatching, not just the current page. recyclingSoonFilter
+  // is the one exception (same reasoning as Select-All above): it's
+  // client-only, so there's no server-side "full matching set" to
+  // fetch when it's active — export falls back to the already-visible,
+  // already-client-filtered current page in that case (also a real
+  // fix over piece 1, which exported `leads` directly there, ignoring
+  // this toggle entirely). Both exceljs and jspdf are dynamically
+  // imported inside lib/exportLeadsReport.ts, so their weight only
+  // loads once one of these is actually clicked.
+  const exportIsEmpty = recyclingSoonFilter ? recyclingFilteredLeads.length === 0 : totalCount === 0;
+
   async function handleExport(format: "excel" | "pdf") {
-    if (visibleLeads.length === 0 || exporting) return;
+    if (exportIsEmpty || exporting) return;
 
     setExporting(true);
     try {
+      const rows = recyclingSoonFilter ? recyclingFilteredLeads : await fetchAllMatching(LEADS_SELECT);
+      if (rows.length === 0) {
+        toast.error("No leads match these filters.");
+        return;
+      }
       if (format === "excel") {
-        await exportLeadsToExcel(visibleLeads, reportMeta);
+        await exportLeadsToExcel(rows, reportMeta);
       } else {
-        await exportLeadsToPDF(visibleLeads, reportMeta);
+        await exportLeadsToPDF(rows, reportMeta);
       }
     } catch (err) {
       console.error(err);
       toast.error("Export failed. Please try again.");
     } finally {
       setExporting(false);
+    }
+  }
+
+  // Same full-set-vs-recyclingSoonFilter split as export, for the
+  // Report Table preview — fetched once on toggle-open (not kept in
+  // sync live while open; toggling off and back on refetches).
+  const [previewRows, setPreviewRows] = useState<any[] | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  async function handleTogglePreview() {
+    if (showPreviewTable) {
+      setShowPreviewTable(false);
+      setPreviewRows(null);
+      return;
+    }
+
+    setShowPreviewTable(true);
+    if (recyclingSoonFilter) {
+      setPreviewRows(recyclingFilteredLeads);
+      return;
+    }
+
+    setPreviewLoading(true);
+    try {
+      const rows = await fetchAllMatching(LEADS_SELECT);
+      setPreviewRows(rows);
+    } finally {
+      setPreviewLoading(false);
     }
   }
 
@@ -659,7 +827,9 @@ export default function AdminLeadsPage() {
           <div>
             <h1 className="text-3xl font-bold">Leads</h1>
             <p className="mt-2 text-white/80 text-sm">
-              Every lead, across every employee — {leads.length} total
+              {recyclingSoonFilter
+                ? `Every lead, across every employee — ${cardLeads.length} matching on this page (Recycling Soon total isn't server-computed)`
+                : `Every lead, across every employee — ${totalCount} matching`}
             </p>
           </div>
 
@@ -803,32 +973,32 @@ export default function AdminLeadsPage() {
               below for the custom date-range inputs. */}
           <div className="col-span-2 flex flex-wrap items-center gap-2">
             <button
-              onClick={() => setShowPreviewTable((v) => !v)}
-              disabled={visibleLeads.length === 0}
+              onClick={handleTogglePreview}
+              disabled={exportIsEmpty || previewLoading}
               className={`flex items-center gap-1.5 h-10 px-3 rounded-lg text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed transition ${
                 showPreviewTable ? "bg-blue-600 text-white" : "bg-blue-50 text-blue-700 hover:bg-blue-100"
               }`}
             >
               <Table2 size={14} />
-              {showPreviewTable ? "Hide Table" : "View Report"}
+              {previewLoading ? "Loading..." : showPreviewTable ? "Hide Table" : `View Report${recyclingSoonFilter ? " (Page)" : ""}`}
             </button>
 
             <button
               onClick={() => handleExport("excel")}
-              disabled={visibleLeads.length === 0 || exporting}
+              disabled={exportIsEmpty || exporting}
               className="flex items-center gap-1.5 h-10 px-3 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-emerald-100 transition"
             >
               <FileSpreadsheet size={14} />
-              Excel
+              {exporting ? "Exporting..." : `Excel${recyclingSoonFilter ? " (Page)" : ""}`}
             </button>
 
             <button
               onClick={() => handleExport("pdf")}
-              disabled={visibleLeads.length === 0 || exporting}
+              disabled={exportIsEmpty || exporting}
               className="flex items-center gap-1.5 h-10 px-3 rounded-lg bg-red-50 text-red-700 text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-red-100 transition"
             >
               <FileText size={14} />
-              PDF
+              {exporting ? "Exporting..." : `PDF${recyclingSoonFilter ? " (Page)" : ""}`}
             </button>
           </div>
 
@@ -851,43 +1021,48 @@ export default function AdminLeadsPage() {
         </div>
       </motion.div>
 
-      {!loading && showPreviewTable && (
+      {showPreviewTable && previewRows && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           className="bg-white rounded-[24px] border border-slate-100 shadow-md p-6"
         >
           <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold mb-3">
-            Report Table — {visibleLeads.length} lead{visibleLeads.length === 1 ? "" : "s"}
+            Report Table{recyclingSoonFilter ? " (This Page)" : ""} — {previewRows.length} lead{previewRows.length === 1 ? "" : "s"}
           </p>
-          <ExportPreviewTable leads={visibleLeads} />
+          <ExportPreviewTable leads={previewRows} />
         </motion.div>
       )}
 
       {loading ? (
         <div className="text-center text-sm text-slate-400 py-10">Loading leads...</div>
-      ) : visibleLeads.length === 0 ? (
+      ) : cardLeads.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <div className="text-5xl mb-3">🎯</div>
           <h2 className="text-lg font-semibold text-gray-700">No leads match these filters</h2>
         </div>
       ) : (
         <>
-          {selectableVisibleIds.length > 0 && (
+          {(selectAllIsFullSet ? totalCount > 0 : pageSelectableIds.length > 0) && (
             <div className="flex items-center justify-between">
               <button
                 onClick={handleToggleSelectAll}
-                className="text-xs font-bold text-blue-700 hover:text-blue-900"
+                disabled={selectAllFetching}
+                className="text-xs font-bold text-blue-700 hover:text-blue-900 disabled:opacity-50 disabled:cursor-wait"
               >
-                {allVisibleSelected
-                  ? `Deselect All (${selectableVisibleIds.length})`
-                  : `Select All Filtered (${selectableVisibleIds.length})`}
+                {selectAllFetching
+                  ? "Fetching all matching leads..."
+                  : allVisibleSelected
+                    ? `Deselect All${selectAllIsFullSet ? " Filtered" : " (This Page)"} (${selectableIds.length})`
+                    : selectAllIsFullSet
+                      ? `Select All Filtered (${totalCount})`
+                      : `Select All (This Page) (${pageSelectableIds.length})`}
               </button>
             </div>
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {paginatedCardLeads.map((cardLead, index) => (
+          {cardLeads.map((cardLead, index) => (
             <AdminLeadCard
               key={cardLead.id}
               index={index}
@@ -907,21 +1082,21 @@ export default function AdminLeadsPage() {
           {totalPages > 1 && (
             <div className="flex items-center justify-center gap-4 pt-2">
               <button
-                onClick={() => setVisiblePage((p) => Math.max(1, p - 1))}
-                disabled={visiblePage === 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1 || loading}
                 className="h-9 px-4 rounded-lg text-xs font-bold bg-white border border-slate-200 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 transition"
               >
                 Previous
               </button>
               <span className="text-xs font-semibold text-slate-500">
-                Page {visiblePage} of {totalPages} — showing{" "}
-                {(visiblePage - 1) * LEADS_PAGE_SIZE + 1}
+                Page {page} of {totalPages} — showing{" "}
+                {(page - 1) * PAGE_SIZE + 1}
                 {"–"}
-                {Math.min(visiblePage * LEADS_PAGE_SIZE, cardLeads.length)} of {cardLeads.length}
+                {Math.min(page * PAGE_SIZE, totalCount)} of {totalCount}
               </span>
               <button
-                onClick={() => setVisiblePage((p) => Math.min(totalPages, p + 1))}
-                disabled={visiblePage === totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages || loading}
                 className="h-9 px-4 rounded-lg text-xs font-bold bg-white border border-slate-200 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 transition"
               >
                 Next
