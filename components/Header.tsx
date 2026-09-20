@@ -6,11 +6,13 @@ import { supabase } from "@/lib/supabase";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { Playfair_Display } from "next/font/google";
-import { Bell, Globe, MapPin, Phone, LogOut, X, ChevronRight } from "lucide-react";
-import { FaInstagram, FaFacebookF, FaYoutube } from "react-icons/fa";
+import { Bell, LogOut, X, ChevronRight } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import NotificationModal from "./NotificationModal";
 import BookingCelebrationModal from "./BookingCelebrationModal";
 import LeaderboardPopupModal from "./LeaderboardPopupModal";
+import { getEmployeeTabs } from "./EmployeeTabBar";
 import { getISTParts, ymd, formatShortDate, getMostRecentCompletedWeek, weekEndKey } from "@/lib/leaderboardWeek";
 
 const playfair = Playfair_Display({ subsets: ["latin"], weight: ["600", "700"] });
@@ -49,8 +51,14 @@ export default function Header() {
   const [leaderboardPopup, setLeaderboardPopup] = useState<LeaderboardPopupState | null>(null);
   const [myEmployeeId, setMyEmployeeId] = useState<string | null>(null);
   const [myDepartment, setMyDepartment] = useState<string | null>(null);
+  // role (2026-09-20, mobile-drawer-nav piece) — needed alongside the
+  // already-fetched department to compute the same tab list
+  // getEmployeeTabs gives EmployeeTabBar, for the drawer's mobile-only
+  // Navigation section below.
+  const [myRole, setMyRole] = useState<string | undefined>(undefined);
 
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     const loadUnreadCount = async () => {
@@ -90,7 +98,7 @@ useEffect(() => {
 
       const { data: employee } = await supabase
         .from("employees")
-        .select("id, department")
+        .select("id, department, role")
         .eq("auth_user_id", user.id)
         .single();
 
@@ -98,6 +106,7 @@ useEffect(() => {
 
       setMyEmployeeId(employee.id);
       setMyDepartment(employee.department);
+      setMyRole(employee.role);
 
       const existing = supabase.getChannels().find((ch) => ch.topic === `realtime:employee-${employee.id}`);
 
@@ -391,11 +400,7 @@ useEffect(() => {
     router.replace("/login");
   }
 
-  const socialLinks = [
-    { name: "Instagram", href: "https://www.instagram.com/divyapadmainfosystemllp__/", icon: FaInstagram, color: "#D6336C", bg: "bg-pink-50" },
-    { name: "Facebook", href: "https://www.facebook.com/share/198io8761o/", icon: FaFacebookF, color: "#1877F2", bg: "bg-blue-50" },
-    { name: "YouTube", href: "https://youtube.com/@divyapadmainfosystemllp_1?si=QVF8glGIr_4bZrCo", icon: FaYoutube, color: "#FF0000", bg: "bg-red-50" }
-  ];
+  const drawerTabs = getEmployeeTabs(myRole, myDepartment || undefined);
 
   return (
     <>
@@ -562,36 +567,46 @@ useEffect(() => {
 
               {/* CONTENT */}
               <div className="px-6 py-6">
-                <p className="text-[10.5px] uppercase tracking-[0.25em] text-slate-400 font-bold mb-3 px-1">
-                  Connect With Us
-                </p>
-
-                <div className="flex flex-col gap-3 mb-6">
-                  {socialLinks.map((social, i) => (
-                    <motion.a
-                      key={social.name}
-                      href={social.href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 0.14 + i * 0.06 }}
-                      whileHover={{ y: -2 }}
-                      whileTap={{ scale: 0.98 }}
-                      className="group flex items-center justify-between gap-3 px-4 py-3.5 rounded-2xl bg-white shadow-[0_2px_10px_rgba(15,23,42,0.05)] hover:shadow-[0_6px_20px_rgba(15,23,42,0.1)] border border-slate-100 transition-shadow duration-300"
-                    >
-                      <div className="flex items-center gap-3.5">
-                        <div className={`h-10 w-10 rounded-xl ${social.bg} flex items-center justify-center`}>
-                          <social.icon size={17} style={{ color: social.color }} />
-                        </div>
-                        <span className="text-[14.5px] font-semibold text-slate-800">{social.name}</span>
-                      </div>
-                      <ChevronRight
-                        size={16}
-                        className="text-slate-300 group-hover:text-[#B8860B] group-hover:translate-x-0.5 transition-all"
-                      />
-                    </motion.a>
-                  ))}
+                {/* NAVIGATION (mobile-only, 2026-09-20) — same tabs
+                    EmployeeTabBar shows on desktop, via the shared
+                    getEmployeeTabs, so the two can never list different
+                    tabs. lg:hidden because EmployeeTabBar itself is the
+                    lg:block-only surface for this now -- on desktop,
+                    opening this drawer never needs a redundant copy of
+                    tabs already visible inline on the page. */}
+                <div className="lg:hidden mb-6">
+                  <p className="text-[10.5px] uppercase tracking-[0.25em] text-slate-400 font-bold mb-3 px-1">
+                    Navigate
+                  </p>
+                  <div className="flex flex-col gap-2">
+                    {drawerTabs.map((tab, i) => {
+                      const active = pathname === tab.href;
+                      const Icon = tab.icon;
+                      return (
+                        <motion.div
+                          key={tab.href}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.1 + i * 0.05 }}
+                        >
+                          <Link
+                            href={tab.href}
+                            onClick={() => setOpen(false)}
+                            className={`group flex items-center gap-3.5 px-4 py-3 rounded-2xl border transition-shadow duration-300 ${
+                              active
+                                ? "bg-gradient-to-r from-yellow-400 to-amber-500 border-transparent shadow-[0_4px_12px_rgba(217,119,6,0.35)]"
+                                : "bg-white border-slate-100 shadow-[0_2px_10px_rgba(15,23,42,0.05)] hover:shadow-[0_6px_20px_rgba(15,23,42,0.1)]"
+                            }`}
+                          >
+                            <Icon size={17} className={active ? "text-slate-900" : "text-slate-500"} />
+                            <span className={`text-[14.5px] font-semibold ${active ? "text-slate-900" : "text-slate-800"}`}>
+                              {tab.label}
+                            </span>
+                          </Link>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 <motion.button
@@ -614,41 +629,6 @@ useEffect(() => {
                     className="text-red-200 group-hover:text-red-400 group-hover:translate-x-0.5 transition-all"
                   />
                 </motion.button>
-
-                {/* FOOTER CARD */}
-                <div className="mt-8 rounded-2xl bg-white shadow-[0_2px_10px_rgba(15,23,42,0.05)] border border-slate-100 p-5">
-                  <p className="text-[10.5px] uppercase tracking-[0.25em] text-slate-400 font-bold mb-4">
-                    Get In Touch
-                  </p>
-
-                  <div className="flex flex-col gap-3.5">
-                    <a
-                      href="https://divyapadma.com"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-3 text-[13px] font-medium text-slate-600 hover:text-[#9c7a1f] transition-colors"
-                    >
-                      <span className="h-8 w-8 rounded-lg bg-[#FBF3DD] flex items-center justify-center shrink-0">
-                        <Globe size={14} className="text-[#9c7a1f]" />
-                      </span>
-                      divyapadma.com
-                    </a>
-
-                    <div className="flex items-start gap-3 text-[13px] text-slate-600">
-                      <span className="h-8 w-8 rounded-lg bg-[#FBF3DD] flex items-center justify-center shrink-0 mt-[1px]">
-                        <MapPin size={14} className="text-[#9c7a1f]" />
-                      </span>
-                      <span className="pt-1.5">4th Floor, F417, Artha SEZ, Techzone 4, Greater Noida West</span>
-                    </div>
-
-                    <div className="flex items-center gap-3 text-[13px] text-slate-600">
-                      <span className="h-8 w-8 rounded-lg bg-[#FBF3DD] flex items-center justify-center shrink-0">
-                        <Phone size={14} className="text-[#9c7a1f]" />
-                      </span>
-                      9220907340
-                    </div>
-                  </div>
-                </div>
 
                 <p className="text-center text-[10.5px] text-slate-400 mt-6 tracking-wide">
   Designed &amp; Developed by <span className="text-[#9c7a1f] font-bold">Shivansh Saxena</span>

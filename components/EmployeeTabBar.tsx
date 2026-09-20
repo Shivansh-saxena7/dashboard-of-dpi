@@ -32,6 +32,17 @@ const NON_SALES_TABS = [
 
 const TEAM_LEADER_TAB = { href: "/team", label: "Team", icon: Users };
 
+// Single source of truth for "which tabs does this role/department see"
+// — exported (2026-09-20, mobile-drawer-nav piece) so Header.tsx's
+// drawer can render the identical list on mobile without a second,
+// independently-maintained copy that could drift out of sync if a tab
+// is ever added/removed here.
+export function getEmployeeTabs(role?: string, department?: string) {
+  const isNonSales = Boolean(department && department !== "sales");
+  const baseTabs = isNonSales ? NON_SALES_TABS : SALES_TABS;
+  return !isNonSales && role === "team_leader" ? [...baseTabs, TEAM_LEADER_TAB] : baseTabs;
+}
+
 // Nav between the V1 (Posts) and V2 (Leads/Data) employee views, plus
 // a conditional "Team" tab for team_leader role only — this is
 // exactly the "one more array entry" extensibility this component was
@@ -92,6 +103,13 @@ const TEAM_LEADER_TAB = { href: "/team", label: "Team", icon: Users };
 // (trailing tab fades at the edge, swipeable, not clipped/broken),
 // same as the 6-tab team_leader case already did. The 2-tab
 // NON_SALES_TABS case is the only one that never needs to scroll.
+// Mobile-hidden, desktop-only (2026-09-20) — these tabs live in
+// Header.tsx's drawer on mobile instead (via getEmployeeTabs above),
+// since overflow-x-auto horizontal scrolling here was the actual UX
+// problem being fixed, not just a styling tweak. `lg:` is the same
+// breakpoint the Admin/HR/Payroll sidebar mobile-drawer fixes already
+// use elsewhere in this app, reused here for consistency rather than
+// introducing a second mobile-cutoff convention.
 export default function EmployeeTabBar({ role, department }: EmployeeTabBarProps) {
   const pathname = usePathname();
 
@@ -99,16 +117,14 @@ export default function EmployeeTabBar({ role, department }: EmployeeTabBarProps
   // before the employee row has loaded — falls through to the Sales
   // tab-set, matching the DB column's own default so nothing changes
   // for the common case).
-  const isNonSales = Boolean(department && department !== "sales");
-  const baseTabs = isNonSales ? NON_SALES_TABS : SALES_TABS;
-  const tabs = !isNonSales && role === "team_leader" ? [...baseTabs, TEAM_LEADER_TAB] : baseTabs;
+  const tabs = getEmployeeTabs(role, department);
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5 }}
-      className="relative mx-4 mt-4 rounded-[22px] bg-gradient-to-br from-[#FFFDF8] to-[#F3ECDA] border border-slate-100 shadow-[0_4px_20px_rgba(15,23,42,0.06)] overflow-hidden"
+      className="hidden lg:block relative mx-4 mt-4 rounded-[22px] bg-gradient-to-br from-[#FFFDF8] to-[#F3ECDA] border border-slate-100 shadow-[0_4px_20px_rgba(15,23,42,0.06)] overflow-hidden"
     >
       <motion.div
         aria-hidden
