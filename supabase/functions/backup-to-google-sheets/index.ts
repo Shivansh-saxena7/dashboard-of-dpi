@@ -12,7 +12,14 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 // One tab per active employee (name = tab title), one synthetic
 // "Unassigned - Reserved" tab for leads with no current_owner_id yet
 // (reserved-to-a-team but not yet distributed) — every lead lands
-// somewhere, none silently dropped from the backup.
+// somewhere, none silently dropped from the backup. Plus three GLOBAL
+// tabs (2026-09-20, part B) — "Lead History", "Lead Notes", "Site
+// Visits" — covering the FULL audit trail (every lead_history/
+// lead_notes/site_visits row ever, not just each lead's current
+// derived summary column). Deliberately NOT per-employee: a
+// reassignment away from someone, or a note from a past owner, doesn't
+// cleanly belong to any one person's tab the way a current-state
+// snapshot does.
 //
 // Design is a full snapshot (clear + rewrite each tab), not an
 // incremental diff — deliberately: a daily disaster-recovery backup
@@ -30,11 +37,47 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 // Function style. Credentials come from Deno.env (supabase secrets
 // set GOOGLE_SERVICE_ACCOUNT_KEY / GOOGLE_SHEET_ID), never committed
 // to the repo.
+//
+// Coverage, confirmed precisely 2026-09-20 (verified against code and
+// live data, not assumed):
+// - The `leads` query below has NO lead_type filter anywhere — both
+//   'LEAD' and 'DATA' rows (and legacy NULL, treated as 'LEAD') are
+//   already included and already carry an explicit Type column in the
+//   Sheet.
+// - This design is genuinely future-proof for the `leads` table
+//   itself: the query is unconditional on entry-method/source, so ANY
+//   future feature that inserts a row into `leads` (e.g. a planned
+//   Manual WhatsApp Lead Entry) is automatically picked up on the next
+//   run with zero code changes here, purely because the query has no
+//   opinion on how a row got there.
+// - Confirmed gap, fixed by part B (2026-09-20): site_visits genuinely
+//   allows multiple rows per lead — no unique constraint on lead_id,
+//   and event_type's own CHECK constraint includes 'REVISIT' alongside
+//   'VISIT'/'BOOKED' (3 real leads already had 2 rows each in
+//   production at the time this was found). visitStatusByLead below
+//   still collapses every row for a lead into one derived status
+//   string for the per-employee snapshot tabs (a fine quick-glance
+//   summary), but the new "Site Visits" global tab now carries every
+//   individual row's own event/timestamp/who-logged-it detail, so a
+//   revisit is no longer lost from the backup.
 
 const SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
 const HEADER_ROW = [
   "Type", "Name", "Mobile", "Project", "Source", "Status", "Board Stage",
   "Last Contact Date", "Follow-up Notes", "Visit Status", "Booking Status"
+];
+
+// Part B (2026-09-20) global audit tabs — see their own build comments
+// further down for what each row represents.
+const HISTORY_HEADER_ROW = [
+  "Lead Name", "Mobile", "Employee", "Assigned By Type", "Assigned By", "Is Active",
+  "Call Count", "First Call At", "First WhatsApp At", "Outcome", "Outcome At",
+  "Ended Reason", "Reassign Note", "Recycle Reason", "Paused Until", "Pause Reason", "Pause Note"
+];
+const NOTES_HEADER_ROW = ["Lead Name", "Mobile", "Employee", "Note", "Created At"];
+const VISITS_HEADER_ROW = [
+  "Lead Name", "Mobile", "Employee", "Event Type", "Created At",
+  "Verified At", "Verified By", "Denied At", "Denied By", "Deny Reason"
 ];
 
 function sleep(ms: number): Promise<void> {
@@ -93,6 +136,44 @@ async function withRetry(fn: () => any, maxAttempts = 3) {
     if (attempt < maxAttempts) await sleep(1000 * attempt); // 1s, 2s backoff
   }
   return last;
+}
+
+// Root-caused 2026-09-20 — the exact same bug class just fixed in
+// app/admin/leads/page.tsx: PostgREST enforces a default ~1000-row cap
+// per request regardless of any .limit()/.range() call being present,
+// applying equally to the service-role key this function uses. None of
+// leads/lead_history/lead_notes below had a .range() call, so each was
+// silently capped at 1000 rows out of 2,000+ actual rows — this
+// disaster-recovery backup was backing up barely half the real data
+// every single night while still reporting `status: "SUCCESS"`, since
+// the existing discrepancy-detection (further down) only compares
+// "rows intended to write" against "rows Google confirmed writing" —
+// it has no visibility into the SOURCE read already being truncated
+// before that comparison ever happens.
+//
+// queryBuilder must be a FRESH, unexecuted query on every call (a
+// supabase-js query object is single-use), since a new .range() needs
+// to be chained onto it for every page — same reason
+// fetchAllMatching in app/admin/leads/page.tsx takes a builder
+// function, not a built query. Each page goes through the existing
+// withRetry above, so a transient failure on page 3 of 3 doesn't
+// waste the two pages already fetched.
+async function fetchAllRows(queryBuilder: () => any, pageSize = 1000): Promise<{ data: any[]; error: any }> {
+  let all: any[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await withRetry(() => queryBuilder().range(from, from + pageSize - 1));
+    if (error) return { data: all, error };
+    if (!data || data.length === 0) break;
+
+    all = all.concat(data);
+
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return { data: all, error: null };
 }
 
 function base64url(input: string | ArrayBuffer): string {
@@ -191,6 +272,7 @@ serve(async () => {
 
     const [
       { data: employees, error: employeesError },
+      { data: allEmployees, error: allEmployeesError },
       { data: leads, error: leadsError },
       { data: historyRows, error: historyError },
       { data: notes, error: notesError },
@@ -205,22 +287,73 @@ serve(async () => {
       // but a real latent risk found while root-causing that one.
       // withRetry (2026-08-27): all 5 of these wrapped after the
       // PGRST303 clock-skew incident -- see withRetry's own comment.
+      //
+      // leads/lead_history/lead_notes/site_visits (2026-09-20):
+      // switched to fetchAllRows -- see its own comment for why. Each
+      // now also carries an explicit .order("id") tiebreaker it didn't
+      // have before, required for .range()-based pagination to be
+      // stable (without one, Postgres doesn't guarantee the same row
+      // order across the separate page-by-page requests, which could
+      // skip or duplicate a row between pages). lead_notes keeps its
+      // existing created_at-desc primary order (latestNoteByLead below
+      // depends on it) with id appended only as a same-timestamp
+      // tiebreaker. site_visits is nowhere near 1000 rows today (17),
+      // but now backs a real audit tab (part B) rather than just a
+      // derived per-lead status, so it gets the same safety margin as
+      // the others rather than staying a one-off exception.
+      //
+      // lead_history (2026-09-20, part B): widened from "active rows
+      // only, 3 columns" to every row ever, full column set -- the
+      // active-only subset (still needed for lastContactByLead) is now
+      // derived client-side from this same fetch instead of being a
+      // second, separate query.
+      //
+      // employees (unchanged) stays active-only -- it drives which
+      // tabs get CREATED, and only active employees should get one.
+      // allEmployees (2026-09-20, part B) is a second, unfiltered read
+      // used purely to resolve names for the new audit tabs, where a
+      // past owner/assigner/note-author might since have been
+      // deactivated -- using the active-only list there would silently
+      // blank out their name instead of losing nothing.
       withRetry(() => supabase.from("employees").select("id, name").eq("is_active", true).order("id")),
-      withRetry(() => supabase.from("leads").select("id, name, mobile, project, source, status, board_stage, current_owner_id, lead_type")),
-      withRetry(() => supabase.from("lead_history").select("lead_id, employee_id, last_activity_at").eq("is_active", true)),
-      withRetry(() => supabase.from("lead_notes").select("lead_id, note, created_at").order("created_at", { ascending: false })),
-      withRetry(() => supabase.from("site_visits").select("lead_id, verified_at, denied_at"))
+      withRetry(() => supabase.from("employees").select("id, name").order("id")),
+      fetchAllRows(() =>
+        supabase
+          .from("leads")
+          .select("id, name, mobile, project, source, status, board_stage, current_owner_id, lead_type")
+          .order("id")
+      ),
+      fetchAllRows(() =>
+        supabase
+          .from("lead_history")
+          .select(
+            "id, lead_id, employee_id, assigned_at, is_active, outcome, outcome_at, ended_reason, reassign_note, recycle_reason, call_count, first_call_at, first_whatsapp_at, assigned_by_type, assigned_by_employee_id, last_activity_at, paused_until, pause_reason, pause_note"
+          )
+          .order("id")
+      ),
+      fetchAllRows(() =>
+        supabase.from("lead_notes").select("lead_id, employee_id, note, created_at").order("created_at", { ascending: false }).order("id")
+      ),
+      fetchAllRows(() =>
+        supabase
+          .from("site_visits")
+          .select("lead_id, employee_id, event_type, created_at, verified_at, verified_by, denied_at, denied_by, deny_reason")
+          .order("id")
+      )
     ]);
 
-    if (employeesError || leadsError || historyError || notesError || visitsError) {
+    if (employeesError || allEmployeesError || leadsError || historyError || notesError || visitsError) {
       throw new Error(
-        `Data fetch failed: ${JSON.stringify({ employeesError, leadsError, historyError, notesError, visitsError })}`
+        `Data fetch failed: ${JSON.stringify({ employeesError, allEmployeesError, leadsError, historyError, notesError, visitsError })}`
       );
     }
 
+    // historyRows is now every row ever (see the fetch comment above),
+    // so the active-only subset this map needs is filtered client-side
+    // rather than being a second query.
     const lastContactByLead = new Map<string, string>();
     for (const h of historyRows || []) {
-      if (h.last_activity_at) lastContactByLead.set(h.lead_id, h.last_activity_at);
+      if (h.is_active && h.last_activity_at) lastContactByLead.set(h.lead_id, h.last_activity_at);
     }
 
     const latestNoteByLead = new Map<string, string>();
@@ -240,12 +373,83 @@ serve(async () => {
       }
     }
 
+    // Part B (2026-09-20) — lookups shared by the three new global
+    // audit tabs below. employeeNameById deliberately comes from
+    // allEmployees (active + inactive), not employees (active only,
+    // used for tab creation) -- a past owner/assigner/note-author on
+    // an audit row might since have left, and this is a disaster-
+    // recovery backup, not a live UI; losing their name entirely would
+    // defeat the point.
+    const leadInfoById = new Map<string, { name: string; mobile: string }>();
+    for (const l of leads || []) {
+      leadInfoById.set(l.id, { name: l.name || "", mobile: l.mobile || "" });
+    }
+    const employeeNameById = new Map<string, string>();
+    for (const e of allEmployees || []) {
+      employeeNameById.set(e.id, e.name || "");
+    }
+
+    const HISTORY_TAB = "Lead History";
+    const NOTES_TAB = "Lead Notes";
+    const VISITS_TAB = "Site Visits";
+
+    const historyTabRows: string[][] = (historyRows || []).map((h: any) => {
+      const lead = leadInfoById.get(h.lead_id);
+      return [
+        lead?.name || "",
+        lead?.mobile || "",
+        employeeNameById.get(h.employee_id) || "",
+        h.assigned_by_type || "",
+        h.assigned_by_employee_id ? employeeNameById.get(h.assigned_by_employee_id) || "" : "",
+        h.is_active ? "Yes" : "No",
+        String(h.call_count ?? 0),
+        formatDate(h.first_call_at),
+        formatDate(h.first_whatsapp_at),
+        h.outcome || "",
+        formatDate(h.outcome_at),
+        h.ended_reason || "",
+        h.reassign_note || "",
+        h.recycle_reason || "",
+        formatDate(h.paused_until),
+        h.pause_reason || "",
+        h.pause_note || ""
+      ];
+    });
+
+    const notesTabRows: string[][] = (notes || []).map((n: any) => {
+      const lead = leadInfoById.get(n.lead_id);
+      return [lead?.name || "", lead?.mobile || "", employeeNameById.get(n.employee_id) || "", n.note || "", formatDate(n.created_at)];
+    });
+
+    // Every VISIT/REVISIT/BOOKED row on its own line -- this is
+    // exactly what fixes the revisit gap: visitStatusByLead above
+    // still collapses these into one status for the per-employee
+    // snapshot tabs, but nothing here does.
+    const visitsTabRows: string[][] = (visits || []).map((v: any) => {
+      const lead = leadInfoById.get(v.lead_id);
+      return [
+        lead?.name || "",
+        lead?.mobile || "",
+        employeeNameById.get(v.employee_id) || "",
+        v.event_type || "",
+        formatDate(v.created_at),
+        formatDate(v.verified_at),
+        v.verified_by ? employeeNameById.get(v.verified_by) || "" : "",
+        formatDate(v.denied_at),
+        v.denied_by ? employeeNameById.get(v.denied_by) || "" : "",
+        v.deny_reason || ""
+      ];
+    });
+
     const tabNameByEmployeeId = buildTabNames(employees || []);
     const UNASSIGNED_TAB = "Unassigned - Reserved";
 
     const rowsByTab = new Map<string, string[][]>();
     for (const tabName of tabNameByEmployeeId.values()) rowsByTab.set(tabName, []);
     rowsByTab.set(UNASSIGNED_TAB, []);
+    rowsByTab.set(HISTORY_TAB, historyTabRows);
+    rowsByTab.set(NOTES_TAB, notesTabRows);
+    rowsByTab.set(VISITS_TAB, visitsTabRows);
 
     for (const lead of leads || []) {
       const tabName = lead.current_owner_id
@@ -299,7 +503,20 @@ serve(async () => {
       if (!addRes.ok) throw new Error(`Adding tabs failed: ${JSON.stringify(addJson)}`);
     }
 
-    const rangeFor = (tab: string) => `'${tab.replace(/'/g, "''")}'!A1:Z1000`;
+    // Z100000 (was Z1000, 2026-09-20 part B): the new global audit
+    // tabs can genuinely exceed 1000 rows on their own (lead_history is
+    // already at 2,502 today) -- a clear range that stopped at row
+    // 1000 would leave stale rows from a previous run sitting below
+    // it. 100,000 is a wide safety margin against near-term growth;
+    // clearing empty cells beyond existing data costs nothing extra.
+    const rangeFor = (tab: string) => `'${tab.replace(/'/g, "''")}'!A1:Z100000`;
+
+    const headerRowFor = (tab: string): string[] => {
+      if (tab === HISTORY_TAB) return HISTORY_HEADER_ROW;
+      if (tab === NOTES_TAB) return NOTES_HEADER_ROW;
+      if (tab === VISITS_TAB) return VISITS_HEADER_ROW;
+      return HEADER_ROW;
+    };
 
     // 3) Clear every tab's data range before rewriting (so a shrunk
     // list — e.g. leads recycled away from someone — doesn't leave
@@ -320,7 +537,7 @@ serve(async () => {
         valueInputOption: "RAW",
         data: allTabNames.map((tab) => ({
           range: `'${tab.replace(/'/g, "''")}'!A1`,
-          values: [HEADER_ROW, ...(rowsByTab.get(tab) || [])]
+          values: [headerRowFor(tab), ...(rowsByTab.get(tab) || [])]
         }))
       })
     });
