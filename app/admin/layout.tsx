@@ -156,6 +156,11 @@ href:"/admin/backup-status",
 icon:"🛟"
 },
 {
+name:"System Health",
+href:"/admin/system-health",
+icon:"🩺"
+},
+{
 name:"Leave",
 href:"/admin/leave",
 icon:"🌴"

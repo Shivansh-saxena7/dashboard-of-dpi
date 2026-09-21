@@ -244,8 +244,9 @@ function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps) {
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="text-[15px] font-bold text-slate-800 truncate">{lead.name}</p>
+              <p className="text-xs text-slate-500 mt-0.5">{lead.mobile}</p>
               {lead.project && (
-                <p className="text-xs text-slate-500 mt-0.5 truncate">{lead.project}</p>
+                <p className="text-xs text-slate-500 truncate">{lead.project}</p>
               )}
             </div>
 

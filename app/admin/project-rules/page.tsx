@@ -97,20 +97,24 @@ export default function ProjectRulesPage() {
   async function loadData() {
     setLoading(true);
 
-    const [{ data: rulesData }, { data: exclusionsData }, { data: employeesData }, { data: leadsData }] =
+    // leads_distinct_projects (2026-09-18) instead of reading every
+    // lead row's project column directly — that used to silently
+    // truncate at PostgREST's 1000-row cap, capable of missing a
+    // project name that only appears in leads past row ~1000. The
+    // view is already the source of truth for "every distinct project
+    // that's ever appeared on a lead" — no need to re-derive it here.
+    const [{ data: rulesData }, { data: exclusionsData }, { data: employeesData }, { data: projectsData }] =
       await Promise.all([
         supabase.from("project_assignment_rules").select("id, project, assigned_employee_id").order("project"),
         supabase.from("project_exclusion_rules").select("id, project, excluded_employee_id").order("project"),
         supabase.from("employees").select("id, name").order("name"),
-        supabase.from("leads").select("project")
+        supabase.from("leads_distinct_projects").select("project").order("project")
       ]);
 
     setRules(rulesData || []);
     setExclusions(exclusionsData || []);
     setEmployees(employeesData || []);
-    setProjectOptions(
-      Array.from(new Set((leadsData || []).map((l) => l.project).filter(Boolean))).sort() as string[]
-    );
+    setProjectOptions((projectsData || []).map((p) => p.project).filter(Boolean) as string[]);
     setLoading(false);
   }
 

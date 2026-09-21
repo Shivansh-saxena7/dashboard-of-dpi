@@ -9,6 +9,7 @@ import { ArrowLeft, Upload, ChevronDown, Loader2, CheckCircle2, AlertTriangle, R
 import { supabase } from "@/lib/supabase";
 import { normalizeMobile } from "@/lib/normalizeMobile";
 import { guessFieldForHeader, MAPPED_FIELD_OPTIONS, MappedField } from "@/lib/csvFieldMatcher";
+import { fetchAllRows } from "@/lib/fetchAllRows";
 import DeleteModal from "../../components/DeleteModal";
 
 const NEW_SOURCE_SENTINEL = "__new__";
@@ -510,13 +511,24 @@ export default function ImportLeadsPage() {
     // that the backend would actually import fine for a different
     // employee, which is exactly the re-upload-for-someone-else flow
     // Data is meant to support.
-    let existingQuery = supabase.from("leads").select("mobile");
+    // fetchAllRows (2026-09-21) — same unbounded-query shape the
+    // backend's own dedup check just got fixed for; this is
+    // preview-only (backend re-checks authoritatively on submit), but
+    // an unbounded .select() here still silently undercounted
+    // duplicates in the preview once `leads` crossed 1000 rows,
+    // showing "will import" for numbers already in the system.
+    const { data: existing } = await fetchAllRows(
+      () => {
+        let q = supabase.from("leads").select("mobile", { count: "exact" }).order("id");
 
-    if (leadType === "DATA") {
-      existingQuery = existingQuery.eq("lead_type", "DATA").in("current_owner_id", manualEmployeeIds);
-    }
+        if (leadType === "DATA") {
+          q = q.eq("lead_type", "DATA").in("current_owner_id", manualEmployeeIds);
+        }
 
-    const { data: existing } = await existingQuery;
+        return q;
+      },
+      { anomalyContext: { supabase, source: "admin/leads/import:duplicatePreview" } }
+    );
     const existingNormalized = new Set((existing || []).map((l) => normalizeMobile(l.mobile)));
 
     const seen = new Set<string>();

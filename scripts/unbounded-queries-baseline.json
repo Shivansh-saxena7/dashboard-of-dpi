@@ -1,0 +1,18 @@
+[
+  { "file": "app/admin/leads/import/page.tsx", "line": 241, "reason": "Scoped to one csv_import_batch_id — bounded to a single import batch's own rows." },
+  { "file": "app/admin/leave/page.tsx", "line": 98, "reason": "Scoped to employees currently on an active leave period (typically a handful of people), not all active employees." },
+  { "file": "app/admin/teams/page.tsx", "line": 127, "reason": "Scoped to one team's own memberIds via .in() — bounded by team size." },
+  { "file": "app/api/data/route.ts", "line": 16, "reason": "WATCH (from 2026-09-21 audit): unbounded only if called with no employeeId/date filter; not currently called that way anywhere in the app, but the route itself allows it." },
+  { "file": "app/coordinator/page.tsx", "line": 414, "reason": "site_visits table has 19 total rows as of 2026-09-21 — nowhere near the 1000 cap; revisit if visit volume grows substantially." },
+  { "file": "app/team/page.tsx", "line": 171, "reason": "Scoped to one team's pending_team_id + current_owner_id IS NULL — bounded to that team's own unassigned leads." },
+  { "file": "app/team/page.tsx", "line": 304, "reason": "Scoped to one team's own memberIds via .in() — bounded by team size." },
+  { "file": "app/team/page.tsx", "line": 308, "reason": "Scoped to one team's own memberIds via .in() — bounded by team size." },
+  { "file": "components/AdminLeadHistoryModal.tsx", "line": 145, "reason": "Scoped to .eq(\"lead_id\", leadId) — one lead's own history, opened per-lead in a modal." },
+  { "file": "components/DataDetailModal.tsx", "line": 89, "reason": "Scoped to .eq(\"lead_history_id\", ...) — one lead's own notes, opened per-lead in a modal." },
+  { "file": "components/DataList.tsx", "line": 109, "reason": "WATCH (from 2026-09-21 audit): scoped to one employee's own current_owner_id, correct today, no ceiling as an individual's Data-lead count grows — same shape as LeadList.tsx below." },
+  { "file": "components/LeadDetailModal.tsx", "line": 126, "reason": "Scoped to .eq(\"lead_history_id\", ...) — one lead's own notes, opened per-lead in a modal." },
+  { "file": "components/LeadList.tsx", "line": 205, "reason": "WATCH (from 2026-09-21 audit): scoped to one employee's own current_owner_id (524 for the case investigated), correct today, no ceiling as an individual's lead count grows." },
+  { "file": "supabase/functions/check-lead-reminders/index.ts", "line": 30, "reason": "Scoped to reminder_at <= now AND reminder_notified_at IS NULL — only currently-due reminders on any given 15-min sweep, realistically small." },
+  { "file": "supabase/functions/mark-missed-posts/index.ts", "line": 39, "reason": "Scoped to .eq(\"date\", today) — one day's tracking rows only." },
+  { "file": "supabase/functions/retry-lead-distribution/index.ts", "line": 93, "reason": "Scoped to one csv_import_batch_id + current_owner_id IS NULL — bounded to a single batch's still-unassigned leads." }
+]

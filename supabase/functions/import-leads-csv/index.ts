@@ -37,6 +37,38 @@ function respond(body: any, status = 200) {
   });
 }
 
+// PostgREST caps any single response at 1000 rows regardless of table
+// size or which key calls it — confirmed live (2026-09-21) this was
+// silently truncating the "existing leads" duplicate-check below once
+// `leads` crossed ~2200 rows, letting genuine duplicates through past
+// row ~1000 in whatever order Postgres happened to return. Same
+// fetchAllRows shape as backup-to-google-sheets/index.ts and
+// app/admin/leads/page.tsx's fetchAllMatching — queryBuilder must be a
+// FRESH, unexecuted query per call (a supabase-js query is single-use,
+// a new .range() is chained on each page), and .order("id") on every
+// call site is what makes paging past 1000 correct rather than just
+// silently missing/duplicating rows across pages. Not a "for now"
+// fix sized to today's ~2200 leads — this scales correctly to
+// 200,000+ rows unchanged, since it keeps paging until a page comes
+// back short.
+async function fetchAllRows(queryBuilder: () => any, pageSize = 1000): Promise<{ data: any[]; error: any }> {
+  let all: any[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await queryBuilder().range(from, from + pageSize - 1);
+    if (error) return { data: all, error };
+    if (!data || data.length === 0) break;
+
+    all = all.concat(data);
+
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return { data: all, error: null };
+}
+
 serve(async (req) => {
 
   if (req.method === "OPTIONS") {
@@ -131,13 +163,15 @@ serve(async (req) => {
     // updates current_owner_id off them, so they're correctly no
     // longer blocked from receiving that number again. Leads keep the
     // original global check, completely unaffected.
-    let existingLeadsQuery = supabase.from("leads").select("mobile");
+    const { data: existingLeads, error: existingLeadsError } = await fetchAllRows(() => {
+      let q = supabase.from("leads").select("mobile").order("id");
 
-    if (leadType === "DATA") {
-      existingLeadsQuery = existingLeadsQuery.eq("lead_type", "DATA").in("current_owner_id", manualEmployeeIds);
-    }
+      if (leadType === "DATA") {
+        q = q.eq("lead_type", "DATA").in("current_owner_id", manualEmployeeIds);
+      }
 
-    const { data: existingLeads, error: existingLeadsError } = await existingLeadsQuery;
+      return q;
+    });
 
     if (existingLeadsError) {
       return respond(

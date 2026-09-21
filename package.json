@@ -4,9 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "node scripts/check-unbounded-queries.js",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "check:unbounded-queries": "node scripts/check-unbounded-queries.js"
   },
   "dependencies": {
     "@supabase/auth-helpers-nextjs": "^0.15.0",

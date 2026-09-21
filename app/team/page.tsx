@@ -17,6 +17,7 @@ import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES } from "@/lib/leadBoardStageDisplay";
 import { exportLeadsToExcel, exportLeadsToPDF } from "@/lib/exportLeadsReport";
 import { DateRangeOption, isWithinDateRange, dateRangeFilterLabel } from "@/lib/dateRangeFilter";
+import { fetchAllRows } from "@/lib/fetchAllRows";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const ALL_STATUSES = Object.keys(LEAD_STATUS_DISPLAY);
@@ -221,13 +222,21 @@ export default function TeamPage() {
   // scoped by memberIds for the roster cards, this one needs the full
   // row shape (priority, board_stage, first_call_at, etc.) that
   // lib/exportLeadsReport.ts expects.
+  // fetchAllRows (2026-09-21) — RLS keeps this scoped to one team, so
+  // it's currently safe at typical team sizes, but a bare unbounded
+  // .select() has no ceiling as a team's lead volume grows, and this
+  // feeds an export (needs a completeness guarantee, not a "probably
+  // fine today"). .order("id") is a secondary tiebreaker after the
+  // existing created_at ordering, required for deterministic paging.
   async function loadReportLeads() {
     setLoadingReport(true);
 
-    const { data, error } = await supabase
-      .from("leads")
-      .select(
-        `
+    const { data, error } = await fetchAllRows(
+      () =>
+        supabase
+          .from("leads")
+          .select(
+            `
         id, name, mobile, project, source, status, priority, board_stage, recycle_count, lead_type,
         current_owner_id,
         employees ( name ),
@@ -235,10 +244,14 @@ export default function TeamPage() {
           assigned_at, is_active, first_call_at, first_whatsapp_at, assigned_by_type,
           assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)
         )
-      `
-      )
-      .eq("lead_history.is_active", true)
-      .order("created_at", { ascending: false });
+      `,
+            { count: "exact" }
+          )
+          .eq("lead_history.is_active", true)
+          .order("created_at", { ascending: false })
+          .order("id"),
+      { anomalyContext: { supabase, source: "team:loadReportLeads" } }
+    );
 
     if (!error && data) {
       setReportLeads(data);

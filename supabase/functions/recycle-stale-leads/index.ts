@@ -5,6 +5,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 import { calculateSLAStatus, FOLLOWUP_INACTIVITY_WARNING_DAYS } from "../../../lib/calculateSLAStatus.ts";
 import { calculateLeadAssignment } from "../../../lib/calculateLeadAssignment.ts";
 import { isLeadTerminal } from "../../../lib/isLeadTerminal.ts";
+import { fetchAllRows } from "../../../lib/fetchAllRows.ts";
 
 // Scheduled sweep (pg_cron, every 15 min — modeled on
 // mark-missed-posts). No CORS, no caller-identity resolution: this
@@ -363,10 +364,21 @@ serve(async () => {
       .in("role", ["admin", "sales_coordinator"])
       .eq("is_active", true);
 
-    const { data: leads, error: leadsError } = await supabase
-      .from("leads")
-      .select(
-        `
+    // fetchAllRows (2026-09-21) — this is the nightly staleness/
+    // recycling safety net itself; a bare unbounded .select() here
+    // silently stopped evaluating every lead past row ~1000 once
+    // `leads` crossed the PostgREST 1000-row response cap, so leads
+    // assigned late in table order simply never got a staleness
+    // check, warning, or recycle. .order("id") (required by
+    // fetchAllRows for correct paging) is an arbitrary but stable
+    // tiebreaker — it doesn't change which leads get swept, only the
+    // order pages come back in.
+    const { data: leads, error: leadsError } = await fetchAllRows(
+      () =>
+        supabase
+          .from("leads")
+          .select(
+            `
         id,
         project,
         status,
@@ -390,22 +402,26 @@ serve(async () => {
           pause_expiry_warning_sent_at,
           pause_expired_notified_at
         )
-      `
-      )
-      // Only JUNK is excluded at the query level — CONVERTED is NOT,
-      // deliberately. status='CONVERTED' alone doesn't mean genuinely
-      // booked (see lib/isLeadTerminal.ts); a lead an employee marked
-      // CONVERTED as a plain call-outcome, without ever reaching
-      // board_stage='BOOKING', is still active and needs the same
-      // staleness/recycling sweep as anything else. The real terminal
-      // check (which needs board_stage, not expressible as a simple
-      // PostgREST .not() filter) happens per-row in the loop below via
-      // isLeadTerminal — this used to blanket-exclude CONVERTED here,
-      // making the whole safety net structurally blind to a
-      // premature/mistaken CONVERTED mark: that lead would never be
-      // flagged or recovered, forever, even if abandoned right after.
-      .neq("status", "JUNK")
-      .eq("lead_history.is_active", true);
+      `,
+            { count: "exact" }
+          )
+          // Only JUNK is excluded at the query level — CONVERTED is NOT,
+          // deliberately. status='CONVERTED' alone doesn't mean genuinely
+          // booked (see lib/isLeadTerminal.ts); a lead an employee marked
+          // CONVERTED as a plain call-outcome, without ever reaching
+          // board_stage='BOOKING', is still active and needs the same
+          // staleness/recycling sweep as anything else. The real terminal
+          // check (which needs board_stage, not expressible as a simple
+          // PostgREST .not() filter) happens per-row in the loop below via
+          // isLeadTerminal — this used to blanket-exclude CONVERTED here,
+          // making the whole safety net structurally blind to a
+          // premature/mistaken CONVERTED mark: that lead would never be
+          // flagged or recovered, forever, even if abandoned right after.
+          .neq("status", "JUNK")
+          .eq("lead_history.is_active", true)
+          .order("id"),
+      { anomalyContext: { supabase, source: "recycle-stale-leads:leads" } }
+    );
 
     if (leadsError) {
       return new Response(

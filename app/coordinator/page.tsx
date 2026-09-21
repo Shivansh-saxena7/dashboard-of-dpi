@@ -17,6 +17,7 @@ import { exportEmployeeSummaryToExcel, exportEmployeeSummaryToPDF, SummaryExport
 import { exportVisitsToExcel, exportVisitsToPDF, VisitExportRow } from "@/lib/exportVisitReport";
 import { exportSnoozesToExcel, exportSnoozesToPDF, SnoozeExportRow } from "@/lib/exportSnoozeReport";
 import { DateRangeOption, isWithinDateRange, dateRangeFilterLabel } from "@/lib/dateRangeFilter";
+import { fetchAllRows } from "@/lib/fetchAllRows";
 
 type ActiveTab = "LEADS" | "SUMMARY" | "VERIFY" | "SNOOZE" | "LEADERBOARD" | "TICKETS";
 type SortOption = "NEWEST" | "OLDEST" | "SLA_URGENCY";
@@ -342,11 +343,21 @@ export default function CoordinatorDashboard() {
     setRemarksByLeadHistoryId(map);
   }
 
+  // fetchAllRows (2026-09-21) — this is the Coordinator's live
+  // working dashboard AND its report-export source; a bare unbounded
+  // .select() here silently truncated at PostgREST's 1000-row cap
+  // once `leads` crossed it (already true today at 2500+), hiding
+  // real leads from both the board and every export. .order("id") is
+  // a secondary tiebreaker after the existing created_at ordering —
+  // required so paging is deterministic across pages when several
+  // leads share the same created_at.
   async function loadLeads() {
-    const { data, error } = await supabase
-      .from("leads")
-      .select(
-        `
+    const { data, error } = await fetchAllRows(
+      () =>
+        supabase
+          .from("leads")
+          .select(
+            `
         id, name, mobile, project, source, catcher_name, status, priority, board_stage, board_stage_changed_at,
         sla_deadline, recycle_count, created_at, current_owner_id, lead_type,
         employees ( name ),
@@ -355,10 +366,14 @@ export default function CoordinatorDashboard() {
           last_activity_at, paused_until, pause_reason, outcome_at,
           assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)
         )
-        `
-      )
-      .eq("lead_history.is_active", true)
-      .order("created_at", { ascending: false });
+        `,
+            { count: "exact" }
+          )
+          .eq("lead_history.is_active", true)
+          .order("created_at", { ascending: false })
+          .order("id"),
+      { anomalyContext: { supabase, source: "coordinator:loadLeads" } }
+    );
 
     if (error) {
       console.error("coordinator: loadLeads failed:", error.message);
