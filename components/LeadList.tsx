@@ -375,17 +375,23 @@ export default function LeadList({ employeeId }: LeadListProps) {
       return [];
     }
 
-    // Search deliberately searches across ALL of this employee's own
-    // leads, not just the currently-active board-stage tab (2026-09-21
-    // fix) — previously the tab filter ran first unconditionally, so a
-    // lead that had genuinely progressed to Follow-up/Visit/Booking
-    // was invisible to a search run from the default "Leads" tab, even
-    // though it was correctly fetched and genuinely this employee's
-    // own (confirmed live: this affected leads across multiple
-    // employees, not a one-off). Matches how Admin's own leads search
-    // already behaves (global by default, not stage-scoped). Plain
-    // tab-browsing with an empty search box is completely unchanged.
-    let result = searchQuery.trim() ? leads : leads.filter((lead) => (lead.board_stage || "LEADS") === activeTab);
+    // Search and the Status filter both deliberately search/filter
+    // across ALL of this employee's own leads, not just the
+    // currently-active board-stage tab (2026-09-21) — previously the
+    // tab filter ran first unconditionally, so a lead that had
+    // genuinely progressed to Follow-up/Visit/Booking was invisible
+    // to a search run from the default "Leads" tab, even though it
+    // was correctly fetched and genuinely this employee's own
+    // (confirmed live: this affected leads across multiple employees,
+    // not a one-off). Matches how Admin's own leads search already
+    // behaves (global by default, not stage-scoped). Status='NEW'
+    // specifically needs this too — the whole point of a "New" filter
+    // is finding every not-yet-touched lead regardless of which tab
+    // it happens to sit in, same reasoning reused rather than a
+    // second bespoke mechanism. Plain tab-browsing with no search/
+    // status filter active is completely unchanged.
+    const bypassTabFilter = Boolean(searchQuery.trim()) || Boolean(statusFilter);
+    let result = bypassTabFilter ? leads : leads.filter((lead) => (lead.board_stage || "LEADS") === activeTab);
 
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
@@ -622,6 +628,15 @@ export default function LeadList({ employeeId }: LeadListProps) {
 
             <FilterSelect value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
               <option value="">All Statuses</option>
+              {/* "New" is a filter value here, not a selectable status
+                  an employee can set on a lead — those are two
+                  genuinely different things (EMPLOYEE_SELECTABLE_STATUSES
+                  deliberately excludes NEW/JUNK for the latter, see
+                  lib/getValidNextLeadStatuses.ts's own comment), so it's
+                  added here directly rather than to that list. Reuses
+                  LEAD_STATUS_DISPLAY's existing "New" label/styling —
+                  no new display logic needed. */}
+              <option value="NEW">{LEAD_STATUS_DISPLAY.NEW.label}</option>
               {EMPLOYEE_SELECTABLE_STATUSES.map((status) => (
                 <option key={status} value={status}>{LEAD_STATUS_DISPLAY[status].label}</option>
               ))}
