@@ -375,7 +375,17 @@ export default function LeadList({ employeeId }: LeadListProps) {
       return [];
     }
 
-    let result = leads.filter((lead) => (lead.board_stage || "LEADS") === activeTab);
+    // Search deliberately searches across ALL of this employee's own
+    // leads, not just the currently-active board-stage tab (2026-09-21
+    // fix) — previously the tab filter ran first unconditionally, so a
+    // lead that had genuinely progressed to Follow-up/Visit/Booking
+    // was invisible to a search run from the default "Leads" tab, even
+    // though it was correctly fetched and genuinely this employee's
+    // own (confirmed live: this affected leads across multiple
+    // employees, not a one-off). Matches how Admin's own leads search
+    // already behaves (global by default, not stage-scoped). Plain
+    // tab-browsing with an empty search box is completely unchanged.
+    let result = searchQuery.trim() ? leads : leads.filter((lead) => (lead.board_stage || "LEADS") === activeTab);
 
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();

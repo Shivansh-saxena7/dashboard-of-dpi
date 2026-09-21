@@ -158,7 +158,12 @@ export default function DataList({ employeeId }: DataListProps) {
 
   const visibleLeads = useMemo(() => {
 
-    let result = leads.filter((lead) => (lead.board_stage || "LEADS") === activeTab);
+    // Same fix as LeadList.tsx (2026-09-21) — search runs across ALL
+    // of this employee's own Data leads, not just the active
+    // board-stage tab, so a lead that's progressed to a later stage
+    // is still findable from the default tab. Empty-search tab
+    // browsing is unchanged.
+    let result = searchQuery.trim() ? leads : leads.filter((lead) => (lead.board_stage || "LEADS") === activeTab);
 
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
