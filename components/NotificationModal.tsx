@@ -589,25 +589,38 @@ export default function NotificationModal({
                         resolved (null if reassigned away since — see
                         the type's own comment). stopPropagation isn't
                         needed here, unlike LeadCard's buttons — this
-                        card has no whole-card onClick of its own. */}
+                        card has no whole-card onClick of its own.
+                        Name+mobile shown as their own visible text line
+                        (2026-09-23 fix) — the Call button's own label
+                        already had the name, but the mobile number
+                        previously only existed inside its tel: href,
+                        never as readable text — genuinely missing per
+                        the original requirement (name, number, AND a
+                        Call button, three separate things). */}
                     {hasCallAction(item.type) && item.related_lead && (
-                      <div className="mt-3 flex items-center gap-2 flex-wrap">
-                        <a
-                          href={`tel:${item.related_lead.mobile}`}
-                          onClick={() => handleCallClick(item.related_lead!.id)}
-                          className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 h-10 rounded-xl bg-gradient-to-r from-yellow-400 to-amber-500 text-slate-900 text-xs font-bold"
-                        >
-                          <Phone size={13} />
-                          Call {item.related_lead.name}
-                        </a>
-                        <button
-                          type="button"
-                          onClick={() => handleViewLead(item.related_lead!.id, item.related_lead!.lead_type)}
-                          className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 h-10 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold hover:bg-slate-200 transition"
-                        >
-                          View Lead
-                          <ArrowUpRight size={13} />
-                        </button>
+                      <div className="mt-3">
+                        <div className="flex items-center justify-between gap-2 rounded-xl bg-slate-50 border border-slate-100 px-3 py-2 mb-2">
+                          <span className="text-sm font-bold text-slate-800 truncate">{item.related_lead.name}</span>
+                          <span className="text-sm text-slate-500 shrink-0">{item.related_lead.mobile}</span>
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <a
+                            href={`tel:${item.related_lead.mobile}`}
+                            onClick={() => handleCallClick(item.related_lead!.id)}
+                            className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 h-10 rounded-xl bg-gradient-to-r from-yellow-400 to-amber-500 text-slate-900 text-xs font-bold"
+                          >
+                            <Phone size={13} />
+                            Call
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => handleViewLead(item.related_lead!.id, item.related_lead!.lead_type)}
+                            className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 h-10 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold hover:bg-slate-200 transition"
+                          >
+                            View Lead
+                            <ArrowUpRight size={13} />
+                          </button>
+                        </div>
                       </div>
                     )}
 
