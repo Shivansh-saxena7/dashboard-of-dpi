@@ -67,7 +67,16 @@ serve(async () => {
         title: "Lead follow-up reminder",
         message: `Follow-up due for ${item.leads?.name || "a lead"}: "${item.note}"`,
         type: "LEAD_REMINDER",
-        is_read: false
+        is_read: false,
+        // Notification-Call-Action (2026-09-23) -- lets the bell
+        // dropdown show a direct Call/View-Lead button instead of the
+        // employee having to search for this lead themselves. ID-only
+        // (see notification.related_lead_id's own comment) -- the
+        // frontend joins leads live at render time, so a lead
+        // reassigned away between now and when this is viewed
+        // correctly stops exposing its number, rather than a frozen
+        // snapshot staying callable.
+        related_lead_id: item.lead_id
       });
 
       if (notifyError) {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { Search, ChevronDown } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -70,6 +71,8 @@ export default function DataList({ employeeId }: DataListProps) {
   const [leads, setLeads] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   // Board-stage tabs (2026-09-16 bug fix) — DataDetailModal's Move-to-
   // Follow-up/Visit/Booking actions genuinely worked server-side all
@@ -101,6 +104,18 @@ export default function DataList({ employeeId }: DataListProps) {
     const id = consumeRecentlyCalledCardId();
     if (id) scrollToAndHighlightCard(`data-card-${id}`);
   }, [loading]);
+
+  // Notification-Call-Action "View Lead" (2026-09-23) — same shape as
+  // LeadList.tsx's own identical effect (DATA_ASSIGNED notifications
+  // route here via /data?openLead=..., LEAD_* types route to /leads).
+  useEffect(() => {
+    if (loading) return;
+    const openLeadId = searchParams.get("openLead");
+    if (openLeadId) {
+      setSelectedLeadId(openLeadId);
+      router.replace("/data");
+    }
+  }, [loading, searchParams, router]);
 
   async function loadLeads() {
     setLoading(true);

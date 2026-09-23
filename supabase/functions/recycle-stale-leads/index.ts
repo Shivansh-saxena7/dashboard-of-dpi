@@ -499,7 +499,10 @@ serve(async () => {
               ? `Your Visit-lock on a lead is ending soon (${pausedUntilDate.toDateString()}) — schedule a revisit before then or it may be reassigned to another team member.`
               : `Your Snooze on a lead is ending soon (${pausedUntilDate.toDateString()}) — follow up before then.`,
             type: "PAUSE_EXPIRY_WARNING",
-            is_read: false
+            is_read: false,
+            // Notification-Call-Action (2026-09-23) -- see
+            // check-lead-reminders' own comment on this field.
+            related_lead_id: lead.id
           });
 
           await supabase
@@ -550,7 +553,10 @@ serve(async () => {
                 ? "Your Visit-lock on a lead has ended — follow up today or it may be reassigned to another team member."
                 : "Your Snooze on a lead has ended — follow up today.",
               type: "PAUSE_EXPIRED",
-              is_read: false
+              is_read: false,
+              // Notification-Call-Action (2026-09-23) -- see
+              // check-lead-reminders' own comment on this field.
+              related_lead_id: lead.id
             });
 
           }
@@ -721,7 +727,10 @@ serve(async () => {
             title: "Follow-up needs attention",
             message: `A lead in your Follow-up/Visit list hasn't had any activity in ${FOLLOWUP_INACTIVITY_WARNING_DAYS} days — follow up soon or it may be reassigned to another team member.`,
             type: "SLA_WARNING",
-            is_read: false
+            is_read: false,
+            // Notification-Call-Action (2026-09-23) -- see
+            // check-lead-reminders' own comment on this field.
+            related_lead_id: lead.id
           });
 
           await supabase
@@ -805,7 +814,10 @@ serve(async () => {
               title: "Lead needs follow-up",
               message: "A lead assigned to you via a Project Rule is past its SLA window — please follow up.",
               type: "SLA_WARNING",
-              is_read: false
+              is_read: false,
+              // Notification-Call-Action (2026-09-23) -- see
+              // check-lead-reminders' own comment on this field.
+              related_lead_id: lead.id
             });
 
           } else {

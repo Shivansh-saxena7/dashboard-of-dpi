@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 import { Search, ChevronDown } from "lucide-react";
@@ -106,6 +107,8 @@ export default function LeadList({ employeeId }: LeadListProps) {
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(new Date());
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   // 2026-08-27 perf pass — one stable reference passed to every
   // LeadCard, instead of a fresh inline arrow per card per render
@@ -164,6 +167,23 @@ export default function LeadList({ employeeId }: LeadListProps) {
     const id = consumeRecentlyCalledCardId();
     if (id) scrollToAndHighlightCard(`lead-card-${id}`);
   }, [loading]);
+
+  // Notification-Call-Action "View Lead" (2026-09-23) — same
+  // auto-open-after-landing shape as handlePersonalLeadCreated above,
+  // reused rather than a new pattern: gated on `loading` for the
+  // identical reason the scroll-restore effect above is — leads state
+  // needs to actually contain this lead before selectedLead (a plain
+  // leads.find(...)) can resolve it. router.replace (not push) strips
+  // the query param once consumed, so refreshing the page afterward
+  // doesn't keep re-opening the same modal.
+  useEffect(() => {
+    if (loading) return;
+    const openLeadId = searchParams.get("openLead");
+    if (openLeadId) {
+      setSelectedLeadId(openLeadId);
+      router.replace("/leads");
+    }
+  }, [loading, searchParams, router]);
 
   // Quick Dial (2026-09-23) — genuinely new trigger, not a reuse of
   // the scroll-restore effect above (confirmed that one doesn't use

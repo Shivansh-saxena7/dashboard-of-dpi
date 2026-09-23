@@ -54,3 +54,23 @@ export function notificationTypeLabel(type: string | null | undefined): string {
   if (!type) return "Notification";
   return NOTIFICATION_TYPE_LABELS[type] || type;
 }
+
+// Notification-Call-Action (2026-09-23) — deliberately narrow, approved
+// scope: only "you should call this lead right now" types get the
+// Call/View-Lead buttons in NotificationModal. Explicitly excludes
+// decision-type notifications (VISIT_VERIFICATION_OVERDUE, TICKET_*,
+// PROJECT_RULE_STALE — Admin/Coordinator-facing config or approval
+// alerts, not "go call someone") and anti-gaming/celebration types —
+// bolting a Call button onto those would be confusing, not helpful.
+const CALL_ACTION_TYPES = new Set([
+  "LEAD_ASSIGNED",
+  "DATA_ASSIGNED",
+  "LEAD_REMINDER",
+  "SLA_WARNING",
+  "PAUSE_EXPIRY_WARNING",
+  "PAUSE_EXPIRED"
+]);
+
+export function hasCallAction(type: string | null | undefined): boolean {
+  return Boolean(type && CALL_ACTION_TYPES.has(type));
+}

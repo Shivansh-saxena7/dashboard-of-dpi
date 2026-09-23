@@ -385,9 +385,17 @@ useEffect(() => {
 
     if (!employee) return;
 
+    // Notification-Call-Action (2026-09-23) -- the leads embed is
+    // what lets NotificationModal show a direct Call/View-Lead button
+    // for "go call this lead" notification types, without a second
+    // query. Live join, not a frozen snapshot (see
+    // notification.related_lead_id's own comment) -- leads' own RLS
+    // (owner-scoped) naturally means this comes back null if the
+    // lead's been reassigned away since the notification was created,
+    // so a stale number can never surface here.
     const { data } = await supabase
       .from("notification")
-      .select("*")
+      .select("*, related_lead:leads!notification_related_lead_id_fkey(id, name, mobile, lead_type, current_owner_id)")
       .eq("employee_id", employee.id)
       .order("created_at", { ascending: false })
       .limit(50);

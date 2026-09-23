@@ -2,14 +2,18 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Bell,
   X,
   CalendarDays,
   Sparkles,
   Clock3,
+  Phone,
+  ArrowUpRight,
 } from "lucide-react";
-import { classifyNotificationSystem, notificationTypeLabel, NotificationSystem } from "@/lib/notificationSystem";
+import { supabase } from "@/lib/supabase";
+import { classifyNotificationSystem, notificationTypeLabel, hasCallAction, NotificationSystem } from "@/lib/notificationSystem";
 
 type Notification = {
   id: string | number;
@@ -18,6 +22,18 @@ type Notification = {
   created_at: string;
   is_read?: boolean;
   type?: string;
+  // Notification-Call-Action (2026-09-23) — the live join Header.tsx's
+  // fetch adds. Null whenever there's nothing to link (most
+  // notification types), or when a related lead exists but has since
+  // been reassigned away from this employee (RLS-scoped embed simply
+  // returns nothing then) — both cases render identically, no button.
+  related_lead?: {
+    id: string;
+    name: string;
+    mobile: string;
+    lead_type: string;
+    current_owner_id: string | null;
+  } | null;
 };
 
 type Props = {
@@ -54,6 +70,46 @@ export default function NotificationModal({
 }: Props) {
 
   const [activeTab, setActiveTab] = useState<NotificationSystem>("LEADS");
+  const router = useRouter();
+
+  // Notification-Call-Action (2026-09-23) — same log_call_click_atomic
+  // RPC LeadCard.tsx's own Call button uses, so a call placed from
+  // here is tracked identically (call_count, stuck-leads reporting,
+  // etc.) regardless of entry point. The active lead_history_id isn't
+  // preloaded on every notification (Header.tsx's fetch only embeds
+  // the lead's own fields) — resolved here, on click, only for the
+  // one lead actually being called; the unique-one-active-row-per-
+  // lead invariant already established elsewhere in this app means
+  // lead_id + is_active=true alone is enough to find it, no employee_id
+  // needed.
+  async function handleCallClick(leadId: string) {
+    const { data: history } = await supabase
+      .from("lead_history")
+      .select("id")
+      .eq("lead_id", leadId)
+      .eq("is_active", true)
+      .single();
+
+    if (history?.id) {
+      supabase
+        .rpc("log_call_click_atomic", { p_lead_history_id: history.id })
+        .then(({ error }) => {
+          if (error) console.error("log_call_click_atomic failed:", error.message);
+        });
+    }
+  }
+
+  // "View Lead" (2026-09-23) — navigates to the employee's own list
+  // with a query param LeadList.tsx/DataList.tsx pick up on mount to
+  // auto-open LeadDetailModal/DataDetailModal for this exact lead,
+  // same auto-open mechanism already built for Personal Lead creation
+  // — reused, not a new pattern. DATA-type leads route to /data,
+  // everything else to /leads.
+  function handleViewLead(leadId: string, leadType: string) {
+    const path = leadType === "DATA" ? "/data" : "/leads";
+    router.push(`${path}?openLead=${leadId}`);
+    onClose();
+  }
 
   const leadsNotifications = notifications.filter((n) => classifyNotificationSystem(n.type) === "LEADS");
   const postsNotifications = notifications.filter((n) => classifyNotificationSystem(n.type) === "POSTS");
@@ -526,6 +582,34 @@ export default function NotificationModal({
                       </div>
 
                     </div>
+
+                    {/* Notification-Call-Action (2026-09-23) — only
+                        for the approved-scope "go call this lead"
+                        types, and only when related_lead actually
+                        resolved (null if reassigned away since — see
+                        the type's own comment). stopPropagation isn't
+                        needed here, unlike LeadCard's buttons — this
+                        card has no whole-card onClick of its own. */}
+                    {hasCallAction(item.type) && item.related_lead && (
+                      <div className="mt-3 flex items-center gap-2 flex-wrap">
+                        <a
+                          href={`tel:${item.related_lead.mobile}`}
+                          onClick={() => handleCallClick(item.related_lead!.id)}
+                          className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 h-10 rounded-xl bg-gradient-to-r from-yellow-400 to-amber-500 text-slate-900 text-xs font-bold"
+                        >
+                          <Phone size={13} />
+                          Call {item.related_lead.name}
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => handleViewLead(item.related_lead!.id, item.related_lead!.lead_type)}
+                          className="flex-1 min-w-[120px] flex items-center justify-center gap-1.5 h-10 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold hover:bg-slate-200 transition"
+                        >
+                          View Lead
+                          <ArrowUpRight size={13} />
+                        </button>
+                      </div>
+                    )}
 
                   </motion.div>
 
