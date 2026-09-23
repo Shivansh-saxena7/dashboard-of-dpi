@@ -12,6 +12,13 @@ interface DetailEntry {
   time: string;
 }
 
+interface StuckLeadEntry {
+  leadName: string;
+  mobile: string | null;
+  callCount: number;
+  daysSinceLastAttempt: number;
+}
+
 interface WorkReportData {
   calls: number;
   callDetails: DetailEntry[];
@@ -31,6 +38,8 @@ interface WorkReportData {
   visitDetails: DetailEntry[];
   bookings: number;
   bookingDetails: DetailEntry[];
+  stuckLeads: number;
+  stuckLeadsDetails: StuckLeadEntry[];
 }
 
 interface WorkReportViewProps {
@@ -90,14 +99,55 @@ export default function WorkReportView({ employeeId, employeeName, date, whatsap
   const [report, setReport] = useState<WorkReportData | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<MetricKey | null>(null);
+  const [stuckExpanded, setStuckExpanded] = useState(false);
 
   useEffect(() => {
     loadReport();
   }, [employeeId, date]);
 
+  // Realtime (2026-09-21) — same proven pattern already used by
+  // LeadList.tsx's own channel (lead-list-${employeeId}), so a call
+  // click's effect on Stuck Leads shows up here without a manual
+  // page refresh. A full loadReport() refetch (not a partial patch)
+  // is deliberate, same reasoning as LeadList.tsx: the realtime
+  // payload is the raw changed row only, missing the joins this RPC's
+  // JSON actually returns. Safe to fire regardless of which date is
+  // selected — the day-bound metrics (Calls, Connected, etc.) for a
+  // past date are immutable and simply refetch identically; only the
+  // Stuck Leads snapshot (deliberately not date-scoped) can actually
+  // change from this.
+  useEffect(() => {
+    if (!employeeId) return;
+
+    let cancelled = false;
+
+    const existing = supabase.getChannels().find((ch) => ch.topic === `realtime:work-report-${employeeId}`);
+    if (existing) {
+      supabase.removeChannel(existing);
+    }
+
+    const channel = supabase
+      .channel(`work-report-${employeeId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "lead_history", filter: `employee_id=eq.${employeeId}` },
+        () => {
+          if (cancelled) return;
+          loadReport();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, [employeeId]);
+
   async function loadReport() {
     setLoading(true);
     setExpanded(null);
+    setStuckExpanded(false);
 
     const { data, error } = await supabase.rpc("get_employee_work_report", {
       p_employee_id: employeeId,
@@ -205,7 +255,77 @@ export default function WorkReportView({ employeeId, employeeName, date, whatsap
             </motion.button>
           );
         })}
+
+        {/* Stuck Leads (2026-09-21) — deliberately outside the METRICS
+            array/generic map above: it's a live current-state
+            snapshot (identical regardless of which day's report this
+            is), not a day-bound event count like every other tile, and
+            its detail shape (callCount/daysSinceLastAttempt) doesn't
+            match DetailEntry's (leadName/time) — genuinely different
+            data, not worth forcing into the shared shape. Deliberately
+            excluded from currentMessage()/buildWorkReportMessage — see
+            that function's own note on why this never goes into the
+            shareable WhatsApp text. Red/amber tone (not the neutral
+            grid styling) when count > 0 — this tile is specifically an
+            attention-needed signal, not a neutral daily stat. */}
+        <motion.button
+          whileTap={{ scale: 0.97 }}
+          onClick={() => setStuckExpanded((v) => !v)}
+          className={`rounded-2xl border p-3 text-left transition shadow-[0_2px_10px_rgba(15,23,42,0.04)] ${
+            stuckExpanded
+              ? "border-red-300 bg-red-50/60"
+              : report.stuckLeads > 0
+                ? "border-red-200 bg-red-50/30 hover:border-red-300"
+                : "border-slate-100 bg-white hover:border-slate-200"
+          }`}
+        >
+          {/* "Not Connected, No Follow-up" (2026-09-23 — narrowed from
+              "Called Once, No Follow-up") -- the underlying stuck_leads
+              view now filters to status='NOT_CONNECTED' specifically
+              (was any status with call_count=1), so the label naming
+              that one status is accurate again, not a misdescription
+              like it would have been against the broader definition
+              this replaced. */}
+          <p className="text-[11px] font-semibold text-slate-500 flex items-center gap-1 min-h-[28px]">
+            <span>⚠️</span> Not Connected, No Follow-up
+          </p>
+          <p className={`text-2xl font-bold mt-1 ${report.stuckLeads > 0 ? "text-red-600" : "text-slate-800"}`}>
+            {report.stuckLeads}
+          </p>
+          <p className="text-[10px] text-slate-400 mt-0.5">3+ days, no re-call yet</p>
+        </motion.button>
       </div>
+
+      {stuckExpanded && (
+        <div className="rounded-2xl bg-white border border-red-100 shadow-md p-4">
+          <p className="text-xs font-bold text-red-600 uppercase tracking-wide mb-1">
+            Not Connected, No Follow-up
+          </p>
+          <p className="text-xs text-slate-500 mb-2">
+            Leads marked "Not Connected" on your one call, with no follow-up call in 3+ days.
+          </p>
+          {report.stuckLeadsDetails.length === 0 ? (
+            <p className="text-sm text-slate-400">None right now.</p>
+          ) : (
+            <div className="space-y-2">
+              {report.stuckLeadsDetails.map((entry, i) => (
+                <div
+                  key={i}
+                  className="flex items-center justify-between text-sm border-b border-slate-50 last:border-0 pb-2 last:pb-0"
+                >
+                  <div className="min-w-0">
+                    <p className="text-slate-700 font-medium truncate">{entry.leadName}</p>
+                    {entry.mobile && <p className="text-xs text-slate-400">{entry.mobile}</p>}
+                  </div>
+                  <span className="text-red-600 text-xs font-semibold shrink-0 ml-2">
+                    {entry.daysSinceLastAttempt}d ago
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {expandedMetric && (
         <div className="rounded-2xl bg-white border border-slate-100 shadow-md p-4">

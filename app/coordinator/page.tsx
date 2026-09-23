@@ -359,7 +359,7 @@ export default function CoordinatorDashboard() {
           .select(
             `
         id, name, mobile, project, source, catcher_name, status, priority, board_stage, board_stage_changed_at,
-        sla_deadline, recycle_count, created_at, current_owner_id, lead_type,
+        sla_deadline, recycle_count, created_at, current_owner_id, lead_type, is_personal_lead,
         employees ( name ),
         lead_history (
           id, assigned_at, is_active, first_call_at, first_whatsapp_at, assigned_by_type, call_count,
@@ -634,7 +634,8 @@ export default function CoordinatorDashboard() {
         callCount: lead.lead_history?.[0]?.call_count ?? 0,
         pausedUntil: lead.lead_history?.[0]?.paused_until ?? null,
         pauseReason: lead.lead_history?.[0]?.pause_reason ?? null,
-        lastActivityAt: lead.lead_history?.[0]?.last_activity_at ?? null
+        lastActivityAt: lead.lead_history?.[0]?.last_activity_at ?? null,
+        isPersonalLead: lead.is_personal_lead ?? false
       })),
     [visibleLeads]
   );

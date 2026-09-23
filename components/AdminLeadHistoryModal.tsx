@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
-import { X, User, Bookmark, Share2 } from "lucide-react";
+import { X, User, Bookmark, Share2, Phone, MessageCircle, StickyNote, MapPin, Moon, ArrowRightCircle, TrendingUp } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { ENDED_REASON_TEXT } from "@/lib/endedReasonDisplay";
 import { assignedByLabel } from "@/lib/assignedByDisplay";
@@ -28,7 +28,7 @@ interface HistoryEntry {
   reassign_note: string | null;
   outcome: string | null;
   call_count: number;
-  assigned_by_type: "SYSTEM" | "ADMIN" | "TEAM_LEADER" | "SALES_COORDINATOR";
+  assigned_by_type: "SYSTEM" | "ADMIN" | "TEAM_LEADER" | "SALES_COORDINATOR" | "SELF";
   employees: { name: string } | null;
   assigned_by: { name: string } | null;
 }
@@ -72,18 +72,76 @@ interface AssetShareEntry {
   employees: { name: string } | null;
 }
 
+interface NoteEntry {
+  id: string;
+  note: string;
+  created_at: string;
+  employees: { name: string } | null;
+}
+
+interface VisitEntry {
+  id: string;
+  event_type: "VISIT" | "REVISIT" | "BOOKED";
+  created_at: string;
+  verified_at: string | null;
+  denied_at: string | null;
+  deny_reason: string | null;
+  employees: { name: string } | null;
+}
+
+interface SnoozeEntry {
+  id: string;
+  snoozed_at: string;
+  duration_months: number;
+  snoozed_until: string;
+  reason: string | null;
+  cancelled_at: string | null;
+  employees: { name: string } | null;
+}
+
+// The two entry shapes below come from get_lead_activity_log_atomic,
+// not a direct table query — contact_click_log/lead_activity_log both
+// have RLS enabled with ZERO policies (deliberate, same posture
+// get_employee_work_report's own comment documents: "Authorization
+// gate lives HERE, not in RLS"), so a bare supabase.from() on either
+// returns nothing for anyone regardless of role. This RPC is the one
+// authorized read path for these two specifically.
+interface CallClickEntry {
+  id: string;
+  clickType: "CALL" | "WHATSAPP";
+  clickedAt: string;
+  employeeName: string | null;
+}
+
+interface ActivityLogEntry {
+  id: string;
+  activityType: "STATUS_UPDATE" | "BOARD_STAGE_MOVE";
+  detail: string;
+  createdAt: string;
+  employeeName: string | null;
+}
+
 // Reservations (Admin -> team, before anyone owns the lead),
-// assignments (lead_history rows), and asset shares (Project Assets /
-// Cost-Sheet WhatsApp sends) are three structurally different event
-// types — merged here into one timestamp-sorted timeline so the
-// drawer reads as a single continuous story, even though they live in
-// three separate tables (a reservation has no employee_id yet, which
-// lead_history's schema doesn't allow; an asset share isn't an
-// ownership event at all).
+// assignments (lead_history rows), asset shares (Project Assets /
+// Cost-Sheet WhatsApp sends), notes, site visits, snoozes, call/
+// WhatsApp clicks, and individual status/board-stage transitions are
+// nine structurally different event types — merged here into one
+// timestamp-sorted timeline so the drawer reads as a single
+// continuous story, even though they live in seven separate tables
+// (2026-09-23 — extended from the original 3-source version to cover
+// the full per-employee activity trail: exactly what call was made
+// when, every note, every status/stage transition, not just each
+// assignment period's final outcome).
 type TimelineEntry =
   | { kind: "ASSIGNMENT"; timestamp: string; data: HistoryEntry }
   | { kind: "RESERVATION"; timestamp: string; data: ReservationEntry }
-  | { kind: "ASSET_SHARE"; timestamp: string; data: AssetShareEntry };
+  | { kind: "ASSET_SHARE"; timestamp: string; data: AssetShareEntry }
+  | { kind: "NOTE"; timestamp: string; data: NoteEntry }
+  | { kind: "SITE_VISIT"; timestamp: string; data: VisitEntry }
+  | { kind: "SNOOZE"; timestamp: string; data: SnoozeEntry }
+  | { kind: "CALL_CLICK"; timestamp: string; data: CallClickEntry }
+  | { kind: "STATUS_CHANGE"; timestamp: string; data: ActivityLogEntry }
+  | { kind: "BOARD_STAGE_MOVE"; timestamp: string; data: ActivityLogEntry };
 
 // Admin-only, full audit trail — queries lead_history DIRECTLY (never
 // employee_sla_breach_history, which is deliberately scoped/masked
@@ -139,7 +197,11 @@ export default function AdminLeadHistoryModal({ leadId, leadName, leadType, lead
     const [
       { data: historyData, error: historyError },
       { data: reservationData, error: reservationError },
-      { data: assetShareData, error: assetShareError }
+      { data: assetShareData, error: assetShareError },
+      { data: noteData, error: noteError },
+      { data: visitData, error: visitError },
+      { data: snoozeData, error: snoozeError },
+      { data: activityData, error: activityError }
     ] = await Promise.all([
         supabase
           .from("lead_history")
@@ -159,7 +221,23 @@ export default function AdminLeadHistoryModal({ leadId, leadName, leadType, lead
         supabase
           .from("asset_share_log")
           .select("id, shared_at, entry_type, assets_snapshot, employees(name)")
-          .eq("lead_id", leadId)
+          .eq("lead_id", leadId),
+        supabase
+          .from("lead_notes")
+          .select("id, note, created_at, employees(name)")
+          .eq("lead_id", leadId),
+        supabase
+          .from("site_visits")
+          .select("id, event_type, created_at, verified_at, denied_at, deny_reason, employees(name)")
+          .eq("lead_id", leadId),
+        supabase
+          .from("lead_snooze_log")
+          .select("id, snoozed_at, duration_months, snoozed_until, reason, cancelled_at, employees(name)")
+          .eq("lead_id", leadId),
+        // The one RPC call (not a direct table query) — see
+        // CallClickEntry/ActivityLogEntry's own comment for why
+        // contact_click_log/lead_activity_log can't be read directly.
+        supabase.rpc("get_lead_activity_log_atomic", { p_lead_id: leadId })
       ]);
 
     const merged: TimelineEntry[] = [];
@@ -180,6 +258,40 @@ export default function AdminLeadHistoryModal({ leadId, leadName, leadType, lead
       (assetShareData as unknown as AssetShareEntry[]).forEach((entry) =>
         merged.push({ kind: "ASSET_SHARE", timestamp: entry.shared_at, data: entry })
       );
+    }
+
+    if (!noteError && noteData) {
+      (noteData as unknown as NoteEntry[]).forEach((entry) =>
+        merged.push({ kind: "NOTE", timestamp: entry.created_at, data: entry })
+      );
+    }
+
+    if (!visitError && visitData) {
+      (visitData as unknown as VisitEntry[]).forEach((entry) =>
+        merged.push({ kind: "SITE_VISIT", timestamp: entry.created_at, data: entry })
+      );
+    }
+
+    if (!snoozeError && snoozeData) {
+      (snoozeData as unknown as SnoozeEntry[]).forEach((entry) =>
+        merged.push({ kind: "SNOOZE", timestamp: entry.snoozed_at, data: entry })
+      );
+    }
+
+    if (!activityError && activityData) {
+      const parsed = activityData as unknown as { callClicks: CallClickEntry[]; activityLog: ActivityLogEntry[] };
+
+      (parsed.callClicks || []).forEach((entry) =>
+        merged.push({ kind: "CALL_CLICK", timestamp: entry.clickedAt, data: entry })
+      );
+
+      (parsed.activityLog || []).forEach((entry) => {
+        merged.push({
+          kind: entry.activityType === "BOARD_STAGE_MOVE" ? "BOARD_STAGE_MOVE" : "STATUS_CHANGE",
+          timestamp: entry.createdAt,
+          data: entry
+        });
+      });
     }
 
     merged.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
@@ -333,6 +445,138 @@ export default function AdminLeadHistoryModal({ leadId, leadName, leadType, lead
                             ))}
                           </ul>
                         )}
+                      </div>
+                    </>
+                  ) : item.kind === "NOTE" ? (
+                    <>
+                      <div className="absolute left-0 top-0.5 h-5 w-5 rounded-full flex items-center justify-center bg-gradient-to-br from-slate-400 to-slate-500">
+                        <StickyNote size={11} className="text-white" />
+                      </div>
+
+                      <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
+                        <p className="text-sm text-slate-700">{item.data.note}</p>
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          {item.data.employees?.name || "Unknown"} ·{" "}
+                          {new Date(item.data.created_at).toLocaleString([], {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit"
+                          })}
+                        </p>
+                      </div>
+                    </>
+                  ) : item.kind === "SITE_VISIT" ? (
+                    <>
+                      <div className="absolute left-0 top-0.5 h-5 w-5 rounded-full flex items-center justify-center bg-gradient-to-br from-purple-500 to-violet-600">
+                        <MapPin size={11} className="text-white" />
+                      </div>
+
+                      <div className="rounded-xl bg-purple-50 border border-purple-100 p-3">
+                        <p className="text-sm font-bold text-purple-800">
+                          {item.data.event_type === "BOOKED" ? "Booked" : item.data.event_type === "REVISIT" ? "Revisit" : "Site Visit"}
+                          {item.data.denied_at ? " — Denied" : item.data.verified_at ? " — Verified" : ""}
+                        </p>
+                        <p className="text-[11px] text-purple-700/80 mt-1">
+                          {item.data.employees?.name || "Unknown"} ·{" "}
+                          {new Date(item.data.created_at).toLocaleString([], {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit"
+                          })}
+                        </p>
+                        {item.data.deny_reason && (
+                          <p className="text-xs text-purple-700/90 mt-1">Reason: {item.data.deny_reason}</p>
+                        )}
+                      </div>
+                    </>
+                  ) : item.kind === "SNOOZE" ? (
+                    <>
+                      <div className="absolute left-0 top-0.5 h-5 w-5 rounded-full flex items-center justify-center bg-gradient-to-br from-indigo-500 to-indigo-600">
+                        <Moon size={11} className="text-white" />
+                      </div>
+
+                      <div className="rounded-xl bg-indigo-50 border border-indigo-100 p-3">
+                        <p className="text-sm font-bold text-indigo-800">
+                          Snoozed {item.data.duration_months} month{item.data.duration_months === 1 ? "" : "s"}
+                          {item.data.cancelled_at ? " — Cancelled" : ""}
+                        </p>
+                        <p className="text-[11px] text-indigo-700/80 mt-1">
+                          {item.data.employees?.name || "Unknown"} ·{" "}
+                          {new Date(item.data.snoozed_at).toLocaleString([], {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit"
+                          })}
+                        </p>
+                        {item.data.reason && (
+                          <p className="text-xs text-indigo-700/90 mt-1">Reason: {item.data.reason}</p>
+                        )}
+                      </div>
+                    </>
+                  ) : item.kind === "CALL_CLICK" ? (
+                    <>
+                      <div className="absolute left-0 top-0.5 h-5 w-5 rounded-full flex items-center justify-center bg-gradient-to-br from-teal-500 to-teal-600">
+                        {item.data.clickType === "WHATSAPP" ? (
+                          <MessageCircle size={11} className="text-white" />
+                        ) : (
+                          <Phone size={11} className="text-white" />
+                        )}
+                      </div>
+
+                      <div className="rounded-xl bg-teal-50 border border-teal-100 p-3">
+                        <p className="text-sm font-bold text-teal-800">
+                          {item.data.clickType === "WHATSAPP" ? "WhatsApp clicked" : "Call clicked"}
+                        </p>
+                        <p className="text-[11px] text-teal-700/80 mt-1">
+                          {item.data.employeeName || "Unknown"} ·{" "}
+                          {new Date(item.data.clickedAt).toLocaleString([], {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit"
+                          })}
+                        </p>
+                      </div>
+                    </>
+                  ) : item.kind === "STATUS_CHANGE" ? (
+                    <>
+                      <div className="absolute left-0 top-0.5 h-5 w-5 rounded-full flex items-center justify-center bg-gradient-to-br from-blue-500 to-blue-600">
+                        <ArrowRightCircle size={11} className="text-white" />
+                      </div>
+
+                      <div className="rounded-xl bg-blue-50 border border-blue-100 p-3">
+                        <p className="text-sm font-bold text-blue-800">Status → {item.data.detail}</p>
+                        <p className="text-[11px] text-blue-700/80 mt-1">
+                          {item.data.employeeName || "Unknown"} ·{" "}
+                          {new Date(item.data.createdAt).toLocaleString([], {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit"
+                          })}
+                        </p>
+                      </div>
+                    </>
+                  ) : item.kind === "BOARD_STAGE_MOVE" ? (
+                    <>
+                      <div className="absolute left-0 top-0.5 h-5 w-5 rounded-full flex items-center justify-center bg-gradient-to-br from-rose-500 to-rose-600">
+                        <TrendingUp size={11} className="text-white" />
+                      </div>
+
+                      <div className="rounded-xl bg-rose-50 border border-rose-100 p-3">
+                        <p className="text-sm font-bold text-rose-800">Moved to {item.data.detail}</p>
+                        <p className="text-[11px] text-rose-700/80 mt-1">
+                          {item.data.employeeName || "Unknown"} ·{" "}
+                          {new Date(item.data.createdAt).toLocaleString([], {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit"
+                          })}
+                        </p>
                       </div>
                     </>
                   ) : (

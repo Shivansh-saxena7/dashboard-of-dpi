@@ -51,6 +51,9 @@ interface AdminLeadCardLead {
   // unchanged; undefined just means the cooldown-based reason (Leads-
   // stage NOT_CONNECTED/SWITCHED_OFF/NOT_INTERESTED) can't be shown.
   outcomeAt?: string | null;
+  // Personal (self-sourced) lead (2026-09-23) — optional, undefined
+  // behaves exactly like false (every pre-existing caller unaffected).
+  isPersonalLead?: boolean;
 }
 
 interface AdminLeadCardProps {
@@ -224,7 +227,15 @@ function AdminLeadCard({
   // would keep showing "Needs follow-up"/"Going stale" even though
   // the backend has already stopped counting toward recycling for
   // it — actively misleading, not just a missing badge.
-  const isStale = !isTerminal && !isPaused && !isOwnerOnLeave && isBeyondLeadsStage && daysSinceActivity !== null && daysSinceActivity >= FOLLOWUP_INACTIVITY_WARNING_DAYS;
+  //
+  // Personal lead (2026-09-23) — same precedence as !isOwnerOnLeave
+  // above, and for the identical reason: this card computes
+  // isStale/isGoingStale independently of calculateSLAStatus (doesn't
+  // call it at all), so its own isPersonalLead short-circuit alone
+  // doesn't reach here — this guard is what actually makes "no SLA/
+  // urgency whatsoever" true on this card too, not just the employee-
+  // facing one.
+  const isStale = !isTerminal && !isPaused && !isOwnerOnLeave && !lead.isPersonalLead && isBeyondLeadsStage && daysSinceActivity !== null && daysSinceActivity >= FOLLOWUP_INACTIVITY_WARNING_DAYS;
   const isGoingStale = isStale && daysSinceActivity !== null && daysSinceActivity >= FOLLOWUP_INACTIVITY_RECYCLE_DAYS;
   const showOnLeaveBadge = isOwnerOnLeave && !isTerminal && isBeyondLeadsStage;
 
@@ -236,7 +247,7 @@ function AdminLeadCard({
   // NOT_CONNECTED/SWITCHED_OFF/NOT_INTERESTED cooldown case isStale
   // never did (it's gated on isBeyondLeadsStage only).
   const recycleCutoff =
-    !isTerminal && !isPaused && !isOwnerOnLeave
+    !isTerminal && !isPaused && !isOwnerOnLeave && !lead.isPersonalLead
       ? getRecycleCutoff(
           {
             status: lead.status,
@@ -260,7 +271,9 @@ function AdminLeadCard({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, delay: Math.min(index, 10) * 0.04 }}
       whileHover={{ y: -3 }}
-      className="relative overflow-hidden rounded-[20px] bg-white border border-slate-100 shadow-[0_4px_20px_rgba(15,23,42,0.06)] hover:shadow-[0_10px_28px_rgba(29,78,216,0.12)] transition-shadow p-5"
+      className={`relative overflow-hidden rounded-[20px] shadow-[0_4px_20px_rgba(15,23,42,0.06)] hover:shadow-[0_10px_28px_rgba(29,78,216,0.12)] transition-shadow p-5 ${
+        lead.isPersonalLead ? "bg-violet-50/40 border-2 border-violet-200" : "bg-white border border-slate-100"
+      }`}
     >
       <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-blue-600 via-cyan-400 to-blue-600" />
 
@@ -311,10 +324,19 @@ function AdminLeadCard({
               <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${priorityDisplay.badgeClassName}`}>
                 {priorityDisplay.label}
               </span>
-              {lead.source && (
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">
-                  {lead.source}
+              {/* Same dedicated-badge-over-generic-source-pill choice
+                  as LeadCard.tsx (2026-09-23) — see that file's own
+                  comment. */}
+              {lead.isPersonalLead ? (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 border border-violet-200">
+                  🔒 Personal
                 </span>
+              ) : (
+                lead.source && (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">
+                    {lead.source}
+                  </span>
+                )
               )}
               {lead.catcherName && (
                 <span

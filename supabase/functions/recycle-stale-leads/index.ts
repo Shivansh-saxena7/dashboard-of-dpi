@@ -388,6 +388,7 @@ serve(async () => {
         lead_type,
         board_stage,
         last_unjunked_at,
+        is_personal_lead,
         lead_history!inner (
           id,
           assigned_at,
@@ -580,6 +581,25 @@ serve(async () => {
 
       }
 
+      // Personal lead (2026-09-23) — structural, redundant guarantee on
+      // top of calculateSLAStatus's own isPersonalLead short-circuit
+      // (which already makes JUNK_ELIGIBLE/RECYCLE_READY/etc.
+      // structurally unreachable for one of these). This skips the
+      // ENTIRE recycling-decision path below — the notInterestedCount
+      // query, calculateSLAStatus itself, every action branch — for
+      // any is_personal_lead lead, so no future change to that
+      // function's internal check ordering could ever let a personal
+      // lead get recycled or flagged, even by accident. Deliberately
+      // placed AFTER the pause-expiry-notification block above, not
+      // before it: a personal lead can still be Snoozed by its owner
+      // like any other lead, and that's a reminder the employee chose
+      // for themselves, not an urgency/recycling mechanism imposed on
+      // them — unrelated to this guarantee, so left running normally.
+      if (lead.is_personal_lead) {
+        diagnostics.push({ leadId: lead.id, action: "SKIPPED", reason: "personal lead — no SLA/recycling ever" });
+        continue;
+      }
+
       // Bounded to lead_history rows created at-or-after the lead's
       // most recent unjunk_and_reassign_lead_atomic recovery (if
       // any) — a manual recovery is a deliberate "this deserves a
@@ -624,7 +644,15 @@ serve(async () => {
         // never becomes FOLLOWUP_INACTIVITY_WARNING) — one flag closes
         // both the recycle-prevention and the warning-suppression,
         // no separate skip needed here.
-        onLeaveEmployeeIds.has(lead.current_owner_id)
+        onLeaveEmployeeIds.has(lead.current_owner_id),
+        // Personal lead (2026-09-23) — this is the actual enforcement
+        // engine, so this is where "no SLA timer, ever" genuinely gets
+        // honored, not just the UI badge. calculateSLAStatus returns
+        // NOT_APPLICABLE immediately, which this sweep already treats
+        // as a complete no-op (same as any terminal/paused lead) —
+        // confirmed by reading every branch below that acts on
+        // slaStatus, none of which match NOT_APPLICABLE.
+        lead.is_personal_lead
       );
 
       if (slaStatus === "JUNK_ELIGIBLE") {

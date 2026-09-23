@@ -58,3 +58,44 @@ export function scrollToAndHighlightCard(domId: string) {
     el.classList.remove("ring-2", "ring-amber-400", "ring-offset-2");
   }, 2000);
 }
+
+// Quick Dial (2026-09-23) — same sessionStorage/timestamp/try-catch
+// shape as rememberCalledCard/consumeRecentlyCalledCardId above (one
+// module, one family of "remember something before a tel: link
+// navigates away, consume it later" helpers), but a genuinely
+// different trigger: those are checked opportunistically on the next
+// natural list re-render, which this can't rely on since there's no
+// lead/card to re-render at all yet. This pair is meant to be checked
+// from a `visibilitychange` listener instead (see LeadList.tsx) — the
+// mechanism that component's own scroll-restore does NOT actually use
+// today, confirmed by reading it; this is new, not a reuse of that
+// trigger, only of the storage pattern.
+const QUICK_DIAL_STORAGE_KEY = "lastQuickDialNumber";
+const QUICK_DIAL_MAX_AGE_MS = 10 * 60 * 1000; // same 10-minute window as above, same reasoning
+
+export function rememberQuickDialNumber(mobile: string) {
+  try {
+    sessionStorage.setItem(QUICK_DIAL_STORAGE_KEY, JSON.stringify({ mobile, at: Date.now() }));
+  } catch {
+    // Same as rememberCalledCard — a UX nicety, never worth failing
+    // the actual call over.
+  }
+}
+
+// One-time consume, same reasoning as consumeRecentlyCalledCardId —
+// a later, unrelated visibility change shouldn't keep re-prompting.
+export function consumeQuickDialNumber(): string | null {
+  try {
+    const raw = sessionStorage.getItem(QUICK_DIAL_STORAGE_KEY);
+    if (!raw) return null;
+    sessionStorage.removeItem(QUICK_DIAL_STORAGE_KEY);
+
+    const { mobile, at } = JSON.parse(raw);
+    if (typeof mobile !== "string" || typeof at !== "number") return null;
+    if (Date.now() - at > QUICK_DIAL_MAX_AGE_MS) return null;
+
+    return mobile;
+  } catch {
+    return null;
+  }
+}

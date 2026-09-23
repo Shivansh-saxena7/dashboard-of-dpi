@@ -2,7 +2,7 @@
 
 import { memo } from "react";
 import { motion } from "framer-motion";
-import { Phone, Timer, Repeat, MessageCircle } from "lucide-react";
+import { Phone, Timer, Repeat, MessageCircle, Zap } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { calculateSLAStatus, getRecycleCutoff, RecycleCutoffReason } from "@/lib/calculateSLAStatus";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
@@ -34,6 +34,7 @@ interface LeadCardLead {
   last_activity_at?: string | null;
   paused_until?: string | null;
   pause_reason?: string | null;
+  is_personal_lead?: boolean;
 }
 
 interface LeadCardProps {
@@ -48,6 +49,11 @@ interface LeadCardProps {
   // new prop reference every render regardless of whether this card's
   // own data changed, silently defeating it.
   onOpen: (id: string) => void;
+  // Quick Dial (2026-09-23) — genuinely unrelated to this card's own
+  // lead (dials an arbitrary NEW number, no lead exists for it yet),
+  // so unlike onOpen this takes no id — same stable no-arg callback
+  // for every card, see LeadList.tsx's own handleQuickDial comment.
+  onQuickDial: () => void;
   index?: number;
 }
 
@@ -103,7 +109,7 @@ function formatCountdown(msRemaining: number): string {
 // reference-stable props — see onOpen's own comment above; `lead`
 // itself is already a stable object reference between renders unless
 // its actual data changed, straight from the Supabase response.
-function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps) {
+function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) {
 
   const slaStatus = calculateSLAStatus(
     {
@@ -120,7 +126,9 @@ function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps) {
     // NOT_INTERESTED repeat-count isn't tracked at list-view
     // granularity yet — it only affects the JUNK_ELIGIBLE case, which
     // Phase 4's recycling engine is the real consumer of.
-    0
+    0,
+    false,
+    lead.is_personal_lead
   );
 
   // Stale/Recycle-Warning filter (2026-09-16) — same inputs already
@@ -136,7 +144,8 @@ function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps) {
       pause_reason: lead.pause_reason,
       assigned_at: lead.assigned_at
     },
-    lead.outcome_at
+    lead.outcome_at,
+    lead.is_personal_lead
   );
 
   const statusDisplay = LEAD_STATUS_DISPLAY[lead.status];
@@ -224,7 +233,11 @@ function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps) {
       whileHover={{ y: -3 }}
       whileTap={{ scale: 0.99 }}
       onClick={() => onOpen(lead.id)}
-      className="rounded-[22px] bg-white border border-slate-100 shadow-[0_4px_20px_rgba(15,23,42,0.06)] hover:shadow-[0_10px_30px_rgba(15,23,42,0.1)] transition-shadow p-4 sm:p-5 cursor-pointer"
+      className={`rounded-[22px] shadow-[0_4px_20px_rgba(15,23,42,0.06)] hover:shadow-[0_10px_30px_rgba(15,23,42,0.1)] transition-shadow p-4 sm:p-5 cursor-pointer ${
+        lead.is_personal_lead
+          ? "bg-violet-50/40 border-2 border-violet-200"
+          : "bg-white border border-slate-100"
+      }`}
     >
       <div className="flex items-start gap-3">
         {/* Position-in-current-list number — "aaj maine kitne pe call
@@ -254,10 +267,25 @@ function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps) {
               <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${priorityDisplay.badgeClassName}`}>
                 {priorityDisplay.label}
               </span>
-              {lead.source && (
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">
-                  {lead.source}
+              {/* Dedicated badge instead of the generic source pill
+                  below (2026-09-23) — source='Personal' would already
+                  render there, but a plain indigo pill reading
+                  "Personal" looks identical to any other source string
+                  (Facebook/Website/etc.) and doesn't meet the "turant
+                  pata chale, bilkul mix nahi dikhni chahiye"
+                  requirement on its own. Suppressing the generic
+                  source badge here specifically avoids showing
+                  "Personal" twice on the same card. */}
+              {lead.is_personal_lead ? (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 border border-violet-200">
+                  🔒 Personal
                 </span>
+              ) : (
+                lead.source && (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">
+                    {lead.source}
+                  </span>
+                )
               )}
               {lead.catcher_name && (
                 <span
@@ -348,6 +376,27 @@ function LeadCard({ lead, now, onOpen, index = 0 }: LeadCardProps) {
           <MessageCircle size={15} />
           WhatsApp
         </motion.a>
+
+        {/* Quick Dial (2026-09-23) — deliberately unrelated to this
+            card's own lead/number (Call above still dials THIS lead,
+            unchanged) — a fixed-width icon button, not flex-1 like
+            Call/WhatsApp, since it's an occasional secondary action on
+            every card, not equal-weight with the two primary ones.
+            stopPropagation for the same reason Call/WhatsApp's own
+            handlers do — the whole card has its own onClick that
+            opens the detail modal. */}
+        <motion.button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onQuickDial();
+          }}
+          whileTap={{ scale: 0.94 }}
+          title="Quick Dial a new number"
+          className="shrink-0 w-11 h-11 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 flex items-center justify-center"
+        >
+          <Zap size={16} />
+        </motion.button>
       </div>
     </motion.div>
   );

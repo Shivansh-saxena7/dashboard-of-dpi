@@ -270,6 +270,7 @@ export default function AdminLeadsPage() {
         current_owner_id,
         pending_team_id,
         lead_type,
+        is_personal_lead,
         employees ( name ),
         pending_team:teams ( name ),
         lead_history (
@@ -594,7 +595,8 @@ export default function AdminLeadsPage() {
             assigned_at: h?.assigned_at ?? null,
             lead_type: lead.lead_type
           },
-          h?.outcome_at ?? null
+          h?.outcome_at ?? null,
+          lead.is_personal_lead
         ) !== null
       );
     });
@@ -649,7 +651,8 @@ export default function AdminLeadsPage() {
         pausedUntil: lead.lead_history?.[0]?.paused_until ?? null,
         pauseReason: lead.lead_history?.[0]?.pause_reason ?? null,
         lastActivityAt: lead.lead_history?.[0]?.last_activity_at ?? null,
-        outcomeAt: lead.lead_history?.[0]?.outcome_at ?? null
+        outcomeAt: lead.lead_history?.[0]?.outcome_at ?? null,
+        isPersonalLead: lead.is_personal_lead ?? false
       })),
     [recyclingFilteredLeads]
   );

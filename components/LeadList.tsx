@@ -1,15 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 import { Search, ChevronDown } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import LeadCard from "./LeadCard";
 import LeadDetailModal from "./LeadDetailModal";
+import AddPersonalLeadModal from "./AddPersonalLeadModal";
+import QuickDialModal from "./QuickDialModal";
 import SLABreachHistoryCard from "./SLABreachHistoryCard";
 import { LeadStatus, EMPLOYEE_SELECTABLE_STATUSES } from "@/lib/getValidNextLeadStatuses";
 import { getRecycleCutoff } from "@/lib/calculateSLAStatus";
-import { consumeRecentlyCalledCardId, scrollToAndHighlightCard } from "@/lib/lastCalledLead";
+import { consumeRecentlyCalledCardId, scrollToAndHighlightCard, consumeQuickDialNumber } from "@/lib/lastCalledLead";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
 
@@ -121,6 +124,29 @@ export default function LeadList({ employeeId }: LeadListProps) {
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("NEWEST");
+  // Personal-lead self-add (2026-09-23) — Personal Only filter reuses
+  // the exact tab-bypass mechanism search/statusFilter already
+  // established: with it on, personal leads show across every
+  // board-stage tab instead of only whichever one they happen to
+  // currently sit in, same reasoning as those two.
+  const [personalOnlyFilter, setPersonalOnlyFilter] = useState(false);
+  const [addPersonalLeadOpen, setAddPersonalLeadOpen] = useState(false);
+  const [addPersonalLeadInitialMobile, setAddPersonalLeadInitialMobile] = useState<string | undefined>(undefined);
+  // Quick Dial (2026-09-23) — quickDialOpen is the "enter a number,
+  // tap Call" step; quickDialPromptMobile is the separate "Add as
+  // Personal Lead?" Yes/No step that appears after returning from the
+  // call (see the visibilitychange effect below) — two different UI
+  // moments, deliberately two different pieces of state rather than
+  // one overloaded flag.
+  const [quickDialOpen, setQuickDialOpen] = useState(false);
+  const [quickDialPromptMobile, setQuickDialPromptMobile] = useState<string | null>(null);
+
+  // Same stable-reference reasoning as handleOpenLead above — passed
+  // to every LeadCard's new Quick Dial icon, takes no per-card
+  // argument (Quick Dial dials an arbitrary NEW number, not anything
+  // about the card that triggered it), so this is just a plain
+  // no-arg opener.
+  const handleQuickDial = useCallback(() => setQuickDialOpen(true), []);
 
   useEffect(() => {
     loadLeads();
@@ -138,6 +164,27 @@ export default function LeadList({ employeeId }: LeadListProps) {
     const id = consumeRecentlyCalledCardId();
     if (id) scrollToAndHighlightCard(`lead-card-${id}`);
   }, [loading]);
+
+  // Quick Dial (2026-09-23) — genuinely new trigger, not a reuse of
+  // the scroll-restore effect above (confirmed that one doesn't use
+  // visibilitychange at all — see lib/lastCalledLead.ts's own comment
+  // on this exact distinction). Fires every time the tab regains
+  // visibility for any reason (switching back from another app,
+  // alt-tabbing, not specifically "returning from a phone call" —
+  // there's no web API that could tell the difference), but
+  // consumeQuickDialNumber only ever returns non-null within 10
+  // minutes of an actual Quick Dial Call tap, so an unrelated
+  // visibility change is already a silent no-op the rest of the time.
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState !== "visible") return;
+      const mobile = consumeQuickDialNumber();
+      if (mobile) setQuickDialPromptMobile(mobile);
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, []);
 
   // Realtime — same proven pattern already used by Header.tsx
   // (notification bell) and SessionGuard.tsx (live deactivation),
@@ -217,6 +264,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
         sla_deadline,
         recycle_count,
         created_at,
+        is_personal_lead,
         lead_history!inner (
           id,
           call_count,
@@ -247,6 +295,18 @@ export default function LeadList({ employeeId }: LeadListProps) {
     }
 
     setLoading(false);
+  }
+
+  // Auto-open after Personal Lead creation (2026-09-23) — awaits the
+  // refetch first so `leads` state actually contains the new row
+  // before selecting it; selectedLead below is a plain derived
+  // `leads.find(...)`, so this ordering is what makes LeadDetailModal
+  // resolve correctly on the very next render instead of finding
+  // nothing. Reuses the exact same detail modal/log_lead_update_atomic
+  // flow every other lead already uses — no new status-setting UI.
+  async function handlePersonalLeadCreated(leadId: string) {
+    await loadLeads();
+    setSelectedLeadId(leadId);
   }
 
   async function loadSlaBreachHistory() {
@@ -388,10 +448,16 @@ export default function LeadList({ employeeId }: LeadListProps) {
     // specifically needs this too — the whole point of a "New" filter
     // is finding every not-yet-touched lead regardless of which tab
     // it happens to sit in, same reasoning reused rather than a
-    // second bespoke mechanism. Plain tab-browsing with no search/
-    // status filter active is completely unchanged.
-    const bypassTabFilter = Boolean(searchQuery.trim()) || Boolean(statusFilter);
+    // second bespoke mechanism. Personal Only (2026-09-23) joins the
+    // same bypass for the identical reason. Plain tab-browsing with no
+    // search/status/personal-only filter active is completely
+    // unchanged.
+    const bypassTabFilter = Boolean(searchQuery.trim()) || Boolean(statusFilter) || personalOnlyFilter;
     let result = bypassTabFilter ? leads : leads.filter((lead) => (lead.board_stage || "LEADS") === activeTab);
+
+    if (personalOnlyFilter) {
+      result = result.filter((lead) => lead.is_personal_lead);
+    }
 
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
@@ -481,7 +547,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
 
     return result;
 
-  }, [leads, activeTab, searchQuery, projectFilter, sourceFilter, statusFilter, recyclingSoonFilter, dateRangeFilter, customStart, customEnd, sortBy]);
+  }, [leads, activeTab, searchQuery, projectFilter, sourceFilter, statusFilter, recyclingSoonFilter, dateRangeFilter, customStart, customEnd, sortBy, personalOnlyFilter]);
 
   // Same fix as app/admin/leads/page.tsx's cardLeads (2026-09-18) — the
   // render loop below used to build `lead={{ ...inline object... }}`
@@ -519,7 +585,8 @@ export default function LeadList({ employeeId }: LeadListProps) {
         reassign_note: lead.lead_history[0]?.reassign_note ?? null,
         last_activity_at: lead.lead_history[0]?.last_activity_at ?? null,
         paused_until: lead.lead_history[0]?.paused_until ?? null,
-        pause_reason: lead.lead_history[0]?.pause_reason ?? null
+        pause_reason: lead.lead_history[0]?.pause_reason ?? null,
+        is_personal_lead: lead.is_personal_lead ?? false
       })),
     [visibleLeads]
   );
@@ -606,6 +673,16 @@ export default function LeadList({ employeeId }: LeadListProps) {
             />
           </motion.div>
 
+          {/* No standalone Quick Dial / Add Personal Lead buttons here
+              (2026-09-23 — removed, were here briefly) — Quick Dial
+              now lives inside every LeadCard itself, next to its
+              existing Call button (see LeadCard.tsx), and is the only
+              entry point into the whole personal-lead-add flow. The
+              actual Quick Dial state/modal/prompt machinery below is
+              unchanged, just no longer has a trigger of its own up
+              here — handleQuickDial (passed to every card) is what
+              opens it now. */}
+
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -652,6 +729,18 @@ export default function LeadList({ employeeId }: LeadListProps) {
               }`}
             >
               ⚠️ Recycling Soon
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setPersonalOnlyFilter((v) => !v)}
+              className={`h-11 sm:h-10 rounded-xl px-3 text-xs font-semibold border transition ${
+                personalOnlyFilter
+                  ? "bg-violet-100 border-violet-300 text-violet-700"
+                  : "bg-white border-slate-200 text-slate-600"
+              }`}
+            >
+              🔒 Personal Only
             </button>
 
             <FilterSelect
@@ -726,6 +815,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
               now={now}
               index={index}
               onOpen={handleOpenLead}
+              onQuickDial={handleQuickDial}
               lead={cardLead}
             />
           ))}
@@ -759,6 +849,61 @@ export default function LeadList({ employeeId }: LeadListProps) {
           onPauseChanged={(pause) => handlePauseChanged(selectedLead.id, pause)}
         />
       )}
+
+      {addPersonalLeadOpen && (
+        <AddPersonalLeadModal
+          onClose={() => setAddPersonalLeadOpen(false)}
+          onCreated={handlePersonalLeadCreated}
+          initialMobile={addPersonalLeadInitialMobile}
+        />
+      )}
+
+      {quickDialOpen && <QuickDialModal onClose={() => setQuickDialOpen(false)} />}
+
+      {/* Quick Dial "Add as Personal Lead?" prompt (2026-09-23) —
+          appears once, driven by the visibilitychange effect above.
+          Portaled for the same reason every other modal here is (a
+          transformed motion.div ancestor would otherwise mis-position
+          a plain fixed element) — see AdminLeadHistoryModal.tsx's own
+          comment on this exact issue. "No" clears the prompt with
+          nothing saved; "Yes" hands the number to the existing
+          AddPersonalLeadModal pre-filled, reusing it rather than a
+          second create-lead UI. */}
+      {quickDialPromptMobile &&
+        createPortal(
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <div onClick={() => setQuickDialPromptMobile(null)} className="absolute inset-0 bg-black/40" />
+            <motion.div
+              initial={{ opacity: 0, y: 20, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              className="relative w-full max-w-sm bg-white rounded-[24px] shadow-2xl p-6"
+            >
+              <p className="text-sm font-bold text-slate-800 mb-1">Add as Personal Lead?</p>
+              <p className="text-xs text-slate-500 mb-4">
+                You just quick-dialed <span className="font-semibold">{quickDialPromptMobile}</span>. Log it so it's tracked, with no SLA timer.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setQuickDialPromptMobile(null)}
+                  className="flex-1 h-11 rounded-xl text-sm font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 transition"
+                >
+                  No
+                </button>
+                <button
+                  onClick={() => {
+                    setAddPersonalLeadInitialMobile(quickDialPromptMobile);
+                    setQuickDialPromptMobile(null);
+                    setAddPersonalLeadOpen(true);
+                  }}
+                  className="flex-1 h-11 rounded-xl font-semibold text-white bg-gradient-to-r from-violet-600 to-purple-500"
+                >
+                  Yes, Add
+                </button>
+              </div>
+            </motion.div>
+          </div>,
+          document.body
+        )}
     </>
   );
 }

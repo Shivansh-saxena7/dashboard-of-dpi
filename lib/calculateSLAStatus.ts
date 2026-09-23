@@ -82,8 +82,23 @@ export function calculateSLAStatus(
   // anything about employee_leave_periods itself. Optional, defaults
   // to false — every pre-existing caller (LeadCard.tsx) that doesn't
   // pass it behaves exactly as before.
-  isOwnerOnLeave: boolean = false
+  isOwnerOnLeave: boolean = false,
+  // Personal (self-sourced) lead (2026-09-23) — approved requirement:
+  // NO SLA timer/urgency whatsoever, regardless of stage or status.
+  // Checked first, before even the terminal check, and short-circuits
+  // to the existing NOT_APPLICABLE value rather than a new one — its
+  // meaning ("no SLA enforcement applies here") is already exactly
+  // right, and every existing consumer (recycle-stale-leads included)
+  // already treats NOT_APPLICABLE as a complete no-op. Same optional/
+  // defaults-false/backward-compatible shape as isOwnerOnLeave above —
+  // every pre-existing caller that doesn't pass it behaves exactly as
+  // before.
+  isPersonalLead: boolean = false
 ): SLAStatus {
+
+  if (isPersonalLead) {
+    return "NOT_APPLICABLE";
+  }
 
   const now = new Date();
 
@@ -315,9 +330,15 @@ export type RecycleCutoffReason =
 // should treat null as "not applicable to this filter."
 export function getRecycleCutoff(
   lead: LeadForSLA,
-  lastOutcomeAt: string | null
+  lastOutcomeAt: string | null,
+  // Same isPersonalLead short-circuit as calculateSLAStatus above —
+  // a personal lead never shows a recycle countdown either, same
+  // "no SLA/urgency whatsoever" requirement. Optional/defaults-false,
+  // every pre-existing caller unaffected.
+  isPersonalLead: boolean = false
 ): { cutoffAt: Date; reason: RecycleCutoffReason } | null {
 
+  if (isPersonalLead) return null;
   if (isLeadTerminal(lead.status, lead.board_stage)) return null;
   if (lead.pause_reason === "VISIT_PENDING_VERIFICATION") return null;
   if (lead.paused_until && new Date() < new Date(lead.paused_until)) return null;
