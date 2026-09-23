@@ -144,6 +144,12 @@ export default function AdminLeadsPage() {
   const [boardStageFilter, setBoardStageFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [recyclingSoonFilter, setRecyclingSoonFilter] = useState(false);
+  // Personal Leads Only (2026-09-23) — a real server-side filter, same
+  // pattern as sourceFilter/boardStageFilter above, deliberately NOT
+  // client-side like recyclingSoonFilter (that one's client-side-ness
+  // is its own documented, deliberate exception — see its own comment
+  // — this filter has no such reason to deviate from the norm).
+  const [personalOnlyFilter, setPersonalOnlyFilter] = useState(false);
   const [typeFilter, setTypeFilter] = useState("");
   const [dateRangeFilter, setDateRangeFilter] = useState<DateRangeOption>("ALL");
   const [customStart, setCustomStart] = useState("");
@@ -180,6 +186,7 @@ export default function AdminLeadsPage() {
     boardStageFilter,
     statusFilter,
     typeFilter,
+    personalOnlyFilter,
     dateRangeFilter,
     customStart,
     customEnd,
@@ -306,6 +313,21 @@ export default function AdminLeadsPage() {
     if (employeeFilter) q = q.eq("current_owner_id", employeeFilter);
     if (projectFilter) q = q.eq("project", projectFilter);
     if (sourceFilter) q = q.eq("source", sourceFilter);
+    // Personal Leads Only (2026-09-23) — deliberately filters on the
+    // authoritative is_personal_lead boolean, not source='Personal'.
+    // The two happen to overlap today (both set together at creation
+    // in create_personal_lead_atomic), but is_personal_lead is the
+    // real, purpose-built gate everything else (SLA suppression,
+    // badges, recycle exemption) already keys off — source is a
+    // general free-text field that could in principle drift from it,
+    // so this stays correct even if that ever happened. Once a real
+    // personal lead exists, "Personal" will also appear in the plain
+    // Source dropdown above (leads_distinct_sources has no exclusion
+    // for it) — deliberately not a bug: same overlap as any other
+    // dedicated filter sitting alongside a general one (e.g. Gmail's
+    // label sidebar vs. its own search), not confusing since both
+    // paths return identical results for the same data.
+    if (personalOnlyFilter) q = q.eq("is_personal_lead", true);
 
     if (boardStageFilter) {
       q = boardStageFilter === "LEADS" ? q.or("board_stage.eq.LEADS,board_stage.is.null") : q.eq("board_stage", boardStageFilter);
@@ -734,6 +756,10 @@ export default function AdminLeadsPage() {
       otherFilters.push({ label: "Type", value: typeFilter === "DATA" ? "Data" : "Leads" });
     }
 
+    if (personalOnlyFilter) {
+      otherFilters.push({ label: "Personal", value: "Only" });
+    }
+
     const dateLabel = dateRangeFilterLabel(dateRangeFilter, customStart, customEnd);
     if (dateLabel) {
       otherFilters.push({ label: "Date", value: dateLabel });
@@ -747,6 +773,7 @@ export default function AdminLeadsPage() {
     boardStageFilter,
     statusFilter,
     typeFilter,
+    personalOnlyFilter,
     dateRangeFilter,
     customStart,
     customEnd,
@@ -944,6 +971,18 @@ export default function AdminLeadsPage() {
             }`}
           >
             ⚠️ Recycling Soon
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setPersonalOnlyFilter((v) => !v)}
+            className={`h-10 rounded-lg px-3 text-xs font-semibold border transition ${
+              personalOnlyFilter
+                ? "bg-violet-100 border-violet-300 text-violet-700"
+                : "bg-slate-50 border-slate-200 text-slate-600"
+            }`}
+          >
+            🔒 Personal Only
           </button>
 
           <FilterSelect value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
