@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "react-hot-toast";
+import UpdateAvailableBanner from "@/components/UpdateAvailableBanner";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -39,6 +40,8 @@ export default function RootLayout({
   <body className="min-h-full flex flex-col overflow-x-hidden" style={{ colorScheme: "light" }}>
 
       {children}
+
+      <UpdateAvailableBanner />
 
       <Toaster
         position="top-right"
