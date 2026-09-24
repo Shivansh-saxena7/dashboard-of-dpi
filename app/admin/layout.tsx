@@ -166,6 +166,16 @@ href:"/admin/lead-transfers",
 icon:"🔀"
 },
 {
+name:"HR",
+href:"/hr/attendance",
+icon:"🧑‍💼"
+},
+{
+name:"Payroll",
+href:"/payroll/expenses",
+icon:"💰"
+},
+{
 name:"Settings",
 href:"/admin/settings",
 icon:"⚙️"

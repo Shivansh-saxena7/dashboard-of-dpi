@@ -26,7 +26,7 @@ export interface ExportReportMeta {
 
 export type ExportRow = Record<string, string | number>;
 
-const COMPANY_NAME = "Divya Padma Infosystem LLP";
+export const COMPANY_NAME = "Divya Padma Infosystem LLP";
 const BRAND_BLUE: [number, number, number] = [29, 78, 216];
 const SLATE_500: [number, number, number] = [100, 116, 139];
 const SLATE_200: [number, number, number] = [226, 232, 240];

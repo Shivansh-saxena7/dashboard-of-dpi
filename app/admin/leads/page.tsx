@@ -166,13 +166,32 @@ export default function AdminLeadsPage() {
     }
   }
 
+  // Paginated fetch (2026-09-20 critical fix) — PostgREST enforces a
+  // default 1000-row cap per request regardless of any client-side
+  // .limit()/.range() call being present or not; a single unbounded
+  // .select() here silently returned only the 1000 MOST RECENTLY
+  // CREATED leads company-wide (this query is ordered by
+  // created_at desc) out of ~2,210 total, before any of this page's
+  // own filtering ever ran. Confirmed live: an employee with a large,
+  // older lead book (leads assigned well before the most recent 1000
+  // company-wide) showed a materially undercounted total the moment
+  // the Employee filter was applied, and the same silent truncation
+  // equally affected search, every other filter, Select-All-Filtered,
+  // and the Excel/PDF/Report-Table exports on this page — not an
+  // employee-filter-specific bug. No existing page in this codebase
+  // actually pages through a full >1000-row dataset (admin/teams and
+  // admin/backup-status either use small bounded .limit() queries or
+  // none at all) — this reuses the same `.range()` primitive
+  // TeamMemberDetailModal.tsx already proves works against this exact
+  // lead_history!filtered shape, just looped here until exhausted
+  // instead of that component's incremental "load more", since this
+  // page's search/filter/export all need the complete dataset in
+  // memory up front.
   async function loadLeads() {
     setLoading(true);
 
-    const { data, error } = await supabase
-      .from("leads")
-      .select(
-        `
+    const LEADS_FETCH_PAGE_SIZE = 1000;
+    const selectString = `
         id,
         name,
         mobile,
@@ -195,13 +214,34 @@ export default function AdminLeadsPage() {
           last_activity_at, paused_until, pause_reason, pause_note, outcome_at,
           assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)
         )
-      `
-      )
-      .eq("lead_history.is_active", true)
-      .order("created_at", { ascending: false });
+      `;
 
-    if (!error && data) {
-      setLeads(data);
+    let allLeads: any[] = [];
+    let from = 0;
+    let fetchError: any = null;
+
+    while (true) {
+      const { data, error } = await supabase
+        .from("leads")
+        .select(selectString)
+        .eq("lead_history.is_active", true)
+        .order("created_at", { ascending: false })
+        .range(from, from + LEADS_FETCH_PAGE_SIZE - 1);
+
+      if (error) {
+        fetchError = error;
+        break;
+      }
+      if (!data || data.length === 0) break;
+
+      allLeads = allLeads.concat(data);
+
+      if (data.length < LEADS_FETCH_PAGE_SIZE) break;
+      from += LEADS_FETCH_PAGE_SIZE;
+    }
+
+    if (!fetchError) {
+      setLeads(allLeads);
     }
 
     setLoading(false);

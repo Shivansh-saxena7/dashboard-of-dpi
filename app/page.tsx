@@ -89,6 +89,22 @@ if (data.role === "sales_coordinator") {
 
 }
 
+if (data.role === "hr") {
+
+  router.replace("/hr/attendance");
+
+  return;
+
+}
+
+if (data.role === "payroll") {
+
+  router.replace("/payroll");
+
+  return;
+
+}
+
 setEmployee(data);
 
 setSelectedEmployee(data.id);

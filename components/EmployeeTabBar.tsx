@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
-import { Image as ImageIcon, Target, Database, Users, Trophy, Ticket, ClipboardList } from "lucide-react";
+import { Image as ImageIcon, Target, Database, Users, Trophy, Ticket, ClipboardList, FileText, Receipt } from "lucide-react";
 
 interface EmployeeTabBarProps {
   role?: string;
@@ -16,7 +16,9 @@ const SALES_TABS = [
   { href: "/data", label: "Data", icon: Database },
   { href: "/leaderboard", label: "Leaderboard", icon: Trophy },
   { href: "/report", label: "My Report", icon: ClipboardList },
-  { href: "/tickets", label: "Tickets", icon: Ticket }
+  { href: "/tickets", label: "Tickets", icon: Ticket },
+  { href: "/documents", label: "Documents", icon: FileText },
+  { href: "/expenses", label: "Expenses", icon: Receipt }
 ];
 
 // Tickets is deliberately universal — "koi-bhi-employee" can raise
@@ -27,7 +29,9 @@ const SALES_TABS = [
 // to them, not a blanket re-expansion of their access.
 const NON_SALES_TABS = [
   { href: "/", label: "Posts", icon: ImageIcon },
-  { href: "/tickets", label: "Tickets", icon: Ticket }
+  { href: "/tickets", label: "Tickets", icon: Ticket },
+  { href: "/documents", label: "Documents", icon: FileText },
+  { href: "/expenses", label: "Expenses", icon: Receipt }
 ];
 
 const TEAM_LEADER_TAB = { href: "/team", label: "Team", icon: Users };

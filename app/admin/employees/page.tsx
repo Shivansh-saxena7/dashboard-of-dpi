@@ -181,6 +181,33 @@ const toggleSalesCoordinator = async (
 // sales_coordinator either, since those roles have their own separate
 // dashboards (/admin, /coordinator) that don't read this field at
 // all.
+// Sets department='hr' together with role='hr' in the same update --
+// department is what actually activates the existing ticket_categories
+// HR routing (resolver_value='hr'), so setting role without it would
+// leave that routing silently inactive despite the role looking
+// correctly set. Reverts department back to "sales" (the default) when
+// removing the role, so toggling off doesn't leave a stale department.
+const toggleHrRole = async (
+  id: string,
+  currentRole: string
+) => {
+
+  const turningOn = currentRole !== "hr";
+
+  const { error } = await supabase
+    .from("employees")
+    .update({
+      role: turningOn ? "hr" : "employee",
+      department: turningOn ? "hr" : "sales"
+    })
+    .eq("id", id);
+
+  if (!error) {
+    fetchEmployees();
+  }
+
+};
+
 const updateDepartment = async (id: string, newDepartment: string) => {
 
   const { error } = await supabase
@@ -903,7 +930,23 @@ employee.is_field_employee
   </button>
 )}
 
-{employee.role === "employee" && (
+{(employee.role === "employee" || employee.role === "hr") && (
+  <button
+    onClick={async (e) => {
+      e.stopPropagation();
+      await toggleHrRole(employee.id, employee.role);
+    }}
+    className={`px-4 py-2 rounded-xl text-xs font-semibold transition ${
+      employee.role === "hr"
+        ? "bg-teal-100 text-teal-700 hover:bg-teal-200"
+        : "bg-teal-50 text-teal-700 hover:bg-teal-100"
+    }`}
+  >
+    {employee.role === "hr" ? "Remove HR role" : "Make HR"}
+  </button>
+)}
+
+{(employee.role === "employee" || employee.role === "hr") && (
   <select
     value={employee.department || "sales"}
     onChange={async (e) => {
