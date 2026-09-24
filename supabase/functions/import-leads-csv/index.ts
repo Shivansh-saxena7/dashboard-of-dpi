@@ -449,7 +449,8 @@ serve(async (req) => {
       inputs.eligibleEmployees,
       inputs.projectPointers,
       excludedEmployeeIds,
-      inputs.projectExclusions
+      inputs.projectExclusions,
+      inputs.employeeAllowlists
     );
 
     console.log("import-leads-csv: distributeLeadsBatch complete", {

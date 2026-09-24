@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Building2, Plus, X, ArrowRightLeft, Trash2, ChevronDown, Ban } from "lucide-react";
+import { Building2, Plus, X, ArrowRightLeft, Trash2, ChevronDown, Ban, ShieldCheck } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import toast from "react-hot-toast";
 import DeleteModal from "../components/DeleteModal";
@@ -24,6 +24,20 @@ interface ExclusionRule {
 interface Employee {
   id: string;
   name: string;
+}
+
+// Employee-Project-Allowlist (2026-09-24) — a RESTRICTION, not a
+// RESERVATION: an employee with any rows here is eligible ONLY for
+// the projects listed; an employee with zero rows stays fully
+// unrestricted, same as today. See lib/calculateLeadAssignment.ts's
+// own comment on EmployeeProjectAllowlistRule for the full rule, and
+// its interaction with Fixed Employees above (a project with a fixed
+// employee bypasses this check entirely, same precedence Excluded
+// Employees already has).
+interface AllowlistRule {
+  id: string;
+  employee_id: string;
+  project: string;
 }
 
 // Admin-only management for project_assignment_rules (INCLUDE — a
@@ -61,9 +75,18 @@ export default function ProjectRulesPage() {
 
   const [rules, setRules] = useState<Rule[]>([]);
   const [exclusions, setExclusions] = useState<ExclusionRule[]>([]);
+  const [allowlists, setAllowlists] = useState<AllowlistRule[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [projectOptions, setProjectOptions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [newAllowlistEmployeeId, setNewAllowlistEmployeeId] = useState("");
+  const [newAllowlistProjects, setNewAllowlistProjects] = useState<Set<string>>(new Set());
+  const [creatingAllowlist, setCreatingAllowlist] = useState(false);
+
+  const [addAllowlistProjectFor, setAddAllowlistProjectFor] = useState<string | null>(null);
+  const [addAllowlistProjectSelections, setAddAllowlistProjectSelections] = useState<Set<string>>(new Set());
+  const [addingAllowlistProjects, setAddingAllowlistProjects] = useState(false);
 
   const [newProjectSelect, setNewProjectSelect] = useState("");
   const [newProjectFreeText, setNewProjectFreeText] = useState("");
@@ -103,16 +126,18 @@ export default function ProjectRulesPage() {
     // project name that only appears in leads past row ~1000. The
     // view is already the source of truth for "every distinct project
     // that's ever appeared on a lead" — no need to re-derive it here.
-    const [{ data: rulesData }, { data: exclusionsData }, { data: employeesData }, { data: projectsData }] =
+    const [{ data: rulesData }, { data: exclusionsData }, { data: allowlistsData }, { data: employeesData }, { data: projectsData }] =
       await Promise.all([
         supabase.from("project_assignment_rules").select("id, project, assigned_employee_id").order("project"),
         supabase.from("project_exclusion_rules").select("id, project, excluded_employee_id").order("project"),
+        supabase.from("employee_project_allowlist").select("id, employee_id, project").order("project"),
         supabase.from("employees").select("id, name").order("name"),
         supabase.from("leads_distinct_projects").select("project").order("project")
       ]);
 
     setRules(rulesData || []);
     setExclusions(exclusionsData || []);
+    setAllowlists(allowlistsData || []);
     setEmployees(employeesData || []);
     setProjectOptions((projectsData || []).map((p) => p.project).filter(Boolean) as string[]);
     setLoading(false);
@@ -150,6 +175,25 @@ export default function ProjectRulesPage() {
     const projects = new Set<string>([...includesByProject.keys(), ...excludesByProject.keys()]);
     return Array.from(projects).sort();
   }, [includesByProject, excludesByProject]);
+
+  // Grouped by EMPLOYEE, not project — unlike the two above, this
+  // mechanism is employee-scoped (per the approved plan), so "one card
+  // per employee with any allowlist rows" is the natural display, not
+  // "one card per project."
+  const allowlistsByEmployee = useMemo(() => {
+    const map = new Map<string, AllowlistRule[]>();
+    allowlists.forEach((a) => {
+      if (!map.has(a.employee_id)) map.set(a.employee_id, []);
+      map.get(a.employee_id)!.push(a);
+    });
+    return map;
+  }, [allowlists]);
+
+  const employeesWithAllowlist = useMemo(() => {
+    return Array.from(allowlistsByEmployee.keys()).sort((a, b) =>
+      (employeeNameById.get(a) || "").localeCompare(employeeNameById.get(b) || "")
+    );
+  }, [allowlistsByEmployee, employeeNameById]);
 
   async function handleCreateNewProject() {
     const finalProject = newProjectSelect === NEW_PROJECT_SENTINEL
@@ -276,6 +320,87 @@ export default function ProjectRulesPage() {
     }
 
     toast.success("Exclusion removed.");
+    loadData();
+  }
+
+  function toggleNewAllowlistProject(project: string) {
+    setNewAllowlistProjects((prev) => {
+      const next = new Set(prev);
+      if (next.has(project)) next.delete(project);
+      else next.add(project);
+      return next;
+    });
+  }
+
+  async function handleCreateAllowlist() {
+    if (!newAllowlistEmployeeId || newAllowlistProjects.size === 0) {
+      toast.error("Select an employee and at least one project.");
+      return;
+    }
+
+    setCreatingAllowlist(true);
+
+    const { error } = await supabase.from("employee_project_allowlist").insert(
+      Array.from(newAllowlistProjects).map((project) => ({
+        employee_id: newAllowlistEmployeeId,
+        project
+      }))
+    );
+
+    if (error) {
+      toast.error(error.message || "Could not create allowlist.");
+    } else {
+      toast.success("Allowlist created — this employee is now restricted to the selected projects.");
+      setNewAllowlistEmployeeId("");
+      setNewAllowlistProjects(new Set());
+      loadData();
+    }
+
+    setCreatingAllowlist(false);
+  }
+
+  function toggleAddAllowlistProject(project: string) {
+    setAddAllowlistProjectSelections((prev) => {
+      const next = new Set(prev);
+      if (next.has(project)) next.delete(project);
+      else next.add(project);
+      return next;
+    });
+  }
+
+  async function handleAddProjectsToAllowlist(employeeId: string) {
+    if (addAllowlistProjectSelections.size === 0) return;
+
+    setAddingAllowlistProjects(true);
+
+    const { error } = await supabase.from("employee_project_allowlist").insert(
+      Array.from(addAllowlistProjectSelections).map((project) => ({
+        employee_id: employeeId,
+        project
+      }))
+    );
+
+    if (error) {
+      toast.error(error.message || "Could not add projects.");
+    } else {
+      toast.success("Projects added to allowlist.");
+      setAddAllowlistProjectFor(null);
+      setAddAllowlistProjectSelections(new Set());
+      loadData();
+    }
+
+    setAddingAllowlistProjects(false);
+  }
+
+  async function handleRemoveAllowlistEntry(entryId: string) {
+    const { error } = await supabase.from("employee_project_allowlist").delete().eq("id", entryId);
+
+    if (error) {
+      toast.error(error.message || "Could not remove this project.");
+      return;
+    }
+
+    toast.success("Removed from allowlist.");
     loadData();
   }
 
@@ -439,6 +564,146 @@ export default function ProjectRulesPage() {
           Blocks this employee from round-robin leads for this project — everyone else keeps getting them normally. Has no effect on a project that already has Fixed Employees below.
         </p>
       </div>
+
+      <div className="bg-white rounded-[24px] border border-slate-100 shadow-md p-6">
+        <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold mb-3">Employee Project Allowlist</p>
+        <p className="text-[11px] text-slate-400 mb-3">
+          A restriction, not a reservation: an employee given an allowlist can ONLY receive leads for the projects checked below. An employee with no allowlist stays fully unrestricted, same as today. Has no effect on a project that has a Fixed Employee above — that always wins.
+        </p>
+        <div className="flex flex-col sm:flex-row gap-2 items-start">
+          <select
+            value={newAllowlistEmployeeId}
+            onChange={(e) => setNewAllowlistEmployeeId(e.target.value)}
+            className="h-11 rounded-xl bg-slate-50 border border-slate-200 px-3 text-sm outline-none focus:ring-2 focus:ring-emerald-200"
+          >
+            <option value="">Select employee...</option>
+            {employees.map((e) => (
+              <option key={e.id} value={e.id}>{e.name}</option>
+            ))}
+          </select>
+
+          <div className="flex-1 flex flex-wrap gap-1.5 p-2 rounded-xl bg-slate-50 border border-slate-200 min-h-[44px]">
+            {projectOptions.length === 0 ? (
+              <span className="text-xs text-slate-400 px-1">No projects yet.</span>
+            ) : (
+              projectOptions.map((p) => (
+                <label
+                  key={p}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs cursor-pointer select-none ${
+                    newAllowlistProjects.has(p) ? "bg-emerald-100 text-emerald-800 font-semibold" : "bg-white text-slate-600 border border-slate-200"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={newAllowlistProjects.has(p)}
+                    onChange={() => toggleNewAllowlistProject(p)}
+                    className="accent-emerald-600"
+                  />
+                  {p}
+                </label>
+              ))
+            )}
+          </div>
+
+          <button
+            onClick={handleCreateAllowlist}
+            disabled={creatingAllowlist}
+            className="h-11 px-5 rounded-xl font-semibold text-white bg-gradient-to-r from-emerald-600 to-teal-500 disabled:opacity-50 flex items-center justify-center gap-2 shrink-0"
+          >
+            <ShieldCheck size={16} />
+            Create
+          </button>
+        </div>
+      </div>
+
+      {employeesWithAllowlist.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {employeesWithAllowlist.map((employeeId) => {
+            const entries = allowlistsByEmployee.get(employeeId) || [];
+            const allowedProjects = new Set(entries.map((e) => e.project));
+
+            return (
+              <motion.div
+                key={employeeId}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-white rounded-[24px] border border-emerald-100 shadow-md p-5"
+              >
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="h-9 w-9 rounded-xl bg-emerald-50 flex items-center justify-center shrink-0">
+                    <ShieldCheck size={16} className="text-emerald-600" />
+                  </div>
+                  <p className="text-sm font-bold text-slate-800 truncate">{employeeNameById.get(employeeId) || "Unknown"}</p>
+                </div>
+
+                <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold mb-1.5">
+                  Restricted To
+                </p>
+                <div className="space-y-1.5">
+                  {entries.map((entry) => (
+                    <div key={entry.id} className="flex items-center justify-between px-3 py-2 rounded-xl bg-emerald-50/60">
+                      <span className="text-sm text-slate-700">{entry.project}</span>
+                      <button
+                        onClick={() => handleRemoveAllowlistEntry(entry.id)}
+                        title="Remove this project from the allowlist"
+                        className="h-7 w-7 rounded-lg bg-red-50 flex items-center justify-center text-red-500 hover:bg-red-100 transition"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {addAllowlistProjectFor === employeeId ? (
+                  <div className="mt-3 space-y-2">
+                    <div className="flex flex-wrap gap-1.5 p-2 rounded-xl bg-slate-50 border border-slate-200">
+                      {projectOptions.filter((p) => !allowedProjects.has(p)).map((p) => (
+                        <label
+                          key={p}
+                          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs cursor-pointer select-none ${
+                            addAllowlistProjectSelections.has(p) ? "bg-emerald-100 text-emerald-800 font-semibold" : "bg-white text-slate-600 border border-slate-200"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={addAllowlistProjectSelections.has(p)}
+                            onChange={() => toggleAddAllowlistProject(p)}
+                            className="accent-emerald-600"
+                          />
+                          {p}
+                        </label>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleAddProjectsToAllowlist(employeeId)}
+                        disabled={addingAllowlistProjects || addAllowlistProjectSelections.size === 0}
+                        className="h-9 px-3 rounded-lg bg-emerald-600 text-white text-xs font-bold disabled:opacity-50"
+                      >
+                        Add
+                      </button>
+                      <button
+                        onClick={() => { setAddAllowlistProjectFor(null); setAddAllowlistProjectSelections(new Set()); }}
+                        className="h-9 px-2 text-xs text-slate-400"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setAddAllowlistProjectFor(employeeId)}
+                    className="flex items-center gap-1 mt-3 text-xs font-bold text-emerald-700 hover:text-emerald-800"
+                  >
+                    <Plus size={12} />
+                    Add Project
+                  </button>
+                )}
+              </motion.div>
+            );
+          })}
+        </div>
+      )}
 
       {loading ? (
         <div className="text-center text-sm text-slate-400 py-10">Loading...</div>

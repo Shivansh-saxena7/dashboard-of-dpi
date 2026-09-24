@@ -38,6 +38,20 @@ export interface ProjectExclusionRule {
   excluded_employee_id: string;
 }
 
+// Employee-Project-Allowlist (2026-09-24) — a RESTRICTION, not a
+// RESERVATION: an employee with zero rows here stays fully
+// unrestricted (eligible for every project, same as today). An
+// employee with any rows here is eligible ONLY for the projects
+// listed. Deliberately does not touch a project with a fixed INCLUDE
+// rule (ProjectAssignmentRule) — that branch returns before this is
+// ever consulted, same precedence EXCLUDE already has, for the same
+// reason: INCLUDE is a deliberate hard override chosen by Admin and
+// should always win.
+export interface EmployeeProjectAllowlistRule {
+  employee_id: string;
+  project: string;
+}
+
 // project -> last-assigned-employee-id within that project's own
 // fixed-employee pool. Keyed by the SAME normalization this function
 // applies internally (trim + lowercase) — callers read/write
@@ -77,7 +91,11 @@ export function calculateLeadAssignment(
   eligibleEmployees: EligibleEmployee[],
   lastGlobalAssignedEmployeeId: string | null,
   projectPointers: ProjectRulePointers = {},
-  projectExclusions: ProjectExclusionRule[] = []
+  projectExclusions: ProjectExclusionRule[] = [],
+  // Optional/defaults-empty, same backward-compatible shape as every
+  // other param here — every pre-existing caller that doesn't pass
+  // this behaves exactly as before (nobody restricted).
+  employeeAllowlists: EmployeeProjectAllowlistRule[] = []
 ): LeadAssignmentResult {
 
   const normalizedProject = String(project || "").trim().toLowerCase();
@@ -162,9 +180,28 @@ export function calculateLeadAssignment(
       .map((rule) => rule.excluded_employee_id)
   );
 
-  const roundRobinPool = excludedIds.size > 0
+  const excludedPool = excludedIds.size > 0
     ? eligibleEmployees.filter((employee) => !excludedIds.has(employee.id))
     : eligibleEmployees;
+
+  // Employee-Project-Allowlist — narrows further, AND'd with the
+  // EXCLUDE filter above. restrictedEmployeeIds is "has at least one
+  // allowlist row anywhere" (any project) — an employee not in that
+  // set has no allowlist at all and stays eligible for everything.
+  // allowedForThisProject is "this specific project is in their
+  // allowlist." Kept only if unrestricted OR explicitly allowed here.
+  const restrictedEmployeeIds = new Set(employeeAllowlists.map((rule) => rule.employee_id));
+  const allowedForThisProject = new Set(
+    employeeAllowlists
+      .filter((rule) => String(rule.project || "").trim().toLowerCase() === normalizedProject)
+      .map((rule) => rule.employee_id)
+  );
+
+  const roundRobinPool = restrictedEmployeeIds.size > 0
+    ? excludedPool.filter(
+        (employee) => !restrictedEmployeeIds.has(employee.id) || allowedForThisProject.has(employee.id)
+      )
+    : excludedPool;
 
   if (roundRobinPool.length === 0) {
     return {

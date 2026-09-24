@@ -139,6 +139,24 @@ serve(async (req) => {
       );
     }
 
+    // Employee-Project-Allowlist (2026-09-24) — a RESTRICTION, not a
+    // RESERVATION. See lib/calculateLeadAssignment.ts's own comment on
+    // EmployeeProjectAllowlistRule for the full rule.
+    const { data: employeeAllowlists, error: allowlistError } = await supabase
+      .from("employee_project_allowlist")
+      .select("employee_id, project");
+
+    if (allowlistError) {
+      return respond(
+        {
+          success: false,
+          step: "FETCH_EMPLOYEE_ALLOWLISTS",
+          error: allowlistError.message
+        },
+        500
+      );
+    }
+
     // Round-robin pool = active + rr_eligible employees who have
     // started today's shift AND not yet ended it (Phase 2 attendance
     // gate). Ending shift re-locks new lead assignment for the rest
@@ -216,7 +234,8 @@ serve(async (req) => {
       eligibleEmployees || [],
       settings.round_robin_pointer_employee_id,
       projectPointers,
-      projectExclusions || []
+      projectExclusions || [],
+      employeeAllowlists || []
     );
 
     if (!result.assignedEmployeeId) {

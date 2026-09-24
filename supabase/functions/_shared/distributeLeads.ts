@@ -54,6 +54,13 @@ export async function fetchDistributionInputs(supabase) {
     .from("project_exclusion_rules")
     .select("project, excluded_employee_id");
 
+  // Employee-Project-Allowlist (2026-09-24) — a RESTRICTION, not a
+  // RESERVATION. See lib/calculateLeadAssignment.ts's own comment on
+  // EmployeeProjectAllowlistRule for the full rule.
+  const { data: employeeAllowlists } = await supabase
+    .from("employee_project_allowlist")
+    .select("employee_id, project");
+
   const today = new Date().toISOString().split("T")[0];
 
   const { data: todaysAttendance } = await supabase
@@ -75,7 +82,14 @@ export async function fetchDistributionInputs(supabase) {
     shiftStartedEmployeeIds.has(e.id)
   );
 
-  return { settings, projectRules, eligibleEmployees, projectPointers, projectExclusions: projectExclusions || [] };
+  return {
+    settings,
+    projectRules,
+    eligibleEmployees,
+    projectPointers,
+    projectExclusions: projectExclusions || [],
+    employeeAllowlists: employeeAllowlists || []
+  };
 }
 
 // Callers own fetching the leads list and writing back whatever
@@ -99,7 +113,7 @@ export async function fetchDistributionInputs(supabase) {
 // ends this batch pointing at a non-excluded employee, and the next
 // unrelated call (which won't pass excludedEmployeeIds) resumes fair
 // rotation across everyone automatically.
-export async function distributeLeadsBatch(supabase, leadsToDistribute, settings, projectRules, eligibleEmployees, projectPointers, excludedEmployeeIds = [], projectExclusions = []) {
+export async function distributeLeadsBatch(supabase, leadsToDistribute, settings, projectRules, eligibleEmployees, projectPointers, excludedEmployeeIds = [], projectExclusions = [], employeeAllowlists = []) {
 
   const pool = excludedEmployeeIds && excludedEmployeeIds.length > 0
     ? eligibleEmployees.filter((e) => !excludedEmployeeIds.includes(e.id))
@@ -119,7 +133,8 @@ export async function distributeLeadsBatch(supabase, leadsToDistribute, settings
       pool,
       pointerEmployeeId,
       workingProjectPointers,
-      projectExclusions
+      projectExclusions,
+      employeeAllowlists
     );
 
     if (!result.assignedEmployeeId) {

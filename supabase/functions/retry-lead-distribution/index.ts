@@ -125,7 +125,8 @@ serve(async (req) => {
       inputs.eligibleEmployees,
       inputs.projectPointers,
       [],
-      inputs.projectExclusions
+      inputs.projectExclusions,
+      inputs.employeeAllowlists
     );
 
     const mergedSummary = { ...(batchRow.distribution_summary || {}) };

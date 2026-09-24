@@ -98,6 +98,20 @@ serve(async () => {
       );
     }
 
+    // Employee-Project-Allowlist (2026-09-24) — a RESTRICTION, not a
+    // RESERVATION. See lib/calculateLeadAssignment.ts's own comment on
+    // EmployeeProjectAllowlistRule for the full rule.
+    const { data: employeeAllowlists, error: allowlistError } = await supabase
+      .from("employee_project_allowlist")
+      .select("employee_id, project");
+
+    if (allowlistError) {
+      return new Response(
+        JSON.stringify({ success: false, step: "FETCH_EMPLOYEE_ALLOWLISTS", error: allowlistError.message }),
+        { headers: { "Content-Type": "application/json" }, status: 500 }
+      );
+    }
+
     // Admin's force_reassign_lead_atomic permanently bans a
     // (lead, employee) pairing from ever coming back together via
     // automatic recycling — fetched once here, consulted below in
@@ -976,7 +990,8 @@ serve(async () => {
         eligibleEmployees,
         pointerEmployeeId,
         {},
-        projectExclusions || []
+        projectExclusions || [],
+        employeeAllowlists || []
       );
 
       if (!result.assignedEmployeeId) {
