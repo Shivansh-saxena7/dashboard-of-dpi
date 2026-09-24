@@ -10,6 +10,7 @@ import DataDetailModal from "./DataDetailModal";
 import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
 import { consumeRecentlyCalledCardId, scrollToAndHighlightCard } from "@/lib/lastCalledLead";
+import { normalizeMobile } from "@/lib/normalizeMobile";
 
 interface DataListProps {
   employeeId: string;
@@ -182,10 +183,14 @@ export default function DataList({ employeeId }: DataListProps) {
 
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
+      // Same mobile-format-mismatch fix as LeadList.tsx (2026-09-24) —
+      // see that file's own comment for the full root-cause writeup.
+      const qDigits = normalizeMobile(q);
       result = result.filter(
         (lead) =>
           lead.name?.toLowerCase().includes(q) ||
-          lead.mobile?.toLowerCase().includes(q)
+          lead.mobile?.toLowerCase().includes(q) ||
+          (qDigits.length > 0 && normalizeMobile(lead.mobile).includes(qDigits))
       );
     }
 

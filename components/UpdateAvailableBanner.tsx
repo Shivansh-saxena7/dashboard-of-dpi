@@ -21,6 +21,13 @@ import { RefreshCw, X } from "lucide-react";
 // benefit.
 export default function UpdateAvailableBanner() {
   const [updateAvailable, setUpdateAvailable] = useState(false);
+  // Changelog-in-banner (2026-09-24) — /api/version's latestChanges,
+  // see that route's own comment: only the most-recently-shipped
+  // entry's list, not a full multi-version diff. Empty array (never
+  // shown) when nothing was recorded for this deploy — the banner
+  // falls back to the plain generic message, same as before this
+  // feature existed.
+  const [changes, setChanges] = useState<string[]>([]);
 
   useEffect(() => {
     async function checkVersion() {
@@ -31,6 +38,7 @@ export default function UpdateAvailableBanner() {
         const data = await res.json();
         if (data.buildId && data.buildId !== process.env.NEXT_PUBLIC_BUILD_ID) {
           setUpdateAvailable(true);
+          setChanges(Array.isArray(data.latestChanges) ? data.latestChanges : []);
         }
       } catch {
         // Network hiccup / genuinely offline — not worth surfacing as
@@ -51,24 +59,37 @@ export default function UpdateAvailableBanner() {
   if (!updateAvailable) return null;
 
   return (
-    <div className="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-4 sm:w-96 z-[200] rounded-2xl bg-slate-900 text-white shadow-2xl p-4 flex items-center gap-3">
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-bold">Update available</p>
-        <p className="text-xs text-white/70 mt-0.5">A newer version of this app is ready.</p>
+    <div className="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-4 sm:w-96 z-[200] rounded-2xl bg-slate-900 text-white shadow-2xl p-4">
+      <div className="flex items-start gap-3">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold">Update available</p>
+          {changes.length > 0 ? (
+            <ul className="mt-1.5 space-y-1">
+              {changes.map((change, i) => (
+                <li key={i} className="text-xs text-white/70 leading-snug flex gap-1.5">
+                  <span className="text-white/40">•</span>
+                  <span>{change}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-white/70 mt-0.5">A newer version of this app is ready.</p>
+          )}
+        </div>
+        <button
+          onClick={() => setUpdateAvailable(false)}
+          aria-label="Dismiss"
+          className="shrink-0 h-7 w-7 rounded-lg bg-white/10 flex items-center justify-center"
+        >
+          <X size={13} />
+        </button>
       </div>
       <button
         onClick={() => window.location.reload()}
-        className="shrink-0 flex items-center gap-1.5 h-9 px-3.5 rounded-xl bg-white text-slate-900 text-xs font-bold"
+        className="mt-3 w-full flex items-center justify-center gap-1.5 h-9 rounded-xl bg-white text-slate-900 text-xs font-bold"
       >
         <RefreshCw size={13} />
         Refresh
-      </button>
-      <button
-        onClick={() => setUpdateAvailable(false)}
-        aria-label="Dismiss"
-        className="shrink-0 h-9 w-9 rounded-xl bg-white/10 flex items-center justify-center"
-      >
-        <X size={14} />
       </button>
     </div>
   );

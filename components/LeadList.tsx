@@ -13,6 +13,7 @@ import QuickDialModal from "./QuickDialModal";
 import SLABreachHistoryCard from "./SLABreachHistoryCard";
 import { LeadStatus, EMPLOYEE_SELECTABLE_STATUSES } from "@/lib/getValidNextLeadStatuses";
 import { getRecycleCutoff } from "@/lib/calculateSLAStatus";
+import { normalizeMobile } from "@/lib/normalizeMobile";
 import { consumeRecentlyCalledCardId, scrollToAndHighlightCard, consumeQuickDialNumber } from "@/lib/lastCalledLead";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
@@ -481,10 +482,26 @@ export default function LeadList({ employeeId }: LeadListProps) {
 
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
+      // Mobile search bug fix (2026-09-24) — the raw check above
+      // requires an exact-format substring match, which fails for a
+      // genuinely correct number typed/pasted in a different format
+      // than it's stored in (e.g. copy-pasted from a phone's own
+      // Contacts/WhatsApp as "+91 98213 95679" against a stored
+      // "91-9821395679") — confirmed live this is what broke search
+      // for a real employee, not a regression (this exact matching
+      // code hasn't changed since Phase 4). lib/normalizeMobile.ts
+      // already solves exactly this for CSV duplicate-detection;
+      // reused here rather than writing a second implementation.
+      // Guarded on qDigits.length > 0 — an empty normalized query
+      // (a pure-text search with no digits at all) must never
+      // match every lead via an accidental "".includes("") on the
+      // mobile channel.
+      const qDigits = normalizeMobile(q);
       result = result.filter(
         (lead) =>
           lead.name?.toLowerCase().includes(q) ||
           lead.mobile?.toLowerCase().includes(q) ||
+          (qDigits.length > 0 && normalizeMobile(lead.mobile).includes(qDigits)) ||
           lead.project?.toLowerCase().includes(q)
       );
     }

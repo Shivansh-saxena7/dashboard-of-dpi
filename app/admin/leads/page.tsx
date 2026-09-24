@@ -280,7 +280,7 @@ export default function AdminLeadsPage() {
         is_personal_lead,
         employees ( name ),
         pending_team:teams ( name ),
-        lead_history (
+        lead_history!inner (
           assigned_at, is_active, first_call_at, first_whatsapp_at, assigned_by_type, call_count,
           last_activity_at, paused_until, pause_reason, pause_note, outcome_at,
           assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)
@@ -303,8 +303,33 @@ export default function AdminLeadsPage() {
   // shape (including not bothering to escape commas/parens in the
   // term) — an already-shipped precedent in this codebase, not a new
   // pattern.
+  // Bug fix (2026-09-24): lead_history was embedded WITHOUT !inner —
+  // a Supabase/PostgREST embedded-resource filter (.eq/.gte/.lte on
+  // "lead_history.xxx") without !inner only prunes which nested rows
+  // appear inside each lead's lead_history array, it does NOT filter
+  // which leads are returned at all. Confirmed live via direct
+  // PostgREST curl: a date range matching zero real assigned_at
+  // values still returned all 2,713 leads (Content-Range 0-4/2713),
+  // each with lead_history: [] — the is_active/date-range filters
+  // below were silently no-ops since Phase 4 (c5a637a, 2026-07-28),
+  // completely unrelated to any recent change. !inner on the embed
+  // above is the fix — verified live it correctly returns 0 for the
+  // same zero-match range, and correctly narrows to only the matching
+  // subset for a real range.
+  //
+  // One consequence needing its own guard: is_active=true, now that
+  // it's a REAL filter, would make every JUNK lead disappear (all of
+  // them have zero active lead_history rows, by design, confirmed
+  // live) — silently breaking the JUNK-recovery flow further down
+  // this page (unjunk_and_reassign_lead_atomic), which depends on
+  // being able to see and select a JUNK lead here. Skipped
+  // specifically when viewing the Junk status filter; every other
+  // view keeps the correct "only the active assignment" behavior.
   function applyLeadFilters(query: any) {
-    let q = query.eq("lead_history.is_active", true);
+    let q = query;
+    if (statusFilter !== "JUNK") {
+      q = q.eq("lead_history.is_active", true);
+    }
 
     if (debouncedSearchQuery) {
       q = q.or(`name.ilike.%${debouncedSearchQuery}%,mobile.ilike.%${debouncedSearchQuery}%,project.ilike.%${debouncedSearchQuery}%`);

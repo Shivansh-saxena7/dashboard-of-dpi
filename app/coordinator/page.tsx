@@ -18,6 +18,7 @@ import { exportVisitsToExcel, exportVisitsToPDF, VisitExportRow } from "@/lib/ex
 import { exportSnoozesToExcel, exportSnoozesToPDF, SnoozeExportRow } from "@/lib/exportSnoozeReport";
 import { DateRangeOption, isWithinDateRange, dateRangeFilterLabel } from "@/lib/dateRangeFilter";
 import { fetchAllRows } from "@/lib/fetchAllRows";
+import { normalizeMobile } from "@/lib/normalizeMobile";
 
 type ActiveTab = "LEADS" | "SUMMARY" | "VERIFY" | "SNOOZE" | "LEADERBOARD" | "TICKETS";
 type SortOption = "NEWEST" | "OLDEST" | "SLA_URGENCY";
@@ -531,10 +532,14 @@ export default function CoordinatorDashboard() {
 
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
+      // Same mobile-format-mismatch fix as LeadList.tsx (2026-09-24) —
+      // see that file's own comment for the full root-cause writeup.
+      const qDigits = normalizeMobile(q);
       result = result.filter(
         (lead) =>
           lead.name?.toLowerCase().includes(q) ||
           lead.mobile?.toLowerCase().includes(q) ||
+          (qDigits.length > 0 && normalizeMobile(lead.mobile).includes(qDigits)) ||
           lead.project?.toLowerCase().includes(q)
       );
     }
