@@ -17,6 +17,7 @@ import Footer from "@/components/Footer";
 // everything HR can.
 const menu = [
   { name: "Attendance", href: "/hr/attendance", icon: "🕒" },
+  { name: "Candidates", href: "/hr/candidates", icon: "🧑‍🎓" },
   { name: "Documents", href: "/hr/documents", icon: "📄" },
   { name: "SIM / Email", href: "/hr/sim-assignments", icon: "📱" }
 ];

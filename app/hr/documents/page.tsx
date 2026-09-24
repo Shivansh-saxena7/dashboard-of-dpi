@@ -77,6 +77,14 @@ interface DocumentRow {
   is_generated: boolean;
   created_at: string;
   employee: { id: string; name: string } | null;
+  // Candidate-linked documents (2026-09-24) -- hr_documents.employee_id
+  // is nullable now, candidate_id is the other half of that pairing
+  // (see HRMS_MASTER_PLAN.md's Candidate flow). Without embedding
+  // this too, a candidate-stage Offer Letter/Appointment
+  // Letter/Application Form showed here as "Unknown employee" --
+  // technically not wrong (there IS no employee yet), just unhelpful
+  // for Admin/HR browsing this general list.
+  candidate: { id: string; name: string } | null;
   uploaded_by: { name: string } | null;
 }
 
@@ -88,6 +96,7 @@ const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   EXPERIENCE_LETTER: "Experience Letter",
   EDUCATIONAL: "Educational",
   BOND: "Bond",
+  APPLICATION_FORM: "Application Form",
   OTHER: "Other"
 };
 
@@ -114,6 +123,12 @@ export default function HrDocumentsPage() {
   const [uploading, setUploading] = useState(false);
 
   const [myEmployeeId, setMyEmployeeId] = useState("");
+  // Delete restricted to Admin (2026-09-24) — RLS is the real
+  // enforcement (hr_documents_hr_* and the storage bucket's HR
+  // policies no longer grant DELETE at all, admin-only), this is just
+  // defense-in-depth so an HR caller never even sees a Delete button
+  // that would fail server-side.
+  const [myRole, setMyRole] = useState("");
 
   const [templates, setTemplates] = useState<TemplateRow[]>([]);
   const [manageTemplatesOpen, setManageTemplatesOpen] = useState(false);
@@ -157,8 +172,11 @@ export default function HrDocumentsPage() {
       data: { user }
     } = await supabase.auth.getUser();
     if (!user) return;
-    const { data } = await supabase.from("employees").select("id").eq("auth_user_id", user.id).single();
-    if (data) setMyEmployeeId(data.id);
+    const { data } = await supabase.from("employees").select("id, role").eq("auth_user_id", user.id).single();
+    if (data) {
+      setMyEmployeeId(data.id);
+      setMyRole(data.role);
+    }
   }
 
   async function loadTemplates() {
@@ -181,6 +199,7 @@ export default function HrDocumentsPage() {
         `
         id, document_type, label, storage_path, file_mime_type, is_generated, created_at,
         employee:employees!hr_documents_employee_id_fkey(id, name),
+        candidate:candidates!hr_documents_candidate_id_fkey(id, name),
         uploaded_by:employees!hr_documents_uploaded_by_employee_id_fkey(name)
         `
       )
@@ -692,9 +711,11 @@ export default function HrDocumentsPage() {
                     <button onClick={() => startEditTemplate(t)} className="text-xs font-bold px-3 py-1 rounded-full bg-teal-50 text-teal-700 hover:bg-teal-100">
                       Edit
                     </button>
-                    <button onClick={() => handleDeleteTemplate(t.id)} className="text-xs font-bold px-3 py-1 rounded-full bg-red-50 text-red-600 hover:bg-red-100">
-                      Delete
-                    </button>
+                    {myRole === "admin" && (
+                      <button onClick={() => handleDeleteTemplate(t.id)} className="text-xs font-bold px-3 py-1 rounded-full bg-red-50 text-red-600 hover:bg-red-100">
+                        Delete
+                      </button>
+                    )}
                   </div>
                 </div>
               ))
@@ -824,9 +845,12 @@ export default function HrDocumentsPage() {
                   {doc.is_generated && (
                     <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">Generated</span>
                   )}
+                  {doc.candidate && (
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-violet-50 text-violet-600">Candidate</span>
+                  )}
                 </div>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  {doc.employee?.name || "Unknown employee"} · uploaded by {doc.uploaded_by?.name || "—"} on{" "}
+                  {doc.employee?.name || doc.candidate?.name || "Unknown"} · uploaded by {doc.uploaded_by?.name || "—"} on{" "}
                   {new Date(doc.created_at).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}
                 </p>
               </div>
@@ -837,12 +861,14 @@ export default function HrDocumentsPage() {
                 >
                   Download
                 </button>
-                <button
-                  onClick={() => handleDelete(doc)}
-                  className="text-xs font-bold px-3 py-1.5 rounded-full bg-red-50 text-red-600 hover:bg-red-100"
-                >
-                  Delete
-                </button>
+                {myRole === "admin" && (
+                  <button
+                    onClick={() => handleDelete(doc)}
+                    className="text-xs font-bold px-3 py-1.5 rounded-full bg-red-50 text-red-600 hover:bg-red-100"
+                  >
+                    Delete
+                  </button>
+                )}
               </div>
             </div>
           ))}

@@ -19,16 +19,17 @@ const SLATE_200: [number, number, number] = [226, 232, 240];
 const MARGIN = 50;
 const LINE_HEIGHT = 16;
 
-// Letterhead-mode vertical positions (2026-09-21) — deliberately more
-// generous than the plain-header defaults above, to clear whatever
-// header artwork (logo/address/contact strip) HR's own letterhead
-// image carries. These are a reasonable starting guess, not measured
-// against a real letterhead yet — the first one-line change to make
-// once HR's actual image is in hand and something visibly collides.
-const LETTERHEAD_DATE_Y = 140;
-const LETTERHEAD_TITLE_Y = 175;
-const LETTERHEAD_BODY_START_Y = 205;
-const LETTERHEAD_BOTTOM_MARGIN = 90;
+// Letterhead-mode vertical positions (2026-09-24) — tuned against the
+// real letterhead image (1655x2340px @ 200dpi -> 595x842pt A4, so
+// 2.779px/pt). Measured directly from that image: the header's own
+// art (logo + company name + rule) ends around y=177pt; the footer
+// chrome (a "HR SIGNATURE" line + rule + contact-info strip) starts
+// around y=751pt. These values keep body content inside that ~180pt
+// to ~720pt window, clear of both.
+const LETTERHEAD_DATE_Y = 200;
+const LETTERHEAD_TITLE_Y = 235;
+const LETTERHEAD_BODY_START_Y = 265;
+const LETTERHEAD_BOTTOM_MARGIN = 120;
 
 export interface LetterheadImage {
   // A data: URL (image/png or image/jpeg) — jsPDF's addImage() takes
