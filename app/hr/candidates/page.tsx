@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import toast from "react-hot-toast";
-import { Plus, ChevronDown, X, FileText, UserCheck, Download, FileSpreadsheet, Trash2, Check, Phone, Mail, Briefcase, Users, FileUp } from "lucide-react";
+import { Plus, ChevronDown, X, FileText, UserCheck, Download, FileSpreadsheet, Trash2, Check, Phone, Mail, Briefcase, Users, FileUp, Send } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { buildHrDocumentBlob, LetterheadImage } from "@/lib/generateHrDocumentPdf";
 import { exportCandidatesToExcel, exportCandidatesToPDF, CandidateExportRow } from "@/lib/exportCandidateReport";
@@ -234,6 +234,7 @@ interface CandidateDocumentRow {
   storage_path: string;
   is_generated: boolean;
   created_at: string;
+  emailed_at: string | null;
 }
 
 interface EmployeeOption {
@@ -347,6 +348,8 @@ export default function HrCandidatesPage() {
   const [generateManualValues, setGenerateManualValues] = useState<Record<string, string>>({});
   const [generating, setGenerating] = useState(false);
 
+  const [sendingEmailFor, setSendingEmailFor] = useState<string | null>(null);
+
   const [convertOpenFor, setConvertOpenFor] = useState<string | null>(null);
   const [convertEmail, setConvertEmail] = useState("");
   const [convertPassword, setConvertPassword] = useState("");
@@ -384,7 +387,7 @@ export default function HrCandidatesPage() {
           .select("*, interviewer:employees!candidate_interviews_interviewer_employee_id_fkey(name)")
           .order("interview_date", { ascending: false }),
         supabase.from("hr_document_templates").select("id, title, body, letterhead_storage_path").in("title", ["Offer Letter", "Appointment Letter"]),
-        supabase.from("hr_documents").select("id, candidate_id, document_type, label, storage_path, is_generated, created_at").not("candidate_id", "is", null).order("created_at", { ascending: false }),
+        supabase.from("hr_documents").select("id, candidate_id, document_type, label, storage_path, is_generated, created_at, emailed_at").not("candidate_id", "is", null).order("created_at", { ascending: false }),
         supabase.from("employees").select("id, name").eq("is_active", true).order("name")
       ]);
 
@@ -707,6 +710,47 @@ export default function HrCandidatesPage() {
     window.open(data.signedUrl, "_blank");
   }
 
+  // Phase 4 (2026-09-25) -- emails the exact already-generated letter
+  // PDF to the candidate, via the send-hr-email Edge Function. Same
+  // "Authorization: Bearer <session.access_token>, identity resolved
+  // server-side from the token" pattern retry-lead-distribution and
+  // import-leads-csv already use, not a new one.
+  async function handleSendEmail(doc: CandidateDocumentRow) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      toast.error("Your session has expired — please log in again.");
+      return;
+    }
+
+    setSendingEmailFor(doc.id);
+    try {
+      const res = await fetch(
+        "https://inmxkanrwcjlgajqpcuf.supabase.co/functions/v1/send-hr-email",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`
+          },
+          body: JSON.stringify({ documentId: doc.id })
+        }
+      );
+      const result = await res.json();
+
+      if (!result.success) {
+        toast.error(result.message || "Could not send email.");
+        return;
+      }
+
+      toast.success("Email sent.");
+      loadAll();
+    } catch {
+      toast.error("Could not send email.");
+    } finally {
+      setSendingEmailFor(null);
+    }
+  }
+
   async function handleConvert(candidate: CandidateRow) {
     if (!convertEmail.trim() || !convertPassword.trim()) {
       toast.error("Email and password are required.");
@@ -1022,12 +1066,27 @@ export default function HrCandidatesPage() {
                                   <p className="text-xs font-bold text-slate-700 truncate">{DOCUMENT_TYPE_LABELS[d.document_type] || d.label}</p>
                                   <p className="text-[10px] text-slate-400">
                                     {d.is_generated ? "Generated" : "Uploaded"} · {new Date(d.created_at).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}
+                                    {d.emailed_at && (
+                                      <span className="text-emerald-600 font-semibold"> · Sent {new Date(d.emailed_at).toLocaleDateString([], { month: "short", day: "numeric" })}</span>
+                                    )}
                                   </p>
                                 </div>
                               </div>
-                              <button onClick={() => handleDownloadDocument(d)} className="h-7 px-2.5 rounded-lg bg-teal-50 text-teal-700 text-xs font-bold flex items-center gap-1 shrink-0">
-                                <FileText size={11} /> View
-                              </button>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {(d.document_type === "OFFER_LETTER" || d.document_type === "APPOINTMENT_LETTER") && (
+                                  <button
+                                    onClick={() => handleSendEmail(d)}
+                                    disabled={!candidate.email || sendingEmailFor === d.id}
+                                    title={!candidate.email ? "Add a candidate email first" : undefined}
+                                    className="h-7 px-2.5 rounded-lg bg-violet-50 text-violet-700 text-xs font-bold flex items-center gap-1 disabled:opacity-40"
+                                  >
+                                    <Send size={11} /> {sendingEmailFor === d.id ? "Sending…" : d.emailed_at ? "Resend" : "Email Bhejo"}
+                                  </button>
+                                )}
+                                <button onClick={() => handleDownloadDocument(d)} className="h-7 px-2.5 rounded-lg bg-teal-50 text-teal-700 text-xs font-bold flex items-center gap-1">
+                                  <FileText size={11} /> View
+                                </button>
+                              </div>
                             </div>
                           ))}
                         </div>
