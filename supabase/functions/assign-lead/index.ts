@@ -139,6 +139,24 @@ serve(async (req) => {
       );
     }
 
+    // Employee-Project-Allowlist (2026-09-24) — a RESTRICTION, not a
+    // RESERVATION. See lib/calculateLeadAssignment.ts's own comment on
+    // EmployeeProjectAllowlistRule for the full rule.
+    const { data: employeeAllowlists, error: allowlistError } = await supabase
+      .from("employee_project_allowlist")
+      .select("employee_id, project");
+
+    if (allowlistError) {
+      return respond(
+        {
+          success: false,
+          step: "FETCH_EMPLOYEE_ALLOWLISTS",
+          error: allowlistError.message
+        },
+        500
+      );
+    }
+
     // Round-robin pool = active + rr_eligible employees who have
     // started today's shift AND not yet ended it (Phase 2 attendance
     // gate). Ending shift re-locks new lead assignment for the rest
@@ -216,7 +234,9 @@ serve(async (req) => {
       eligibleEmployees || [],
       settings.round_robin_pointer_employee_id,
       projectPointers,
-      projectExclusions || []
+      projectExclusions || [],
+      employeeAllowlists || [],
+      settings.restricted_pool_pointer_employee_id
     );
 
     if (!result.assignedEmployeeId) {
@@ -275,6 +295,24 @@ serve(async (req) => {
 
       if (projectPointerError) {
         console.error("project_rule_pointers upsert failed:", projectPointerError.message);
+      }
+    }
+
+    // Restricted-pool pointer-skip fix (2026-09-25) — persisted directly
+    // here, same non-fatal-if-fails posture as project_rule_pointers
+    // above, and deliberately NOT threaded through assign_lead_atomic
+    // (mirrors that same precedent: this is a side-effect write, not part
+    // of the atomic lead-assignment transaction). Only writes when it
+    // actually changed, so an unrestricted-pool assignment (the vast
+    // majority) never touches this column at all.
+    if (result.nextRestrictedPoolPointerEmployeeId !== settings.restricted_pool_pointer_employee_id) {
+      const { error: restrictedPointerError } = await supabase
+        .from("lead_engine_settings")
+        .update({ restricted_pool_pointer_employee_id: result.nextRestrictedPoolPointerEmployeeId })
+        .eq("id", 1);
+
+      if (restrictedPointerError) {
+        console.error("restricted_pool_pointer_employee_id update failed:", restrictedPointerError.message);
       }
     }
 

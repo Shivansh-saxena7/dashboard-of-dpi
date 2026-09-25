@@ -165,10 +165,19 @@ serve(async (req) => {
     const letterLabel = DOCUMENT_TYPE_LABELS[doc.document_type];
     const senderName = callerEmployee.name || "HR Team";
 
+    // Fixed template, but the purpose line is worded per letter type --
+    // still auto-generated (HR never edits this), just honest about
+    // which stage of the process this actually is.
+    const purposeLine =
+      doc.document_type === "OFFER_LETTER"
+        ? "We are pleased to extend this offer to you. Please find your Offer Letter attached to this email for your review."
+        : "Please find your Appointment Letter attached to this email, confirming the terms of your appointment with us.";
+
     const body =
       `Dear ${candidate.name || "Candidate"},\n\n` +
-      `Please find your ${letterLabel} attached with this email.\n\n` +
-      `Feel free to reach out if you have any questions.` +
+      `${purposeLine}\n\n` +
+      `If you have any questions, please feel free to reach out to us.\n\n` +
+      `We look forward to having you join our team.` +
       buildSignature(senderName);
 
     const client = new SMTPClient({
@@ -198,6 +207,17 @@ serve(async (req) => {
           }
         ]
       });
+    } catch (sendErr) {
+      // Distinct from the outer catch-all below -- this is specifically
+      // "the mail server rejected the send," so HR sees the server's
+      // actual reason (e.g. an unknown-mailbox rejection) instead of a
+      // generic "Could not send email." Only catches SYNCHRONOUS
+      // rejections at SMTP time -- a provider that accepts the message
+      // and bounces it later will still show success here; that bounce
+      // only ever surfaces inside hr@divyapadma.com's own inbox, never
+      // back to this request.
+      console.error("send-hr-email: SMTP send failed:", sendErr.message);
+      return respond({ success: false, message: `Could not send the email: ${sendErr.message}` }, 502);
     } finally {
       // Always close, even if send() throws — an open SMTP connection
       // left dangling on error would otherwise leak across invocations.
@@ -222,7 +242,12 @@ serve(async (req) => {
 
     console.error("send-hr-email: unhandled error:", err.message, err.stack);
 
-    return respond({ success: false, error: err.message }, 500);
+    // Was `error: err.message` -- the frontend only ever reads
+    // `result.message` (see handleSendEmail in
+    // app/hr/candidates/page.tsx), so every failure that reached this
+    // catch-all was silently showing just the generic "Could not send
+    // email." fallback, with the real reason dropped on the floor.
+    return respond({ success: false, message: err.message }, 500);
 
   }
 });

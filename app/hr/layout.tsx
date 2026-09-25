@@ -19,6 +19,7 @@ const menu = [
   { name: "Attendance", href: "/hr/attendance", icon: "🕒" },
   { name: "Candidates", href: "/hr/candidates", icon: "🧑‍🎓" },
   { name: "Documents", href: "/hr/documents", icon: "📄" },
+  { name: "Salary", href: "/hr/salary", icon: "💰" },
   { name: "SIM / Email", href: "/hr/sim-assignments", icon: "📱" }
 ];
 
@@ -140,7 +141,7 @@ export default function HrLayout({ children }: { children: React.ReactNode }) {
             <p className="font-bold text-slate-800">HR Portal</p>
           </div>
 
-          <div className="p-6">
+          <div className="p-4 sm:p-6">
             {children}
             <Footer />
           </div>

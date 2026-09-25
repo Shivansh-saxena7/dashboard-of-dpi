@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import toast from "react-hot-toast";
-import { Plus, ChevronDown, X, FileText, UserCheck, Download, FileSpreadsheet, Trash2, Check, Phone, Mail, Briefcase, Users, FileUp, Send } from "lucide-react";
+import { Plus, ChevronDown, X, FileText, UserCheck, Download, FileSpreadsheet, Trash2, Check, Phone, Mail, Briefcase, Users, FileUp, Send, Search, Pencil } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { buildHrDocumentBlob, LetterheadImage } from "@/lib/generateHrDocumentPdf";
+import DateInput from "@/components/DateInput";
 import { exportCandidatesToExcel, exportCandidatesToPDF, CandidateExportRow } from "@/lib/exportCandidateReport";
 import DeleteModal from "../../admin/components/DeleteModal";
 
@@ -101,6 +102,7 @@ const RESULT_BUTTON_ACTIVE: Record<string, string> = {
 
 const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   APPLICATION_FORM: "Application Form",
+  JOINING_FORM: "Joining Form",
   OFFER_LETTER: "Offer Letter",
   APPOINTMENT_LETTER: "Appointment Letter"
 };
@@ -160,13 +162,27 @@ const INTERVIEW_RESULT_LABELS: Record<string, string> = {
 // substitute an empty string instead of prompting HR to fill them in.
 // Only what resolveAutoValueForCandidate below can actually resolve
 // belongs in this set.
+//
+// designation/offer_date added 2026-09-25 -- both were being asked
+// manually even though the data already exists: designation is just
+// candidate.position_applied_for (same field the application form
+// already captured), and offer_date is the date actually printed on
+// the candidate's own Offer Letter (its hr_documents row's
+// created_at) -- resolved in handleGenerateDocument below, since it
+// needs a document lookup, not just a plain candidate field.
 const CANDIDATE_AUTO_PLACEHOLDER_LABELS: Record<string, string> = {
   employee_name: "Candidate Name",
   email: "Email",
-  today_date: "Today's Date"
+  today_date: "Today's Date",
+  designation: "Position Applied For",
+  offer_date: "Offer Letter Date"
 };
 
-function resolveAutoValueForCandidate(key: string, candidate: CandidateRow): string | null {
+function resolveAutoValueForCandidate(
+  key: string,
+  candidate: CandidateRow,
+  offerLetterDateLabel: string | null
+): string | null {
   switch (key) {
     case "employee_name":
       return candidate.name;
@@ -174,6 +190,10 @@ function resolveAutoValueForCandidate(key: string, candidate: CandidateRow): str
       return candidate.email || "";
     case "today_date":
       return new Date().toLocaleDateString("en-IN", { year: "numeric", month: "long", day: "numeric" });
+    case "designation":
+      return candidate.position_applied_for;
+    case "offer_date":
+      return offerLetterDateLabel;
     default:
       return null;
   }
@@ -248,9 +268,9 @@ interface EmployeeOption {
 function CandidateStepper({ status }: { status: string }) {
   if (status === "REJECTED") {
     return (
-      <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-red-50 border border-red-100">
-        <span className="h-6 w-6 rounded-full bg-red-500 text-white flex items-center justify-center shrink-0">
-          <X size={13} />
+      <div className="flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-red-50 border border-red-100">
+        <span className="h-7 w-7 rounded-full bg-red-500 text-white flex items-center justify-center shrink-0 shadow-[0_2px_8px_rgba(239,68,68,0.35)]">
+          <X size={14} />
         </span>
         <span className="text-xs font-bold text-red-600">Process ended — candidate rejected</span>
       </div>
@@ -261,14 +281,14 @@ function CandidateStepper({ status }: { status: string }) {
   if (!states) return null;
 
   return (
-    <div className="flex items-start flex-wrap gap-y-3">
+    <div className="flex items-start flex-wrap gap-y-4">
       {STEP_DEFS.map((step, i) => {
         const state = states[step.key];
         const circleClass =
           state === "done"
-            ? "bg-emerald-500 border-emerald-500 text-white"
+            ? "bg-gradient-to-br from-emerald-500 to-emerald-600 border-emerald-500 text-white shadow-[0_2px_8px_rgba(16,185,129,0.35)]"
             : state === "current"
-            ? "bg-white border-blue-500 text-blue-600"
+            ? "bg-white border-blue-500 text-blue-600 shadow-[0_0_0_4px_rgba(37,99,235,0.12)]"
             : state === "hold"
             ? "bg-white border-orange-400 text-orange-500"
             : "bg-white border-slate-200 text-slate-300";
@@ -276,21 +296,21 @@ function CandidateStepper({ status }: { status: string }) {
           state === "done"
             ? "text-emerald-600"
             : state === "current"
-            ? "text-blue-600"
+            ? "text-blue-700"
             : state === "hold"
             ? "text-orange-500"
             : "text-slate-300";
 
         return (
           <div key={step.key} className="flex items-start">
-            <div className="flex flex-col items-center gap-1 w-[78px] sm:w-[92px]">
-              <div className={`h-7 w-7 rounded-full flex items-center justify-center text-[11px] font-bold border-2 shrink-0 ${circleClass}`}>
-                {state === "done" ? <Check size={13} /> : i + 1}
+            <div className="flex flex-col items-center gap-1.5 w-[80px] sm:w-[96px]">
+              <div className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold border-2 shrink-0 transition-all ${circleClass}`}>
+                {state === "done" ? <Check size={14} /> : i + 1}
               </div>
               <span className={`text-[10px] font-bold text-center leading-tight ${labelClass}`}>{step.label}</span>
             </div>
             {i < STEP_DEFS.length - 1 && (
-              <div className={`h-0.5 w-4 sm:w-8 mt-3.5 shrink-0 ${state === "done" ? "bg-emerald-400" : "bg-slate-200"}`} />
+              <div className={`h-[3px] w-5 sm:w-9 mt-4 shrink-0 rounded-full ${state === "done" ? "bg-gradient-to-r from-emerald-400 to-emerald-500" : "bg-slate-200"}`} />
             )}
           </div>
         );
@@ -315,6 +335,7 @@ export default function HrCandidatesPage() {
   const [myRole, setMyRole] = useState("");
 
   const [statusFilter, setStatusFilter] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CandidateRow | null>(null);
   const [deletingCandidate, setDeletingCandidate] = useState(false);
@@ -337,18 +358,33 @@ export default function HrCandidatesPage() {
 
   const [applicationFormFile, setApplicationFormFile] = useState<File | null>(null);
   const [uploadingApplicationFormFor, setUploadingApplicationFormFor] = useState<string | null>(null);
-  // Collapsed-by-default (2026-09-24) -- uploading the Application
-  // Form is a real but supporting/administrative task, never the
-  // actual next step at any pipeline stage, so it stays a quiet
-  // secondary link rather than an always-visible dashed box competing
-  // with whatever genuinely is the primary action right now.
+  // Collapsed-by-default (2026-09-24) -- uploading a supporting
+  // document (Application Form, Joining Form) is a real but
+  // administrative task, never the actual next step at any pipeline
+  // stage, so it stays a quiet secondary link rather than an
+  // always-visible dashed box competing with whatever genuinely is
+  // the primary action right now.
   const [uploadFormOpenFor, setUploadFormOpenFor] = useState<string | null>(null);
+  // Joining Form (2026-09-25) -- the hard-copy form filled/signed when
+  // a candidate physically joins post-offer-acceptance. Same upload
+  // block as Application Form, just a different document_type, so
+  // this is a plain type-select rather than a second duplicated block.
+  const [uploadFormType, setUploadFormType] = useState<"APPLICATION_FORM" | "JOINING_FORM">("APPLICATION_FORM");
 
   const [generateOpenFor, setGenerateOpenFor] = useState<{ candidateId: string; documentType: "OFFER_LETTER" | "APPOINTMENT_LETTER" } | null>(null);
   const [generateManualValues, setGenerateManualValues] = useState<Record<string, string>>({});
   const [generating, setGenerating] = useState(false);
 
   const [sendingEmailFor, setSendingEmailFor] = useState<string | null>(null);
+
+  // Edit candidate email (2026-09-25) -- fixes a genuine typo/mistake
+  // in what HR entered originally. Candidates aren't login accounts
+  // (no auth_user_id), so this is a plain, safe field edit -- unlike
+  // employees.email, nothing else in the system is keyed off this
+  // value staying fixed.
+  const [editingEmailFor, setEditingEmailFor] = useState<string | null>(null);
+  const [emailDraft, setEmailDraft] = useState("");
+  const [savingEmail, setSavingEmail] = useState(false);
 
   const [convertOpenFor, setConvertOpenFor] = useState<string | null>(null);
   const [convertEmail, setConvertEmail] = useState("");
@@ -418,8 +454,13 @@ export default function HrCandidatesPage() {
   }, [documents]);
 
   const visibleCandidates = useMemo(() => {
-    return statusFilter ? candidates.filter((c) => c.status === statusFilter) : candidates;
-  }, [candidates, statusFilter]);
+    const q = searchQuery.trim().toLowerCase();
+    return candidates.filter((c) => {
+      if (statusFilter && c.status !== statusFilter) return false;
+      if (q && !c.name.toLowerCase().includes(q) && !c.mobile.includes(q)) return false;
+      return true;
+    });
+  }, [candidates, statusFilter, searchQuery]);
 
   async function handleAddCandidate() {
     if (!addName.trim() || !addMobile.trim() || !addPosition.trim()) {
@@ -539,8 +580,8 @@ export default function HrCandidatesPage() {
 
       const { error: registerError } = await supabase.rpc("register_hr_document_atomic", {
         p_employee_id: null,
-        p_document_type: "APPLICATION_FORM",
-        p_label: `Application Form - ${candidate.name}`,
+        p_document_type: uploadFormType,
+        p_label: `${DOCUMENT_TYPE_LABELS[uploadFormType]} - ${candidate.name}`,
         p_storage_path: storagePath,
         p_file_mime_type: applicationFormFile.type,
         p_is_generated: false,
@@ -553,7 +594,7 @@ export default function HrCandidatesPage() {
         return;
       }
 
-      toast.success("Application Form uploaded.");
+      toast.success(`${DOCUMENT_TYPE_LABELS[uploadFormType]} uploaded.`);
       setApplicationFormFile(null);
       setUploadFormOpenFor(null);
       loadAll();
@@ -569,6 +610,20 @@ export default function HrCandidatesPage() {
       return;
     }
     toast.success("Candidate marked Rejected.");
+    loadAll();
+  }
+
+  async function handleSaveEmail(candidate: CandidateRow) {
+    const trimmed = emailDraft.trim();
+    setSavingEmail(true);
+    const { error } = await supabase.from("candidates").update({ email: trimmed || null }).eq("id", candidate.id);
+    setSavingEmail(false);
+    if (error) {
+      toast.error(error.message || "Could not update email.");
+      return;
+    }
+    toast.success("Email updated.");
+    setEditingEmailFor(null);
     loadAll();
   }
 
@@ -616,6 +671,18 @@ export default function HrCandidatesPage() {
     const candidate = candidates.find((c) => c.id === generateOpenFor.candidateId);
     if (!candidate) return;
 
+    // documentsByCandidate is already sorted created_at-desc (same
+    // "first match = latest/current" convention the Documents section
+    // and the Emailed badge already rely on) -- so this is the date
+    // actually printed on the candidate's current Offer Letter, not
+    // just "whenever the Offer Letter row happens to be."
+    const offerLetterDoc = (documentsByCandidate.get(candidate.id) || []).find(
+      (d) => d.document_type === "OFFER_LETTER"
+    );
+    const offerLetterDateLabel = offerLetterDoc
+      ? new Date(offerLetterDoc.created_at).toLocaleDateString("en-IN", { year: "numeric", month: "long", day: "numeric" })
+      : null;
+
     for (const key of generatePlaceholders.manual) {
       if (!generateManualValues[key]?.trim()) {
         toast.error(`Fill in "${key}" before generating.`);
@@ -626,7 +693,7 @@ export default function HrCandidatesPage() {
     setGenerating(true);
     try {
       const substituted = generateTemplate.body.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key) => {
-        const autoValue = resolveAutoValueForCandidate(key, candidate);
+        const autoValue = resolveAutoValueForCandidate(key, candidate, offerLetterDateLabel);
         if (autoValue !== null) return autoValue;
         return generateManualValues[key] || "";
       });
@@ -821,34 +888,64 @@ export default function HrCandidatesPage() {
     }
   }
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-800">Candidates</h1>
-          <p className="text-slate-500 mt-1">Interview → Application → Offer → Appointment → Employee.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => handleExport("excel")}
-            disabled={exporting}
-            className="h-10 px-4 rounded-xl bg-emerald-50 text-emerald-700 text-xs font-bold flex items-center gap-1.5 disabled:opacity-50"
-          >
-            <FileSpreadsheet size={14} />
-            Excel
-          </button>
-          <button
-            onClick={() => handleExport("pdf")}
-            disabled={exporting}
-            className="h-10 px-4 rounded-xl bg-red-50 text-red-600 text-xs font-bold flex items-center gap-1.5 disabled:opacity-50"
-          >
-            <Download size={14} />
-            PDF
-          </button>
-        </div>
-      </div>
+  // Whole roster, not visibleCandidates (which is status/search-
+  // filtered) -- these headline numbers describe the pipeline as a
+  // whole, same convention any dashboard KPI strip follows regardless
+  // of what the list below happens to be filtered to right now.
+  const totalCandidates = candidates.length;
+  const inProgressCount = candidates.filter((c) => c.status !== "CONVERTED" && c.status !== "REJECTED").length;
+  const hiredCount = candidates.filter((c) => c.status === "CONVERTED").length;
 
-      <div className="bg-white rounded-[24px] border border-slate-100 shadow-md p-6">
+  return (
+    <div className="space-y-6 pb-10">
+      <motion.div
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="relative overflow-hidden rounded-[24px] bg-gradient-to-br from-blue-700 via-blue-600 to-cyan-500 text-white p-5 sm:p-6"
+      >
+        <Users size={170} strokeWidth={1.1} className="absolute -right-8 -bottom-12 text-white/10 pointer-events-none hidden sm:block" />
+
+        <div className="relative flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <p className="text-[10px] font-semibold tracking-[0.2em] text-blue-100 uppercase mb-2">HR Candidates</p>
+            <h1 className="text-xl sm:text-2xl font-bold">Candidates</h1>
+            <p className="text-sm text-white/70 mt-1">Track every candidate from application to offer, appointment, and hire.</p>
+          </div>
+          <div className="flex gap-2 flex-wrap shrink-0">
+            <button
+              onClick={() => handleExport("excel")}
+              disabled={exporting}
+              className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition disabled:opacity-50"
+            >
+              <FileSpreadsheet size={14} /> Excel
+            </button>
+            <button
+              onClick={() => handleExport("pdf")}
+              disabled={exporting}
+              className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition disabled:opacity-50"
+            >
+              <Download size={14} /> PDF
+            </button>
+          </div>
+        </div>
+
+        <div className="relative flex items-center gap-2.5 flex-wrap mt-5">
+          <div className="flex items-baseline gap-1.5 bg-white/10 border border-white/15 rounded-xl px-3.5 py-2">
+            <span className="text-lg font-bold leading-none">{totalCandidates}</span>
+            <span className="text-[11px] text-white/70 font-semibold">Total Candidates</span>
+          </div>
+          <div className="flex items-baseline gap-1.5 bg-white/10 border border-white/15 rounded-xl px-3.5 py-2">
+            <span className="text-lg font-bold leading-none">{inProgressCount}</span>
+            <span className="text-[11px] text-white/70 font-semibold">In Progress</span>
+          </div>
+          <div className="flex items-baseline gap-1.5 bg-white/10 border border-white/15 rounded-xl px-3.5 py-2">
+            <span className="text-lg font-bold leading-none">{hiredCount}</span>
+            <span className="text-[11px] text-white/70 font-semibold">Hired</span>
+          </div>
+        </div>
+      </motion.div>
+
+      <div className="bg-white rounded-[24px] border border-slate-100 shadow-[0_4px_20px_rgba(15,23,42,0.06)] p-5 sm:p-6">
         {addOpen ? (
           <div className="space-y-3">
             <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold">New Candidate — Application Form</p>
@@ -875,19 +972,33 @@ export default function HrCandidatesPage() {
             </div>
           </div>
         ) : (
-          <button onClick={() => setAddOpen(true)} className="flex items-center gap-2 text-sm font-bold text-blue-700">
-            <Plus size={16} />
-            Add Candidate
+          <button onClick={() => setAddOpen(true)} className="w-full flex items-center gap-3 group text-left">
+            <div className="h-10 w-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 group-hover:bg-blue-100 transition">
+              <Plus size={18} />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-slate-800">Add Candidate</p>
+              <p className="text-[11px] text-slate-400">Start tracking a new applicant</p>
+            </div>
           </button>
         )}
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(15,23,42,0.06)] p-2.5 flex items-center gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search by name or mobile number..."
+            className="w-full h-10 rounded-xl bg-slate-50 border border-slate-200 pl-10 pr-3 text-sm outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition"
+          />
+        </div>
         <div className="relative">
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="appearance-none h-10 rounded-xl bg-white border border-slate-200 pl-3 pr-8 text-sm outline-none"
+            className="appearance-none h-10 rounded-xl bg-slate-50 border border-slate-200 pl-3 pr-8 text-sm outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition"
           >
             <option value="">All Statuses</option>
             {STATUS_OPTIONS.map((s) => (
@@ -901,7 +1012,7 @@ export default function HrCandidatesPage() {
       {loading ? (
         <div className="text-center text-sm text-slate-400 py-10">Loading...</div>
       ) : visibleCandidates.length === 0 ? (
-        <div className="bg-white rounded-[24px] border border-slate-100 shadow-md p-10 text-center text-sm text-slate-400">
+        <div className="bg-white rounded-[24px] border border-slate-100 shadow-[0_4px_20px_rgba(15,23,42,0.06)] p-10 text-center text-sm text-slate-400">
           No candidates yet.
         </div>
       ) : (
@@ -928,31 +1039,78 @@ export default function HrCandidatesPage() {
               ? !!candidateDocuments.find((d) => d.document_type === relevantLetterType)?.emailed_at
               : false;
 
+            const initial = candidate.name?.charAt(0)?.toUpperCase() || "?";
+
             return (
               <motion.div
                 key={candidate.id}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-white rounded-[24px] border border-slate-100 shadow-md p-5"
+                whileHover={{ y: -2 }}
+                className="relative overflow-hidden bg-white rounded-[24px] border border-slate-100 shadow-[0_4px_20px_rgba(15,23,42,0.06)] hover:shadow-[0_10px_28px_rgba(29,78,216,0.12)] transition-shadow p-4 sm:p-5"
               >
+                <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-blue-600 via-cyan-400 to-blue-600" />
+
                 <div className="flex items-start justify-between gap-3 flex-wrap">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                      <p className="text-base font-bold text-slate-800">{candidate.name}</p>
-                      <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full ${STATUS_META[candidate.status].badge}`}>
-                        <span className={`h-1.5 w-1.5 rounded-full ${STATUS_META[candidate.status].dot}`} />
-                        {STATUS_META[candidate.status].label}
-                      </span>
-                      {currentLetterEmailed && (
-                        <span className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700">
-                          <Send size={10} /> Emailed
-                        </span>
-                      )}
+                  <div className="min-w-0 flex-1 flex items-start gap-3">
+                    <div className="shrink-0 h-11 w-11 rounded-2xl bg-gradient-to-br from-blue-600 to-cyan-500 shadow-[0_4px_12px_rgba(37,99,235,0.3)] flex items-center justify-center text-white font-bold text-sm">
+                      {initial}
                     </div>
-                    <div className="flex items-center gap-3.5 flex-wrap mt-1.5 text-xs text-slate-500">
-                      <span className="flex items-center gap-1"><Phone size={12} />{candidate.mobile}</span>
-                      {candidate.email && <span className="flex items-center gap-1"><Mail size={12} />{candidate.email}</span>}
-                      <span className="flex items-center gap-1"><Briefcase size={12} />{candidate.position_applied_for}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <p className="text-base font-bold text-slate-800 truncate">{candidate.name}</p>
+                        <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full ${STATUS_META[candidate.status].badge}`}>
+                          <span className={`h-1.5 w-1.5 rounded-full ${STATUS_META[candidate.status].dot}`} />
+                          {STATUS_META[candidate.status].label}
+                        </span>
+                        {currentLetterEmailed && (
+                          <span className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700">
+                            <Send size={10} /> Emailed
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3.5 flex-wrap mt-1.5 text-xs text-slate-500">
+                        <span className="flex items-center gap-1"><Phone size={12} />{candidate.mobile}</span>
+                        {editingEmailFor === candidate.id ? (
+                          <span className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                            <Mail size={12} className="shrink-0" />
+                            <input
+                              autoFocus
+                              value={emailDraft}
+                              onChange={(e) => setEmailDraft(e.target.value)}
+                              placeholder="candidate@email.com"
+                              className="h-7 w-44 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition"
+                            />
+                            <button
+                              disabled={savingEmail}
+                              onClick={() => handleSaveEmail(candidate)}
+                              className="h-7 px-2 rounded-lg bg-blue-600 text-white text-[11px] font-bold disabled:opacity-50"
+                            >
+                              {savingEmail ? "..." : "Save"}
+                            </button>
+                            <button
+                              disabled={savingEmail}
+                              onClick={() => setEditingEmailFor(null)}
+                              className="h-7 px-2 rounded-lg text-slate-400 text-[11px] font-bold"
+                            >
+                              Cancel
+                            </button>
+                          </span>
+                        ) : (
+                          <span
+                            className="flex items-center gap-1 group cursor-pointer hover:text-blue-600 transition"
+                            onClick={() => {
+                              setEditingEmailFor(candidate.id);
+                              setEmailDraft(candidate.email || "");
+                            }}
+                          >
+                            <Mail size={12} />
+                            {candidate.email || <span className="italic text-slate-400">Add email</span>}
+                            <Pencil size={10} className="opacity-0 group-hover:opacity-60 transition" />
+                          </span>
+                        )}
+                        <span className="flex items-center gap-1"><Briefcase size={12} />{candidate.position_applied_for}</span>
+                      </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
@@ -982,8 +1140,10 @@ export default function HrCandidatesPage() {
                   <div className="mt-5 pt-5 border-t border-slate-100 space-y-5">
                     {/* Interviews */}
                     <div>
-                      <div className="flex items-center gap-1.5 mb-2.5">
-                        <Users size={13} className="text-slate-400" />
+                      <div className="flex items-center gap-2 mb-3">
+                        <div className="h-6 w-6 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                          <Users size={12} />
+                        </div>
                         <p className="text-[11px] uppercase tracking-[0.15em] text-slate-500 font-bold">Interviews</p>
                       </div>
                       {candidateInterviews.length === 0 ? (
@@ -991,7 +1151,7 @@ export default function HrCandidatesPage() {
                       ) : (
                         <div className="space-y-2 mb-2">
                           {candidateInterviews.map((iv) => (
-                            <div key={iv.id} className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                            <div key={iv.id} className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
                               <div className="text-xs mb-2">
                                 <span className="font-bold text-slate-800">{iv.designation}</span>
                                 <span className="text-slate-400"> · {new Date(iv.interview_date).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" })} · by {iv.interviewer?.name || "Unknown"}</span>
@@ -1032,7 +1192,11 @@ export default function HrCandidatesPage() {
                               ))}
                             </select>
                             <input value={interviewDesignation} onChange={(e) => setInterviewDesignation(e.target.value)} placeholder="Designation" className="h-9 rounded-lg bg-white border border-slate-200 px-2 text-xs outline-none" />
-                            <input type="date" value={interviewDate} onChange={(e) => setInterviewDate(e.target.value)} className="h-9 rounded-lg bg-white border border-slate-200 px-2 text-xs outline-none" />
+                            <DateInput
+                              value={interviewDate}
+                              onChange={setInterviewDate}
+                              className="h-9 w-full rounded-lg bg-white border border-slate-200 pl-2 pr-8 text-xs outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition cursor-pointer"
+                            />
                             <input value={interviewNotes} onChange={(e) => setInterviewNotes(e.target.value)} placeholder="Notes (optional)" className="h-9 rounded-lg bg-white border border-slate-200 px-2 text-xs outline-none" />
                           </div>
                           <div className="flex items-center gap-2">
@@ -1067,8 +1231,10 @@ export default function HrCandidatesPage() {
 
                     {/* Documents */}
                     <div>
-                      <div className="flex items-center gap-1.5 mb-2.5">
-                        <FileText size={13} className="text-slate-400" />
+                      <div className="flex items-center gap-2 mb-3">
+                        <div className="h-6 w-6 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                          <FileText size={12} />
+                        </div>
                         <p className="text-[11px] uppercase tracking-[0.15em] text-slate-500 font-bold">Documents</p>
                       </div>
                       {candidateDocuments.length === 0 ? (
@@ -1076,9 +1242,9 @@ export default function HrCandidatesPage() {
                       ) : (
                         <div className="space-y-1.5 mb-3">
                           {candidateDocuments.map((d) => (
-                            <div key={d.id} className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                            <div key={d.id} className="flex items-center justify-between gap-2 flex-wrap px-3.5 py-3 rounded-2xl bg-slate-50 border border-slate-100 hover:bg-slate-100/70 transition-colors">
                               <div className="flex items-center gap-2.5 min-w-0">
-                                <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${d.is_generated ? "bg-indigo-100 text-indigo-600" : "bg-slate-200 text-slate-500"}`}>
+                                <div className={`h-9 w-9 rounded-xl flex items-center justify-center shrink-0 ${d.is_generated ? "bg-indigo-100 text-indigo-600" : "bg-slate-200 text-slate-500"}`}>
                                   {d.is_generated ? <FileText size={14} /> : <FileUp size={14} />}
                                 </div>
                                 <div className="min-w-0">
@@ -1099,7 +1265,7 @@ export default function HrCandidatesPage() {
                                     title={!candidate.email ? "Add a candidate email first" : undefined}
                                     className="h-7 px-2.5 rounded-lg bg-violet-50 text-violet-700 text-xs font-bold flex items-center gap-1 disabled:opacity-40"
                                   >
-                                    <Send size={11} /> {sendingEmailFor === d.id ? "Sending…" : d.emailed_at ? "Resend" : "Email Bhejo"}
+                                    <Send size={11} /> {sendingEmailFor === d.id ? "Sending…" : d.emailed_at ? "Resend Email" : "Send Email"}
                                   </button>
                                 )}
                                 <button onClick={() => handleDownloadDocument(d)} className="h-7 px-2.5 rounded-lg bg-teal-50 text-teal-700 text-xs font-bold flex items-center gap-1">
@@ -1154,6 +1320,14 @@ export default function HrCandidatesPage() {
                           {uploadFormOpenFor === candidate.id ? (
                             <div className="flex items-center gap-2 flex-wrap p-2.5 rounded-xl bg-slate-50 border border-dashed border-slate-200">
                               <FileUp size={14} className="text-slate-400 shrink-0" />
+                              <select
+                                value={uploadFormType}
+                                onChange={(e) => setUploadFormType(e.target.value as "APPLICATION_FORM" | "JOINING_FORM")}
+                                className="h-8 rounded-lg bg-white border border-slate-200 px-2 text-[11px] outline-none"
+                              >
+                                <option value="APPLICATION_FORM">Application Form</option>
+                                <option value="JOINING_FORM">Joining Form</option>
+                              </select>
                               <input
                                 type="file"
                                 onChange={(e) => setApplicationFormFile(e.target.files?.[0] || null)}
@@ -1170,6 +1344,7 @@ export default function HrCandidatesPage() {
                                 onClick={() => {
                                   setUploadFormOpenFor(null);
                                   setApplicationFormFile(null);
+                                  setUploadFormType("APPLICATION_FORM");
                                 }}
                                 className="h-8 px-2 text-xs text-slate-400"
                               >
@@ -1178,7 +1353,7 @@ export default function HrCandidatesPage() {
                             </div>
                           ) : (
                             <button onClick={() => setUploadFormOpenFor(candidate.id)} className={SECONDARY_BUTTON_CLASS}>
-                              <FileUp size={12} /> Upload Application Form
+                              <FileUp size={12} /> Upload Document
                             </button>
                           )}
                         </div>
@@ -1245,8 +1420,8 @@ export default function HrCandidatesPage() {
 
       {/* Generate document modal */}
       {generateOpenFor && generateTemplate && (
-        <div className="fixed inset-0 z-[200] bg-black/40 flex items-center justify-center p-4">
-          <div className="bg-white rounded-[24px] p-6 w-full max-w-md space-y-3">
+        <div className="fixed inset-0 z-[200] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-[24px] shadow-2xl p-6 w-full max-w-md space-y-3">
             <div className="flex items-center justify-between">
               <p className="text-sm font-bold text-slate-800">Generate {generateTemplate.title}</p>
               <button onClick={() => setGenerateOpenFor(null)}><X size={16} /></button>

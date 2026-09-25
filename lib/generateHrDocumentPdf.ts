@@ -1,4 +1,4 @@
-import { COMPANY_NAME } from "@/lib/exportTable";
+import { COMPANY_NAME, PDF_TABLE_STYLES, PDF_HEAD_STYLES, formatINR } from "@/lib/exportTable";
 
 // Renders a generated HR document (offer letter, experience letter,
 // etc.) as a clean, official-looking PDF -- deliberately NOT reusing
@@ -81,13 +81,20 @@ function drawPlainPageNumber(doc: import("jspdf").jsPDF, pageNumber: number) {
   doc.text(`Page ${pageNumber}`, pw - 20, ph - 15, { align: "right" });
 }
 
+// Shared by every generated-PDF builder in this file (offer/appointment
+// letters, salary slips) -- one owner for the PNG-to-JPEG compression
+// decision so a new document type can't reintroduce the ~11MB bug fixed
+// 2026-09-25.
+async function prepareLetterhead(letterheadInput?: LetterheadImage): Promise<LetterheadImage | undefined> {
+  return letterheadInput && detectImageFormat(letterheadInput.dataUrl) === "PNG"
+    ? { dataUrl: await convertToJpeg(letterheadInput.dataUrl, 0.85) }
+    : letterheadInput;
+}
+
 export async function buildHrDocumentBlob(title: string, bodyText: string, letterheadInput?: LetterheadImage): Promise<Blob> {
   const { jsPDF } = await import("jspdf");
 
-  const letterhead: LetterheadImage | undefined =
-    letterheadInput && detectImageFormat(letterheadInput.dataUrl) === "PNG"
-      ? { dataUrl: await convertToJpeg(letterheadInput.dataUrl, 0.85) }
-      : letterheadInput;
+  const letterhead = await prepareLetterhead(letterheadInput);
 
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -174,6 +181,158 @@ export async function buildHrDocumentBlob(title: string, bodyText: string, lette
     doc.setPage(p);
     drawPlainPageNumber(doc, p);
   }
+
+  return doc.output("blob");
+}
+
+export interface SalarySlipInput {
+  employeeName: string;
+  department: string | null;
+  role: string;
+  periodLabel: string; // e.g. "September 2026"
+  basicPay: number;
+}
+
+// Plain payslip form (2026-09-25) -- deliberately NOT letterhead-based,
+// unlike the other generated documents in this file: HR wants this one
+// printed, hand-signed by Accounts and the employee, then the signed
+// scan uploaded back in as the real record (see the upload flow in
+// app/hr/salary/page.tsx). A full-bleed letterhead image would fight
+// with that physical-signature workflow, so this stays a plain bordered
+// form instead. Named allowance/deduction rows are shown at Rs. 0
+// rather than omitted, because this company has no allowance system
+// yet -- Basic Pay is the whole of Gross Salary (see
+// HRMS_MASTER_PLAN.md's Salary Slip scope note). A real allowance
+// later only ever changes these two body arrays, never the layout.
+export async function buildSalarySlipBlob(input: SalarySlipInput): Promise<Blob> {
+  const { jsPDF } = await import("jspdf");
+  const { default: autoTable } = await import("jspdf-autotable");
+
+  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.setTextColor(...SLATE_900);
+  doc.text(COMPANY_NAME, pageWidth / 2, 55, { align: "center" });
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(...SLATE_500);
+  doc.text("Real Estate Consultancy", pageWidth / 2, 70, { align: "center" });
+
+  doc.setDrawColor(...SLATE_200);
+  doc.setLineWidth(1);
+  doc.line(MARGIN, 82, pageWidth - MARGIN, 82);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(...SLATE_900);
+  doc.text(`SALARY SLIP — ${input.periodLabel.toUpperCase()}`, pageWidth / 2, 104, { align: "center" });
+
+  let y = 132;
+  doc.setFontSize(10);
+  const infoRows: [string, string, string, string][] = [
+    ["Employee Name", input.employeeName, "Pay Period", input.periodLabel],
+    ["Designation", input.role, "Date of Issue", new Date().toLocaleDateString("en-IN", { year: "numeric", month: "long", day: "numeric" })],
+    ["Department", input.department || "—", "", ""]
+  ];
+  const col2X = MARGIN + 260;
+  for (const [label1, value1, label2, value2] of infoRows) {
+    doc.setFont("helvetica", "bold");
+    doc.text(`${label1}:`, MARGIN, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(value1, MARGIN + 90, y);
+    if (label2) {
+      doc.setFont("helvetica", "bold");
+      doc.text(`${label2}:`, col2X, y);
+      doc.setFont("helvetica", "normal");
+      doc.text(value2, col2X + 90, y);
+    }
+    y += LINE_HEIGHT + 4;
+  }
+  y += 8;
+
+  const earnings: [string, string][] = [
+    ["Basic Pay", formatINR(input.basicPay)],
+    ["House Rent Allowance (HRA)", formatINR(0)],
+    ["Conveyance Allowance", formatINR(0)],
+    ["Special Allowance", formatINR(0)],
+    ["Other Allowance", formatINR(0)]
+  ];
+  const grossEarnings = input.basicPay;
+
+  const deductions: [string, string][] = [
+    ["Provident Fund (PF)", formatINR(0)],
+    ["Professional Tax", formatINR(0)],
+    ["TDS", formatINR(0)],
+    ["Other Deductions", formatINR(0)]
+  ];
+  const totalDeductions = 0;
+
+  // Earnings and Deductions side by side in one grid, the standard
+  // payslip layout -- padded to equal length so the two columns line
+  // up row-for-row rather than trailing off independently.
+  const rowCount = Math.max(earnings.length, deductions.length);
+  const body: string[][] = [];
+  for (let i = 0; i < rowCount; i++) {
+    const [eLabel, eAmt] = earnings[i] || ["", ""];
+    const [dLabel, dAmt] = deductions[i] || ["", ""];
+    body.push([eLabel, eAmt, dLabel, dAmt]);
+  }
+  body.push(["Gross Earnings", formatINR(grossEarnings), "Total Deductions", formatINR(totalDeductions)]);
+
+  autoTable(doc, {
+    startY: y,
+    theme: "grid",
+    head: [["Earnings", "Amount (Rs.)", "Deductions", "Amount (Rs.)"]],
+    body,
+    styles: PDF_TABLE_STYLES,
+    headStyles: PDF_HEAD_STYLES,
+    columnStyles: {
+      0: { halign: "left" },
+      1: { halign: "right", cellWidth: 80 },
+      2: { halign: "left" },
+      3: { halign: "right", cellWidth: 80 }
+    },
+    margin: { left: MARGIN, right: MARGIN },
+    didParseCell: (data) => {
+      if (data.section === "body" && data.row.index === rowCount) data.cell.styles.fontStyle = "bold";
+    }
+  });
+
+  const netPayY = (doc as any).lastAutoTable.finalY + 24;
+  const netPay = grossEarnings - totalDeductions;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11.5);
+  doc.setTextColor(...SLATE_900);
+  doc.text(`Net Pay: Rs. ${formatINR(netPay)}`, MARGIN, netPayY);
+
+  // Signature boxes -- this form is meant to be printed and physically
+  // signed (Accounts + employee), then the signed scan uploaded back in
+  // as the real record via app/hr/salary/page.tsx's upload flow.
+  const boxY = pageHeight - 130;
+  const boxWidth = (pageWidth - MARGIN * 2 - 30) / 2;
+  const boxHeight = 60;
+
+  doc.setDrawColor(...SLATE_200);
+  doc.setLineWidth(1);
+  doc.rect(MARGIN, boxY, boxWidth, boxHeight);
+  doc.rect(MARGIN + boxWidth + 30, boxY, boxWidth, boxHeight);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor(...SLATE_500);
+  doc.text("Accounts Signature", MARGIN, boxY + boxHeight + 14);
+  doc.text("Employee Signature", MARGIN + boxWidth + 30, boxY + boxHeight + 14);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(...SLATE_500);
+  doc.text("This is a system-generated salary slip.", MARGIN, pageHeight - 40);
+
+  drawPlainPageNumber(doc, 1);
 
   return doc.output("blob");
 }

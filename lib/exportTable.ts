@@ -37,7 +37,7 @@ const SLATE_200: [number, number, number] = [226, 232, 240];
 // 1pt borders, not the subtle look the rest of the app uses).
 // lineWidth 0.5pt + slate-200 matches the on-screen tables' own
 // divide-slate-100/200 borders as closely as jsPDF's units allow.
-const PDF_TABLE_STYLES = {
+export const PDF_TABLE_STYLES = {
   fontSize: 7,
   cellPadding: 4,
   overflow: "linebreak" as const,
@@ -46,7 +46,7 @@ const PDF_TABLE_STYLES = {
   lineWidth: 0.5
 };
 
-const PDF_HEAD_STYLES = {
+export const PDF_HEAD_STYLES = {
   fillColor: BRAND_BLUE,
   textColor: 255,
   fontStyle: "bold" as const,
@@ -445,7 +445,7 @@ export interface CostSheetPdfInput {
   grandTotal: number;
 }
 
-function formatINR(amount: number): string {
+export function formatINR(amount: number): string {
   return amount.toLocaleString("en-IN", { maximumFractionDigits: 0 });
 }
 

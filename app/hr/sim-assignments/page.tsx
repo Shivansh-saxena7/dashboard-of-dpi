@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, Smartphone, Plus, Search, ArrowRightLeft } from "lucide-react";
 import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
 
@@ -38,6 +38,7 @@ export default function HrSimAssignmentsPage() {
   const [assignments, setAssignments] = useState<SimAssignmentRow[]>([]);
   const [activeHolders, setActiveHolders] = useState<ActiveHolderRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const [createOpen, setCreateOpen] = useState(false);
   const [newSimNumber, setNewSimNumber] = useState("");
@@ -94,6 +95,20 @@ export default function HrSimAssignmentsPage() {
       })),
     [assignments, activeHolders]
   );
+
+  const visibleRows = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter(
+      ({ sim, holder }) =>
+        sim.sim_number.toLowerCase().includes(q) ||
+        sim.email_address.toLowerCase().includes(q) ||
+        (holder?.employee?.name || "").toLowerCase().includes(q)
+    );
+  }, [rows, searchQuery]);
+
+  const assignedCount = rows.filter((r) => r.holder).length;
+  const unassignedCount = rows.length - assignedCount;
 
   async function handleCreate() {
     if (!newSimNumber.trim() || !newEmail.trim() || !newPassword || !newEmployeeId || !newReason.trim()) {
@@ -199,50 +214,77 @@ export default function HrSimAssignmentsPage() {
       <motion.div
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
-        className="rounded-[24px] bg-gradient-to-br from-teal-700 via-emerald-600 to-teal-500 text-white p-6"
+        className="relative overflow-hidden rounded-[24px] bg-gradient-to-br from-teal-700 via-emerald-600 to-teal-500 text-white p-5 sm:p-6"
       >
-        <div className="flex items-start justify-between gap-4 flex-wrap">
+        <Smartphone size={160} strokeWidth={1.1} className="absolute -right-8 -bottom-12 text-white/10 pointer-events-none hidden sm:block" />
+
+        <div className="relative flex items-start justify-between gap-4 flex-wrap">
           <div>
             <p className="text-[10px] font-semibold tracking-[0.2em] text-teal-100 uppercase mb-2">HR Assets</p>
-            <h1 className="text-xl font-bold">Company SIM / Email Tracking</h1>
+            <h1 className="text-xl sm:text-2xl font-bold">Company SIM / Email Tracking</h1>
             <p className="text-sm text-white/70 mt-1">Track which employee holds each company SIM and email, and transfer when someone leaves.</p>
           </div>
           <button
             onClick={() => setCreateOpen(true)}
             className="shrink-0 flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition"
           >
-            📱 New SIM / Email
+            <Plus size={14} /> New SIM / Email
           </button>
+        </div>
+
+        <div className="relative flex items-center gap-2.5 flex-wrap mt-5">
+          <div className="flex items-baseline gap-1.5 bg-white/10 border border-white/15 rounded-xl px-3.5 py-2">
+            <span className="text-lg font-bold leading-none">{rows.length}</span>
+            <span className="text-[11px] text-white/70 font-semibold">Total SIMs</span>
+          </div>
+          <div className="flex items-baseline gap-1.5 bg-white/10 border border-white/15 rounded-xl px-3.5 py-2">
+            <span className="text-lg font-bold leading-none">{assignedCount}</span>
+            <span className="text-[11px] text-white/70 font-semibold">Assigned</span>
+          </div>
+          <div className="flex items-baseline gap-1.5 bg-white/10 border border-white/15 rounded-xl px-3.5 py-2">
+            <span className="text-lg font-bold leading-none">{unassignedCount}</span>
+            <span className="text-[11px] text-white/70 font-semibold">In Drawer</span>
+          </div>
         </div>
       </motion.div>
 
       {createOpen && (
-        <div className="rounded-2xl bg-white border border-slate-100 shadow-md p-5 space-y-3">
-          <p className="text-sm font-bold text-slate-800">New SIM / Email</p>
+        <div className="rounded-2xl bg-white border border-slate-100 shadow-[0_4px_20px_rgba(15,23,42,0.06)] p-5 space-y-3.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <div className="h-8 w-8 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center shrink-0">
+                <Smartphone size={15} />
+              </div>
+              <p className="text-sm font-bold text-slate-800">New SIM / Email</p>
+            </div>
+            <button onClick={() => setCreateOpen(false)} className="text-xs font-bold text-slate-400 hover:text-slate-600">
+              Close
+            </button>
+          </div>
           <div className="flex flex-wrap gap-2">
             <input
               value={newSimNumber}
               onChange={(e) => setNewSimNumber(e.target.value)}
               placeholder="SIM number"
-              className="h-10 rounded-xl bg-slate-50 border border-slate-200 px-3 text-xs outline-none"
+              className="h-10 rounded-xl bg-slate-50 border border-slate-200 px-3 text-xs outline-none focus:ring-2 focus:ring-teal-100 focus:border-teal-300 transition"
             />
             <input
               value={newEmail}
               onChange={(e) => setNewEmail(e.target.value)}
               placeholder="Company email address"
-              className="h-10 flex-1 min-w-[200px] rounded-xl bg-slate-50 border border-slate-200 px-3 text-xs outline-none"
+              className="h-10 flex-1 min-w-[200px] rounded-xl bg-slate-50 border border-slate-200 px-3 text-xs outline-none focus:ring-2 focus:ring-teal-100 focus:border-teal-300 transition"
             />
             <input
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
               placeholder="Email password"
               type="text"
-              className="h-10 rounded-xl bg-slate-50 border border-slate-200 px-3 text-xs outline-none"
+              className="h-10 rounded-xl bg-slate-50 border border-slate-200 px-3 text-xs outline-none focus:ring-2 focus:ring-teal-100 focus:border-teal-300 transition"
             />
             <select
               value={newEmployeeId}
               onChange={(e) => setNewEmployeeId(e.target.value)}
-              className="h-10 rounded-xl bg-slate-50 border border-slate-200 px-3 text-xs font-semibold text-slate-600 outline-none"
+              className="h-10 rounded-xl bg-slate-50 border border-slate-200 px-3 text-xs font-semibold text-slate-600 outline-none focus:ring-2 focus:ring-teal-100 focus:border-teal-300 transition"
             >
               <option value="">Assign to...</option>
               {employees.map((emp) => (
@@ -255,14 +297,14 @@ export default function HrSimAssignmentsPage() {
               value={newReason}
               onChange={(e) => setNewReason(e.target.value)}
               placeholder="Reason (required)"
-              className="h-10 flex-1 min-w-[180px] rounded-xl bg-slate-50 border border-slate-200 px-3 text-xs outline-none"
+              className="h-10 flex-1 min-w-[180px] rounded-xl bg-slate-50 border border-slate-200 px-3 text-xs outline-none focus:ring-2 focus:ring-teal-100 focus:border-teal-300 transition"
             />
           </div>
           <div className="flex gap-2">
             <button
               disabled={creating}
               onClick={handleCreate}
-              className="h-10 px-4 rounded-xl text-xs font-bold bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-60 transition"
+              className="h-10 px-5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-teal-600 to-emerald-500 shadow-sm hover:opacity-90 disabled:opacity-60 transition"
             >
               {creating ? "Creating..." : "Create"}
             </button>
@@ -277,34 +319,58 @@ export default function HrSimAssignmentsPage() {
         </div>
       )}
 
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(15,23,42,0.06)] p-2.5">
+        <div className="relative">
+          <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search by SIM number, email, or holder name..."
+            className="w-full h-10 rounded-xl bg-slate-50 border border-slate-200 pl-10 pr-3 text-sm outline-none focus:ring-2 focus:ring-teal-100 focus:border-teal-300 transition"
+          />
+        </div>
+      </div>
+
       {loading ? (
-        <p className="text-sm text-slate-400 px-1">Loading...</p>
-      ) : rows.length === 0 ? (
-        <p className="text-sm text-slate-400 px-1">No SIM/email assignments yet.</p>
+        <div className="text-center text-sm text-slate-400 py-10">Loading...</div>
+      ) : visibleRows.length === 0 ? (
+        <div className="bg-white rounded-[24px] border border-slate-100 shadow-[0_4px_20px_rgba(15,23,42,0.06)] p-10 text-center text-sm text-slate-400">
+          {rows.length === 0 ? "No SIM/email assignments yet." : "No SIM/email assignments match your search."}
+        </div>
       ) : (
         <div className="space-y-3">
-          {rows.map(({ sim, holder }) => (
-            <div key={sim.id} className="rounded-2xl bg-white border border-slate-100 shadow-[0_2px_10px_rgba(15,23,42,0.05)] p-4">
+          {visibleRows.map(({ sim, holder }) => (
+            <div key={sim.id} className="rounded-2xl bg-white border border-slate-100 shadow-[0_2px_10px_rgba(15,23,42,0.05)] hover:shadow-[0_6px_20px_rgba(15,23,42,0.08)] transition-shadow p-4">
               <div className="flex items-start justify-between gap-3 flex-wrap">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-bold text-slate-800">{sim.sim_number}</p>
-                    <span className="text-xs text-slate-500">{sim.email_address}</span>
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className="h-9 w-9 rounded-xl bg-teal-100 text-teal-600 flex items-center justify-center shrink-0">
+                    <Smartphone size={15} />
                   </div>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    {holder ? (
-                      <>
-                        Held by <span className="font-semibold">{holder.employee?.name || "—"}</span>
-                      </>
-                    ) : (
-                      <span className="italic text-amber-600">Unassigned (in drawer)</span>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-bold text-slate-800">{sim.sim_number}</p>
+                      <span className="text-xs text-slate-500">{sim.email_address}</span>
+                    </div>
+                    <div className="mt-1">
+                      {holder ? (
+                        <span className="text-xs text-slate-500">
+                          Held by <span className="font-semibold text-slate-700">{holder.employee?.name || "—"}</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full bg-amber-50 text-amber-700">
+                          <span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> Unassigned — in drawer
+                        </span>
+                      )}
+                    </div>
+                    {revealedPasswords[sim.id] && (
+                      <p className="text-xs text-slate-500 mt-1.5 flex items-center gap-1.5">
+                        Password:{" "}
+                        <span className="font-mono font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md">
+                          {revealedPasswords[sim.id]}
+                        </span>
+                      </p>
                     )}
-                  </p>
-                  {revealedPasswords[sim.id] && (
-                    <p className="text-xs text-slate-500 mt-1">
-                      Password: <span className="font-mono font-semibold">{revealedPasswords[sim.id]}</span>
-                    </p>
-                  )}
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-2 shrink-0">
@@ -318,9 +384,9 @@ export default function HrSimAssignmentsPage() {
                   </button>
                   <button
                     onClick={() => setTransferFormId(transferFormId === sim.id ? null : sim.id)}
-                    className="text-xs font-bold px-3 py-1.5 rounded-full bg-teal-50 text-teal-700 hover:bg-teal-100"
+                    className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full bg-teal-50 text-teal-700 hover:bg-teal-100"
                   >
-                    Transfer
+                    <ArrowRightLeft size={12} /> Transfer
                   </button>
                 </div>
               </div>
@@ -330,7 +396,7 @@ export default function HrSimAssignmentsPage() {
                   <select
                     value={transferEmployeeId}
                     onChange={(e) => setTransferEmployeeId(e.target.value)}
-                    className="h-9 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs outline-none"
+                    className="h-9 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs outline-none focus:ring-2 focus:ring-teal-100 focus:border-teal-300 transition"
                   >
                     <option value="">Unassign only (no new holder)</option>
                     {employees
@@ -345,12 +411,12 @@ export default function HrSimAssignmentsPage() {
                     value={transferReason}
                     onChange={(e) => setTransferReason(e.target.value)}
                     placeholder="Reason (required)"
-                    className="h-9 flex-1 min-w-[160px] rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs outline-none"
+                    className="h-9 flex-1 min-w-[160px] rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs outline-none focus:ring-2 focus:ring-teal-100 focus:border-teal-300 transition"
                   />
                   <button
                     disabled={transferring}
                     onClick={() => handleTransfer(sim.id)}
-                    className="text-xs font-bold px-3 py-1.5 rounded-full bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-60"
+                    className="text-xs font-bold px-4 py-1.5 rounded-full text-white bg-gradient-to-r from-teal-600 to-emerald-500 shadow-sm hover:opacity-90 disabled:opacity-60"
                   >
                     Confirm
                   </button>

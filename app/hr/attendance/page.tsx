@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { FileSpreadsheet, FileText } from "lucide-react";
+import { FileSpreadsheet, FileText, Clock, UserCheck, Share2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
+import DateInput from "@/components/DateInput";
 import { formatTimeStringAsClock } from "@/lib/istTime";
 import {
   calculateDailyHrmsStatus,
@@ -20,6 +21,7 @@ import {
   AttendanceDetailExportRow,
   AttendanceSummaryExportRow
 } from "@/lib/exportAttendanceReport";
+import { STATUS_DISPLAY, STATUS_DOT, dateRangeArray } from "@/lib/hrmsAttendanceDisplay";
 
 interface EmployeeRow {
   id: string;
@@ -40,23 +42,8 @@ interface OverrideRow {
   marked_by: { name: string } | null;
 }
 
-const STATUS_DISPLAY: Record<string, { label: string; className: string }> = {
-  ON_TIME: { label: "On Time", className: "bg-emerald-50 text-emerald-700" },
-  LATE_COMING: { label: "Late Coming", className: "bg-amber-50 text-amber-700" },
-  HALF_DAY: { label: "Half Day", className: "bg-orange-100 text-orange-700" },
-  ABSENT: { label: "Absent", className: "bg-red-50 text-red-700" }
-};
-
-function dateRangeArray(from: string, to: string): string[] {
-  const dates: string[] = [];
-  const cur = new Date(from);
-  const end = new Date(to);
-  while (cur <= end) {
-    dates.push(cur.toISOString().slice(0, 10));
-    cur.setDate(cur.getDate() + 1);
-  }
-  return dates;
-}
+const TEAL_DATE_INPUT_CLASS =
+  "h-10 w-full rounded-xl bg-slate-50 border border-slate-200 pl-3 pr-9 text-xs font-semibold text-slate-600 outline-none focus:ring-2 focus:ring-teal-100 focus:border-teal-300 transition cursor-pointer";
 
 // Daily/Range view: per-employee-per-day status across a From-To range
 // (defaults to today-today, so it behaves exactly like the original
@@ -81,6 +68,8 @@ export default function HrAttendancePage() {
   const [weeklyOffDay, setWeeklyOffDay] = useState(0);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [myEmployeeId, setMyEmployeeId] = useState("");
+  const [sharing, setSharing] = useState(false);
 
   const [rangeAttendance, setRangeAttendance] = useState<AttendanceRow[]>([]);
   const [rangeOverrides, setRangeOverrides] = useState<OverrideRow[]>([]);
@@ -92,6 +81,7 @@ export default function HrAttendancePage() {
 
   useEffect(() => {
     loadStatic();
+    loadSelf();
   }, []);
 
   useEffect(() => {
@@ -112,6 +102,47 @@ export default function HrAttendancePage() {
     if (set) setSettings(set);
     if (les) setWeeklyOffDay(les.sla_weekly_off_day ?? 0);
     setLoading(false);
+  }
+
+  async function loadSelf() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data } = await supabase.from("employees").select("id").eq("auth_user_id", user.id).single();
+    if (data) setMyEmployeeId(data.id);
+  }
+
+  // Attendance Sharing (Phase 5, 2026-09-25) -- attendance_shares is a
+  // pure, immutable audit log (who shared what range with whom, and
+  // when) -- the employee's own read-only view (app/attendance/
+  // page.tsx) recomputes the actual day-by-day status live from the
+  // same attendance table + calculateDailyHrmsStatus this page already
+  // uses, scoped to the shared date_from/date_to. No status snapshot
+  // is stored here, so a later manual override never goes stale on
+  // the employee's side.
+  async function handleShareRange() {
+    if (!employeeFilter) {
+      toast.error("Pick a specific employee first.");
+      return;
+    }
+    if (!myEmployeeId) {
+      toast.error("Could not identify your employee record.");
+      return;
+    }
+
+    setSharing(true);
+    const { error } = await supabase.from("attendance_shares").insert({
+      employee_id: employeeFilter,
+      shared_by_employee_id: myEmployeeId,
+      date_from: dateFrom,
+      date_to: dateTo
+    });
+    setSharing(false);
+
+    if (error) {
+      toast.error(error.message || "Could not share attendance.");
+      return;
+    }
+    toast.success(`Attendance shared with ${employeeFilterLabel}.`);
   }
 
   async function loadRange() {
@@ -208,6 +239,25 @@ export default function HrAttendancePage() {
       return { employee: emp, counts };
     });
   }, [filteredEmployees, monthlyAttendance, settings, selectedMonth, weeklyOffDay, todayStr]);
+
+  // Headline counts for the hero strip -- reflects whichever view/
+  // range/filter is currently active, same "describes what's on
+  // screen right now" convention as the rest of this module's stat
+  // strips (not a separate, independently-scoped query).
+  const statusCounts = useMemo(() => {
+    const counts: Record<MonthlyHrmsStatus, number> = { ON_TIME: 0, LATE_COMING: 0, HALF_DAY: 0, ABSENT: 0 };
+    if (viewMode === "DAILY") {
+      rangeRows.forEach((r) => { counts[r.status]++; });
+    } else {
+      monthlyRows.forEach((r) => {
+        counts.ON_TIME += r.counts.ON_TIME;
+        counts.LATE_COMING += r.counts.LATE_COMING;
+        counts.HALF_DAY += r.counts.HALF_DAY;
+        counts.ABSENT += r.counts.ABSENT;
+      });
+    }
+    return counts;
+  }, [viewMode, rangeRows, monthlyRows]);
 
   async function submitOverride(employeeId: string, date: string, status: "PRESENT" | "ABSENT") {
     if (!overrideReason.trim()) {
@@ -308,26 +358,53 @@ export default function HrAttendancePage() {
       <motion.div
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
-        className="rounded-[24px] bg-gradient-to-br from-teal-700 via-emerald-600 to-teal-500 text-white p-6"
+        className="relative overflow-hidden rounded-[24px] bg-gradient-to-br from-teal-700 via-emerald-600 to-teal-500 text-white p-5 sm:p-6"
       >
-        <p className="text-[10px] font-semibold tracking-[0.2em] text-teal-100 uppercase mb-2">HR Attendance</p>
-        <h1 className="text-xl font-bold">Attendance Tracking</h1>
-        <p className="text-sm text-white/70 mt-1">
-          Independent strict on-time cutoffs ({settings?.first_half_ontime_cutoff?.slice(0, 5)} / {settings?.second_half_ontime_cutoff?.slice(0, 5)}) — separate from the Lead-Distribution shift window.
-        </p>
+        <Clock size={170} strokeWidth={1.1} className="absolute -right-8 -bottom-12 text-white/10 pointer-events-none hidden sm:block" />
+
+        <div className="relative">
+          <p className="text-[10px] font-semibold tracking-[0.2em] text-teal-100 uppercase mb-2">HR Attendance</p>
+          <h1 className="text-xl sm:text-2xl font-bold">Attendance Tracking</h1>
+          <p className="text-sm text-white/70 mt-1">
+            Independent strict on-time cutoffs ({settings?.first_half_ontime_cutoff?.slice(0, 5)} / {settings?.second_half_ontime_cutoff?.slice(0, 5)}) — separate from the Lead-Distribution shift window.
+          </p>
+        </div>
+
+        <div className="relative flex items-center gap-2.5 flex-wrap mt-5">
+          <div className="flex items-baseline gap-1.5 bg-white/10 border border-white/15 rounded-xl px-3.5 py-2">
+            <span className="text-lg font-bold leading-none">{statusCounts.ON_TIME}</span>
+            <span className="text-[11px] text-white/70 font-semibold">On Time</span>
+          </div>
+          <div className="flex items-baseline gap-1.5 bg-white/10 border border-white/15 rounded-xl px-3.5 py-2">
+            <span className="text-lg font-bold leading-none">{statusCounts.LATE_COMING}</span>
+            <span className="text-[11px] text-white/70 font-semibold">Late Coming</span>
+          </div>
+          <div className="flex items-baseline gap-1.5 bg-white/10 border border-white/15 rounded-xl px-3.5 py-2">
+            <span className="text-lg font-bold leading-none">{statusCounts.HALF_DAY}</span>
+            <span className="text-[11px] text-white/70 font-semibold">Half Day</span>
+          </div>
+          <div className="flex items-baseline gap-1.5 bg-white/10 border border-white/15 rounded-xl px-3.5 py-2">
+            <span className="text-lg font-bold leading-none">{statusCounts.ABSENT}</span>
+            <span className="text-[11px] text-white/70 font-semibold">Absent</span>
+          </div>
+        </div>
       </motion.div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex rounded-lg border border-slate-200 overflow-hidden">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_4px_20px_rgba(15,23,42,0.06)] p-3 flex flex-wrap items-center gap-2.5">
+        <div className="flex rounded-xl bg-slate-100 p-1 gap-1">
           <button
             onClick={() => setViewMode("DAILY")}
-            className={`px-4 h-10 text-xs font-bold transition ${viewMode === "DAILY" ? "bg-teal-600 text-white" : "bg-white text-slate-600"}`}
+            className={`px-3.5 h-9 rounded-lg text-xs font-bold transition ${
+              viewMode === "DAILY" ? "bg-gradient-to-r from-teal-600 to-emerald-500 text-white shadow-sm" : "text-slate-500 hover:text-slate-700"
+            }`}
           >
             Daily / Range
           </button>
           <button
             onClick={() => setViewMode("MONTHLY")}
-            className={`px-4 h-10 text-xs font-bold transition ${viewMode === "MONTHLY" ? "bg-teal-600 text-white" : "bg-white text-slate-600"}`}
+            className={`px-3.5 h-9 rounded-lg text-xs font-bold transition ${
+              viewMode === "MONTHLY" ? "bg-gradient-to-r from-teal-600 to-emerald-500 text-white shadow-sm" : "text-slate-500 hover:text-slate-700"
+            }`}
           >
             Monthly Summary
           </button>
@@ -336,7 +413,7 @@ export default function HrAttendancePage() {
         <select
           value={employeeFilter}
           onChange={(e) => setEmployeeFilter(e.target.value)}
-          className="h-10 rounded-xl bg-white border border-slate-200 px-3 text-xs font-semibold text-slate-600 outline-none"
+          className="h-10 rounded-xl bg-slate-50 border border-slate-200 px-3 text-xs font-semibold text-slate-600 outline-none focus:ring-2 focus:ring-teal-100 focus:border-teal-300 transition"
         >
           <option value="">All Employees</option>
           {employees.map((emp) => (
@@ -348,35 +425,36 @@ export default function HrAttendancePage() {
 
         {viewMode === "DAILY" ? (
           <div className="flex items-center gap-2">
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="h-10 rounded-xl bg-white border border-slate-200 px-3 text-xs font-semibold text-slate-600 outline-none"
-            />
+            <div className="w-[150px]">
+              <DateInput value={dateFrom} onChange={setDateFrom} className={TEAL_DATE_INPUT_CLASS} />
+            </div>
             <span className="text-xs text-slate-400">to</span>
-            <input
-              type="date"
-              value={dateTo}
-              min={dateFrom}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="h-10 rounded-xl bg-white border border-slate-200 px-3 text-xs font-semibold text-slate-600 outline-none"
-            />
+            <div className="w-[150px]">
+              <DateInput value={dateTo} onChange={setDateTo} min={dateFrom} className={TEAL_DATE_INPUT_CLASS} />
+            </div>
           </div>
         ) : (
-          <input
-            type="month"
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(e.target.value)}
-            className="h-10 rounded-xl bg-white border border-slate-200 px-3 text-xs font-semibold text-slate-600 outline-none"
-          />
+          <div className="w-[170px]">
+            <DateInput value={selectedMonth} onChange={setSelectedMonth} mode="month" className={TEAL_DATE_INPUT_CLASS} />
+          </div>
         )}
 
-        <div className="flex items-center gap-2 ml-auto">
+        {viewMode === "DAILY" && employeeFilter && (
+          <button
+            onClick={handleShareRange}
+            disabled={sharing}
+            className="flex items-center gap-1.5 h-10 px-3 rounded-xl bg-teal-50 text-teal-700 text-xs font-bold disabled:opacity-40 hover:bg-teal-100 transition"
+          >
+            <Share2 size={14} />
+            {sharing ? "Sharing..." : `Share with ${employeeFilterLabel}`}
+          </button>
+        )}
+
+        <div className="flex items-center gap-2 sm:ml-auto">
           <button
             onClick={() => (viewMode === "DAILY" ? handleExportRange("excel") : handleExportMonthly("excel"))}
             disabled={exporting}
-            className="flex items-center gap-1.5 h-10 px-3 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-bold disabled:opacity-40 hover:bg-emerald-100 transition"
+            className="flex items-center gap-1.5 h-10 px-3 rounded-xl bg-emerald-50 text-emerald-700 text-xs font-bold disabled:opacity-40 hover:bg-emerald-100 transition"
           >
             <FileSpreadsheet size={14} />
             Excel
@@ -384,7 +462,7 @@ export default function HrAttendancePage() {
           <button
             onClick={() => (viewMode === "DAILY" ? handleExportRange("pdf") : handleExportMonthly("pdf"))}
             disabled={exporting}
-            className="flex items-center gap-1.5 h-10 px-3 rounded-lg bg-red-50 text-red-700 text-xs font-bold disabled:opacity-40 hover:bg-red-100 transition"
+            className="flex items-center gap-1.5 h-10 px-3 rounded-xl bg-red-50 text-red-700 text-xs font-bold disabled:opacity-40 hover:bg-red-100 transition"
           >
             <FileText size={14} />
             PDF
@@ -393,29 +471,30 @@ export default function HrAttendancePage() {
       </div>
 
       {loading ? (
-        <p className="text-sm text-slate-400 px-1">Loading...</p>
+        <div className="text-center text-sm text-slate-400 py-10">Loading...</div>
       ) : viewMode === "DAILY" ? (
-        <div className="rounded-2xl bg-white border border-slate-100 shadow-md overflow-x-auto">
+        <div className="rounded-[24px] bg-white border border-slate-100 shadow-[0_4px_20px_rgba(15,23,42,0.06)] overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-100 text-left text-[11px] uppercase tracking-wide text-slate-400">
-                <th className="p-3">Employee</th>
-                <th className="p-3">Date</th>
-                <th className="p-3">Status</th>
-                <th className="p-3">Shift Start</th>
-                <th className="p-3">Manual</th>
-                <th className="p-3">Action</th>
+              <tr className="bg-slate-50/80 border-b border-slate-100 text-left text-[11px] uppercase tracking-wide text-slate-500 font-bold">
+                <th className="p-3.5">Employee</th>
+                <th className="p-3.5">Date</th>
+                <th className="p-3.5">Status</th>
+                <th className="p-3.5">Shift Start</th>
+                <th className="p-3.5">Manual</th>
+                <th className="p-3.5">Action</th>
               </tr>
             </thead>
             <tbody>
               {rangeRows.map(({ employee, date, status, row, override }) => {
                 const key = `${employee.id}::${date}`;
                 return (
-                  <tr key={key} className="border-b border-slate-50 last:border-0 align-top">
-                    <td className="p-3 font-semibold text-slate-800">{employee.name}</td>
-                    <td className="p-3 text-slate-500">{new Date(date).toLocaleDateString([], { month: "short", day: "numeric" })}</td>
-                    <td className="p-3">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${STATUS_DISPLAY[status].className}`}>
+                  <tr key={key} className="border-b border-slate-50 last:border-0 align-top hover:bg-slate-50/60 transition-colors">
+                    <td className="p-3.5 font-semibold text-slate-800">{employee.name}</td>
+                    <td className="p-3.5 text-slate-500">{new Date(date).toLocaleDateString([], { month: "short", day: "numeric" })}</td>
+                    <td className="p-3.5">
+                      <span className={`inline-flex items-center gap-1.5 text-[10px] font-bold px-2.5 py-1 rounded-full ${STATUS_DISPLAY[status].className}`}>
+                        <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[status]}`} />
                         {STATUS_DISPLAY[status].label}
                       </span>
                       {status === "LATE_COMING" && settings && row && (
@@ -429,14 +508,20 @@ export default function HrAttendancePage() {
                         </p>
                       )}
                     </td>
-                    <td className="p-3 text-slate-500">
+                    <td className="p-3.5 text-slate-500">
                       {row
                         ? new Date(row.shift_start_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) +
                           (row.attendance_type === "HALF_DAY_SECOND" ? " (2nd half)" : "")
                         : "—"}
                     </td>
-                    <td className="p-3 text-slate-500">{override ? `✋ ${override.marked_by?.name || "—"}` : "—"}</td>
-                    <td className="p-3">
+                    <td className="p-3.5 text-slate-500">
+                      {override ? (
+                        <span className="flex items-center gap-1.5"><UserCheck size={13} className="text-teal-600" /> {override.marked_by?.name || "—"}</span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td className="p-3.5">
                       {!row &&
                         (overrideFormKey === key ? (
                           <div className="flex flex-col gap-2 items-start">
@@ -444,7 +529,7 @@ export default function HrAttendancePage() {
                               value={overrideReason}
                               onChange={(e) => setOverrideReason(e.target.value)}
                               placeholder="Reason (required)"
-                              className="h-9 w-48 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs outline-none"
+                              className="h-9 w-48 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs outline-none focus:ring-2 focus:ring-teal-100 focus:border-teal-300 transition"
                             />
                             <div className="flex gap-2">
                               <button
@@ -489,25 +574,25 @@ export default function HrAttendancePage() {
           </table>
         </div>
       ) : (
-        <div className="rounded-2xl bg-white border border-slate-100 shadow-md overflow-x-auto">
+        <div className="rounded-[24px] bg-white border border-slate-100 shadow-[0_4px_20px_rgba(15,23,42,0.06)] overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-100 text-left text-[11px] uppercase tracking-wide text-slate-400">
-                <th className="p-3">Employee</th>
-                <th className="p-3">On Time</th>
-                <th className="p-3">Late Coming (free)</th>
-                <th className="p-3">Half Day</th>
-                <th className="p-3">Absent</th>
+              <tr className="bg-slate-50/80 border-b border-slate-100 text-left text-[11px] uppercase tracking-wide text-slate-500 font-bold">
+                <th className="p-3.5">Employee</th>
+                <th className="p-3.5">On Time</th>
+                <th className="p-3.5">Late Coming (free)</th>
+                <th className="p-3.5">Half Day</th>
+                <th className="p-3.5">Absent</th>
               </tr>
             </thead>
             <tbody>
               {monthlyRows.map(({ employee, counts }) => (
-                <tr key={employee.id} className="border-b border-slate-50 last:border-0">
-                  <td className="p-3 font-semibold text-slate-800">{employee.name}</td>
-                  <td className="p-3 text-emerald-700 font-semibold">{counts.ON_TIME}</td>
-                  <td className="p-3 text-amber-700 font-semibold">{counts.LATE_COMING}</td>
-                  <td className="p-3 text-orange-700 font-semibold">{counts.HALF_DAY}</td>
-                  <td className="p-3 text-red-600 font-semibold">{counts.ABSENT}</td>
+                <tr key={employee.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/60 transition-colors">
+                  <td className="p-3.5 font-semibold text-slate-800">{employee.name}</td>
+                  <td className="p-3.5 text-emerald-700 font-semibold">{counts.ON_TIME}</td>
+                  <td className="p-3.5 text-amber-700 font-semibold">{counts.LATE_COMING}</td>
+                  <td className="p-3.5 text-orange-700 font-semibold">{counts.HALF_DAY}</td>
+                  <td className="p-3.5 text-red-600 font-semibold">{counts.ABSENT}</td>
                 </tr>
               ))}
             </tbody>
