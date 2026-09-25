@@ -120,6 +120,11 @@ export async function distributeLeadsBatch(supabase, leadsToDistribute, settings
     : eligibleEmployees;
 
   let pointerEmployeeId = settings.round_robin_pointer_employee_id;
+  // Restricted-pool pointer-skip fix (2026-09-25) — see
+  // lib/calculateLeadAssignment.ts's own comment on
+  // nextRestrictedPoolPointerEmployeeId. Threaded through this loop the
+  // same in-memory-then-persist way pointerEmployeeId already is.
+  let restrictedPoolPointerEmployeeId = settings.restricted_pool_pointer_employee_id;
   const workingProjectPointers = { ...(projectPointers || {}) };
   const distributionSummary = {};
   let assignedCount = 0;
@@ -134,7 +139,8 @@ export async function distributeLeadsBatch(supabase, leadsToDistribute, settings
       pointerEmployeeId,
       workingProjectPointers,
       projectExclusions,
-      employeeAllowlists
+      employeeAllowlists,
+      restrictedPoolPointerEmployeeId
     );
 
     if (!result.assignedEmployeeId) {
@@ -161,6 +167,26 @@ export async function distributeLeadsBatch(supabase, leadsToDistribute, settings
     pointerEmployeeId = result.nextGlobalPointerEmployeeId;
     distributionSummary[result.assignedEmployeeId] =
       (distributionSummary[result.assignedEmployeeId] || 0) + 1;
+
+    if (result.nextRestrictedPoolPointerEmployeeId !== restrictedPoolPointerEmployeeId) {
+      // Updated in-memory first (so a later lead in this same batch that
+      // also hits a restricted-inclusive pool sees the rotation), then
+      // persisted — same shape as nextProjectPointer just below. A
+      // failed persist here is non-fatal for the same reason: the
+      // lead's own assignment already committed via assign_lead_atomic
+      // above; worst case a future batch's restricted-pool rotation
+      // repeats an employee instead of advancing.
+      restrictedPoolPointerEmployeeId = result.nextRestrictedPoolPointerEmployeeId;
+
+      const { error: restrictedPointerError } = await supabase
+        .from("lead_engine_settings")
+        .update({ restricted_pool_pointer_employee_id: restrictedPoolPointerEmployeeId })
+        .eq("id", 1);
+
+      if (restrictedPointerError) {
+        console.error("restricted_pool_pointer_employee_id update failed:", restrictedPointerError.message);
+      }
+    }
 
     if (result.nextProjectPointer) {
       // Updated in-memory FIRST so the next lead in this same loop

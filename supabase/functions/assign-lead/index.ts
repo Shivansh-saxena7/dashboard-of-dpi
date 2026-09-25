@@ -235,7 +235,8 @@ serve(async (req) => {
       settings.round_robin_pointer_employee_id,
       projectPointers,
       projectExclusions || [],
-      employeeAllowlists || []
+      employeeAllowlists || [],
+      settings.restricted_pool_pointer_employee_id
     );
 
     if (!result.assignedEmployeeId) {
@@ -294,6 +295,24 @@ serve(async (req) => {
 
       if (projectPointerError) {
         console.error("project_rule_pointers upsert failed:", projectPointerError.message);
+      }
+    }
+
+    // Restricted-pool pointer-skip fix (2026-09-25) — persisted directly
+    // here, same non-fatal-if-fails posture as project_rule_pointers
+    // above, and deliberately NOT threaded through assign_lead_atomic
+    // (mirrors that same precedent: this is a side-effect write, not part
+    // of the atomic lead-assignment transaction). Only writes when it
+    // actually changed, so an unrestricted-pool assignment (the vast
+    // majority) never touches this column at all.
+    if (result.nextRestrictedPoolPointerEmployeeId !== settings.restricted_pool_pointer_employee_id) {
+      const { error: restrictedPointerError } = await supabase
+        .from("lead_engine_settings")
+        .update({ restricted_pool_pointer_employee_id: result.nextRestrictedPoolPointerEmployeeId })
+        .eq("id", 1);
+
+      if (restrictedPointerError) {
+        console.error("restricted_pool_pointer_employee_id update failed:", restrictedPointerError.message);
       }
     }
 

@@ -449,6 +449,11 @@ serve(async () => {
     let junkedCount = 0;
     let warnedCount = 0;
     let pointerEmployeeId = settings.round_robin_pointer_employee_id;
+    // Restricted-pool pointer-skip fix (2026-09-25) — see
+    // lib/calculateLeadAssignment.ts's own comment on
+    // nextRestrictedPoolPointerEmployeeId. Threaded through this sweep's
+    // loop the same in-memory-then-persist way pointerEmployeeId already is.
+    let restrictedPoolPointerEmployeeId = settings.restricted_pool_pointer_employee_id;
     const diagnostics: any[] = [];
 
     for (const lead of leads || []) {
@@ -991,7 +996,8 @@ serve(async () => {
         pointerEmployeeId,
         {},
         projectExclusions || [],
-        employeeAllowlists || []
+        employeeAllowlists || [],
+        restrictedPoolPointerEmployeeId
       );
 
       if (!result.assignedEmployeeId) {
@@ -1030,6 +1036,23 @@ serve(async () => {
         recycledCount++;
         if (!isTeamLeaderAssigned) {
           pointerEmployeeId = result.nextGlobalPointerEmployeeId;
+
+          // Team-scoped recycles never advance this either — same
+          // "wasn't part of that rotation to begin with" reasoning as
+          // the global pointer just above, so a team-internal restricted-
+          // pool rotation never pollutes the company-wide one.
+          if (result.nextRestrictedPoolPointerEmployeeId !== restrictedPoolPointerEmployeeId) {
+            restrictedPoolPointerEmployeeId = result.nextRestrictedPoolPointerEmployeeId;
+
+            const { error: restrictedPointerError } = await supabase
+              .from("lead_engine_settings")
+              .update({ restricted_pool_pointer_employee_id: restrictedPoolPointerEmployeeId })
+              .eq("id", 1);
+
+            if (restrictedPointerError) {
+              console.error("restricted_pool_pointer_employee_id update failed:", restrictedPointerError.message);
+            }
+          }
         }
         diagnostics.push({
           leadId: lead.id,

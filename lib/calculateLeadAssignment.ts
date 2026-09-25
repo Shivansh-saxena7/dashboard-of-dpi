@@ -73,6 +73,20 @@ export interface LeadAssignmentResult {
   // project_rule_pointers. Null for a single-employee project rule
   // (nothing to rotate) and for ROUND_ROBIN/NO_ELIGIBLE_EMPLOYEE.
   nextProjectPointer: { project: string; employeeId: string } | null;
+  // lead_engine_settings.restricted_pool_pointer_employee_id (2026-09-25)
+  // — a SEPARATE rotation pointer, only ever advanced when
+  // roundRobinPool contains at least one allowlist-restricted employee
+  // (see poolHasRestrictedEmployee below). Fixes a structural bug: the
+  // single shared global pointer was reused across pools of different
+  // size/membership (unrestricted-only vs. restricted-inclusive for the
+  // same project), which could skip a restricted employee's turn
+  // whenever the pointer happened to land on whoever sits just before
+  // them in id-sort order within the LARGER pool. Splitting the pointer
+  // means each pool shape rotates fairly on its own — when the pool has
+  // no restricted employee, this is passed straight through unchanged
+  // (identical to nextGlobalPointerEmployeeId's own pass-through rule),
+  // so nothing changes for anyone without an allowlist row.
+  nextRestrictedPoolPointerEmployeeId: string | null;
 }
 
 // `eligibleEmployees` must already be filtered by the caller to
@@ -95,7 +109,13 @@ export function calculateLeadAssignment(
   // Optional/defaults-empty, same backward-compatible shape as every
   // other param here — every pre-existing caller that doesn't pass
   // this behaves exactly as before (nobody restricted).
-  employeeAllowlists: EmployeeProjectAllowlistRule[] = []
+  employeeAllowlists: EmployeeProjectAllowlistRule[] = [],
+  // See nextRestrictedPoolPointerEmployeeId above. Optional/defaults-
+  // null, same backward-compatible shape as employeeAllowlists — any
+  // caller that doesn't pass this simply never advances or consults it,
+  // and every PROJECT_RULE/NO_ELIGIBLE_EMPLOYEE return path below
+  // passes it straight through untouched.
+  lastRestrictedPoolPointerEmployeeId: string | null = null
 ): LeadAssignmentResult {
 
   const normalizedProject = String(project || "").trim().toLowerCase();
@@ -122,7 +142,8 @@ export function calculateLeadAssignment(
         assignedEmployeeId: matchedEmployeeIds[0],
         reason: "PROJECT_RULE",
         nextGlobalPointerEmployeeId: lastGlobalAssignedEmployeeId,
-        nextProjectPointer: null
+        nextProjectPointer: null,
+        nextRestrictedPoolPointerEmployeeId: lastRestrictedPoolPointerEmployeeId
       };
     }
 
@@ -148,7 +169,8 @@ export function calculateLeadAssignment(
           assignedEmployeeId: null,
           reason: "NO_ELIGIBLE_EMPLOYEE",
           nextGlobalPointerEmployeeId: lastGlobalAssignedEmployeeId,
-          nextProjectPointer: null
+          nextProjectPointer: null,
+          nextRestrictedPoolPointerEmployeeId: lastRestrictedPoolPointerEmployeeId
         };
       }
 
@@ -161,7 +183,8 @@ export function calculateLeadAssignment(
         assignedEmployeeId: nextEmployeeId,
         reason: "PROJECT_RULE",
         nextGlobalPointerEmployeeId: lastGlobalAssignedEmployeeId,
-        nextProjectPointer: { project: normalizedProject, employeeId: nextEmployeeId }
+        nextProjectPointer: { project: normalizedProject, employeeId: nextEmployeeId },
+        nextRestrictedPoolPointerEmployeeId: lastRestrictedPoolPointerEmployeeId
       };
     }
 
@@ -208,8 +231,41 @@ export function calculateLeadAssignment(
       assignedEmployeeId: null,
       reason: "NO_ELIGIBLE_EMPLOYEE",
       nextGlobalPointerEmployeeId: lastGlobalAssignedEmployeeId,
-      nextProjectPointer: null
+      nextProjectPointer: null,
+      nextRestrictedPoolPointerEmployeeId: lastRestrictedPoolPointerEmployeeId
     };
+  }
+
+  // Pointer-skip fix (2026-09-25) — see nextRestrictedPoolPointerEmployeeId's
+  // own comment above for the full "why". A pool is only ever one of two
+  // shapes per call: "no restricted employee present" (identical to every
+  // pool before this fix existed) or "at least one restricted employee
+  // present" (rotates on its own separate pointer instead). Whichever
+  // shape this pool is, only ONE of the two pointers ever moves — the
+  // other passes straight through untouched, so the two rotations never
+  // interfere with each other.
+  const poolHasRestrictedEmployee = roundRobinPool.some(
+    (employee) => restrictedEmployeeIds.has(employee.id)
+  );
+
+  if (poolHasRestrictedEmployee) {
+
+    const lastIndex = roundRobinPool.findIndex(
+      (employee) => employee.id === lastRestrictedPoolPointerEmployeeId
+    );
+
+    const nextIndex = lastIndex === -1 ? 0 : (lastIndex + 1) % roundRobinPool.length;
+
+    const nextEmployee = roundRobinPool[nextIndex];
+
+    return {
+      assignedEmployeeId: nextEmployee.id,
+      reason: "ROUND_ROBIN",
+      nextGlobalPointerEmployeeId: lastGlobalAssignedEmployeeId,
+      nextProjectPointer: null,
+      nextRestrictedPoolPointerEmployeeId: nextEmployee.id
+    };
+
   }
 
   const lastIndex = roundRobinPool.findIndex(
@@ -224,7 +280,8 @@ export function calculateLeadAssignment(
     assignedEmployeeId: nextEmployee.id,
     reason: "ROUND_ROBIN",
     nextGlobalPointerEmployeeId: nextEmployee.id,
-    nextProjectPointer: null
+    nextProjectPointer: null,
+    nextRestrictedPoolPointerEmployeeId: lastRestrictedPoolPointerEmployeeId
   };
 
 }
