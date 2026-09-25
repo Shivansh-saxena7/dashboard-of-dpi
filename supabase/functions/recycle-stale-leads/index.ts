@@ -913,8 +913,11 @@ serve(async () => {
           p_old_lead_history_id: activeHistory.id,
           p_new_employee_id: nextEmployeeId,
           // Global pointer untouched — this lead was never part of the
-          // company-wide rotation to begin with.
+          // company-wide rotation to begin with. Same for the restricted
+          // pointer -- a Project-Rule-group lead never goes through the
+          // allowlist/round-robin branch at all.
           p_next_pointer_employee_id: pointerEmployeeId,
+          p_next_restricted_pool_pointer_employee_id: restrictedPoolPointerEmployeeId,
           p_recycle_reason: slaStatus
         });
 
@@ -1019,8 +1022,10 @@ serve(async () => {
         // Team-scoped recycles never advance the system-wide pointer
         // — that pointer tracks company-wide rotation, which this
         // lead was never part of (same "bypasses round-robin"
-        // principle the manual-assign/reassign RPCs follow).
+        // principle the manual-assign/reassign RPCs follow). Same for
+        // the restricted pointer, same reasoning.
         p_next_pointer_employee_id: isTeamLeaderAssigned ? pointerEmployeeId : result.nextGlobalPointerEmployeeId,
+        p_next_restricted_pool_pointer_employee_id: isTeamLeaderAssigned ? restrictedPoolPointerEmployeeId : result.nextRestrictedPoolPointerEmployeeId,
         p_recycle_reason: slaStatus
       });
 
@@ -1036,23 +1041,11 @@ serve(async () => {
         recycledCount++;
         if (!isTeamLeaderAssigned) {
           pointerEmployeeId = result.nextGlobalPointerEmployeeId;
-
-          // Team-scoped recycles never advance this either — same
-          // "wasn't part of that rotation to begin with" reasoning as
-          // the global pointer just above, so a team-internal restricted-
-          // pool rotation never pollutes the company-wide one.
-          if (result.nextRestrictedPoolPointerEmployeeId !== restrictedPoolPointerEmployeeId) {
-            restrictedPoolPointerEmployeeId = result.nextRestrictedPoolPointerEmployeeId;
-
-            const { error: restrictedPointerError } = await supabase
-              .from("lead_engine_settings")
-              .update({ restricted_pool_pointer_employee_id: restrictedPoolPointerEmployeeId })
-              .eq("id", 1);
-
-            if (restrictedPointerError) {
-              console.error("restricted_pool_pointer_employee_id update failed:", restrictedPointerError.message);
-            }
-          }
+          // Restricted-pool pointer (2026-09-25) — now written
+          // atomically inside recycle_lead_atomic above, same as the
+          // global pointer. Still updated in-memory here so a later
+          // lead in this same sweep sees the current value.
+          restrictedPoolPointerEmployeeId = result.nextRestrictedPoolPointerEmployeeId;
         }
         diagnostics.push({
           leadId: lead.id,

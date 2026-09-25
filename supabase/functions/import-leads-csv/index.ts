@@ -307,7 +307,7 @@ serve(async (req) => {
 
       const { data: settingsRow, error: settingsError } = await supabase
         .from("lead_engine_settings")
-        .select("round_robin_pointer_employee_id")
+        .select("round_robin_pointer_employee_id, restricted_pool_pointer_employee_id")
         .eq("id", 1)
         .single();
 
@@ -335,7 +335,8 @@ serve(async (req) => {
         insertedLeads,
         manualEmployeeIds,
         auth.employeeId,
-        settingsRow.round_robin_pointer_employee_id
+        settingsRow.round_robin_pointer_employee_id,
+        settingsRow.restricted_pool_pointer_employee_id
       );
 
       console.log("import-leads-csv: Data manual distribution complete", {

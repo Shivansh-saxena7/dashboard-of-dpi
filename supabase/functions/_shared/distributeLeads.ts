@@ -155,7 +155,8 @@ export async function distributeLeadsBatch(supabase, leadsToDistribute, settings
     const { error: assignError } = await supabase.rpc("assign_lead_atomic", {
       p_lead_id: lead.id,
       p_employee_id: result.assignedEmployeeId,
-      p_next_pointer_employee_id: result.nextGlobalPointerEmployeeId
+      p_next_pointer_employee_id: result.nextGlobalPointerEmployeeId,
+      p_next_restricted_pool_pointer_employee_id: result.nextRestrictedPoolPointerEmployeeId
     });
 
     if (assignError) {
@@ -165,28 +166,13 @@ export async function distributeLeadsBatch(supabase, leadsToDistribute, settings
 
     assignedCount++;
     pointerEmployeeId = result.nextGlobalPointerEmployeeId;
+    // Restricted-pool pointer (2026-09-25) — now written atomically
+    // INSIDE assign_lead_atomic above, same as the global pointer.
+    // Still updated in-memory here (not persisted separately) so the
+    // next lead in this same batch loop sees the current value.
+    restrictedPoolPointerEmployeeId = result.nextRestrictedPoolPointerEmployeeId;
     distributionSummary[result.assignedEmployeeId] =
       (distributionSummary[result.assignedEmployeeId] || 0) + 1;
-
-    if (result.nextRestrictedPoolPointerEmployeeId !== restrictedPoolPointerEmployeeId) {
-      // Updated in-memory first (so a later lead in this same batch that
-      // also hits a restricted-inclusive pool sees the rotation), then
-      // persisted — same shape as nextProjectPointer just below. A
-      // failed persist here is non-fatal for the same reason: the
-      // lead's own assignment already committed via assign_lead_atomic
-      // above; worst case a future batch's restricted-pool rotation
-      // repeats an employee instead of advancing.
-      restrictedPoolPointerEmployeeId = result.nextRestrictedPoolPointerEmployeeId;
-
-      const { error: restrictedPointerError } = await supabase
-        .from("lead_engine_settings")
-        .update({ restricted_pool_pointer_employee_id: restrictedPoolPointerEmployeeId })
-        .eq("id", 1);
-
-      if (restrictedPointerError) {
-        console.error("restricted_pool_pointer_employee_id update failed:", restrictedPointerError.message);
-      }
-    }
 
     if (result.nextProjectPointer) {
       // Updated in-memory FIRST so the next lead in this same loop
@@ -254,7 +240,9 @@ export async function distributeLeadsBatch(supabase, leadsToDistribute, settings
 // company-wide pointer is left exactly where it was. This lead was
 // never part of that rotation to begin with, same "pass through
 // unchanged" rule PROJECT_RULE assignments already follow.
-export async function distributeDataLeadsManually(supabase, leadsToDistribute, manualEmployeeIds, adminEmployeeId, currentPointerEmployeeId) {
+// currentRestrictedPointerEmployeeId (2026-09-25) is the exact same
+// pass-through, just for restricted_pool_pointer_employee_id.
+export async function distributeDataLeadsManually(supabase, leadsToDistribute, manualEmployeeIds, adminEmployeeId, currentPointerEmployeeId, currentRestrictedPointerEmployeeId) {
 
   const distributionSummary = {};
   let assignedCount = 0;
@@ -269,6 +257,7 @@ export async function distributeDataLeadsManually(supabase, leadsToDistribute, m
       p_lead_id: lead.id,
       p_employee_id: employeeId,
       p_next_pointer_employee_id: currentPointerEmployeeId,
+      p_next_restricted_pool_pointer_employee_id: currentRestrictedPointerEmployeeId,
       p_assigned_by_type: "ADMIN",
       p_assigned_by_employee_id: adminEmployeeId
     });

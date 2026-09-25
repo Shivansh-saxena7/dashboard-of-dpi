@@ -267,7 +267,8 @@ serve(async (req) => {
     const { error: assignError } = await supabase.rpc("assign_lead_atomic", {
       p_lead_id: lead_id,
       p_employee_id: result.assignedEmployeeId,
-      p_next_pointer_employee_id: result.nextGlobalPointerEmployeeId
+      p_next_pointer_employee_id: result.nextGlobalPointerEmployeeId,
+      p_next_restricted_pool_pointer_employee_id: result.nextRestrictedPoolPointerEmployeeId
     });
 
     if (assignError) {
@@ -298,23 +299,17 @@ serve(async (req) => {
       }
     }
 
-    // Restricted-pool pointer-skip fix (2026-09-25) — persisted directly
-    // here, same non-fatal-if-fails posture as project_rule_pointers
-    // above, and deliberately NOT threaded through assign_lead_atomic
-    // (mirrors that same precedent: this is a side-effect write, not part
-    // of the atomic lead-assignment transaction). Only writes when it
-    // actually changed, so an unrestricted-pool assignment (the vast
-    // majority) never touches this column at all.
-    if (result.nextRestrictedPoolPointerEmployeeId !== settings.restricted_pool_pointer_employee_id) {
-      const { error: restrictedPointerError } = await supabase
-        .from("lead_engine_settings")
-        .update({ restricted_pool_pointer_employee_id: result.nextRestrictedPoolPointerEmployeeId })
-        .eq("id", 1);
-
-      if (restrictedPointerError) {
-        console.error("restricted_pool_pointer_employee_id update failed:", restrictedPointerError.message);
-      }
-    }
+    // Restricted-pool pointer (2026-09-25) — now written atomically
+    // INSIDE assign_lead_atomic itself (p_next_restricted_pool_pointer_
+    // employee_id above), same as round_robin_pointer_employee_id
+    // already is. Previously this was a separate best-effort .update()
+    // here, which raced against recycle-stale-leads's own separate
+    // .update() when both ran close together (each reading a possibly-
+    // stale in-memory copy) — that race is exactly what caused a real
+    // production skip (Muskan, 2026-09-25) even after the pointer-split
+    // fix itself was deployed and working. Folding it into the RPC
+    // closes that window the same way the global pointer's write
+    // already was closed from day one.
 
     return respond({
       success: true,
