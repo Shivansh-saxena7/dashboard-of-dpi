@@ -30,8 +30,8 @@ const STATUS_META: Record<string, { label: string; badge: string; dot: string }>
   INTERVIEWING: { label: "Interviewing", badge: "bg-amber-100 text-amber-700", dot: "bg-amber-500" },
   SELECTED: { label: "Selected", badge: "bg-emerald-100 text-emerald-700", dot: "bg-emerald-500" },
   ON_HOLD: { label: "On Hold", badge: "bg-orange-100 text-orange-700", dot: "bg-orange-500" },
-  OFFER_SENT: { label: "Offer Sent", badge: "bg-sky-100 text-sky-700", dot: "bg-sky-500" },
-  APPOINTMENT_PENDING: { label: "Appointment Pending", badge: "bg-violet-100 text-violet-700", dot: "bg-violet-500" },
+  OFFER_SENT: { label: "Offer Letter Generated", badge: "bg-sky-100 text-sky-700", dot: "bg-sky-500" },
+  APPOINTMENT_PENDING: { label: "Appointment Letter Generated", badge: "bg-violet-100 text-violet-700", dot: "bg-violet-500" },
   CONVERTED: { label: "Converted", badge: "bg-blue-100 text-blue-700", dot: "bg-blue-500" },
   REJECTED: { label: "Rejected", badge: "bg-red-100 text-red-600", dot: "bg-red-500" }
 };
@@ -914,6 +914,20 @@ export default function HrCandidatesPage() {
             const hasAppointmentLetter = candidateDocuments.some((d) => d.document_type === "APPOINTMENT_LETTER");
             const primaryAction = getPrimaryAction(candidate.status);
 
+            // "Generated" (status) vs "Emailed" (emailed_at) are two
+            // separate facts -- this badge is the honest answer to
+            // "did the email actually go out," which the status label
+            // alone can no longer claim. candidateDocuments is already
+            // created_at-desc, so the first type match is the current
+            // (latest) letter, not a stale regenerated-over one.
+            const relevantLetterType =
+              candidate.status === "OFFER_SENT" ? "OFFER_LETTER" :
+              candidate.status === "APPOINTMENT_PENDING" ? "APPOINTMENT_LETTER" :
+              null;
+            const currentLetterEmailed = relevantLetterType
+              ? !!candidateDocuments.find((d) => d.document_type === relevantLetterType)?.emailed_at
+              : false;
+
             return (
               <motion.div
                 key={candidate.id}
@@ -929,6 +943,11 @@ export default function HrCandidatesPage() {
                         <span className={`h-1.5 w-1.5 rounded-full ${STATUS_META[candidate.status].dot}`} />
                         {STATUS_META[candidate.status].label}
                       </span>
+                      {currentLetterEmailed && (
+                        <span className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700">
+                          <Send size={10} /> Emailed
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-3.5 flex-wrap mt-1.5 text-xs text-slate-500">
                       <span className="flex items-center gap-1"><Phone size={12} />{candidate.mobile}</span>

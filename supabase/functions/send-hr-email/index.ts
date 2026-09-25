@@ -3,6 +3,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
+import { encode as encodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { resolveCallingEmployeeId } from "../_shared/auth.ts";
 
@@ -142,12 +143,15 @@ serve(async (req) => {
       );
     }
 
-    const fileBytes = new Uint8Array(await fileBlob.arrayBuffer());
-    let binary = "";
-    for (let i = 0; i < fileBytes.length; i++) {
-      binary += String.fromCharCode(fileBytes[i]);
-    }
-    const base64Content = btoa(binary);
+    // A byte-by-byte String.fromCharCode loop here (the original
+    // version of this line) is what caused "Function failed due to
+    // not having enough compute resources" on real letterhead PDFs
+    // (~11MB, since the letterhead image was embedded as PNG — see
+    // lib/generateHrDocumentPdf.ts's JPEG conversion, added the same
+    // day, for the actual fix to file size). encodeBase64 does the
+    // conversion natively instead of a multi-million-iteration
+    // synchronous JS loop.
+    const base64Content = encodeBase64(await fileBlob.arrayBuffer());
 
     const smtpPassword = Deno.env.get("HR_SMTP_PASSWORD");
 

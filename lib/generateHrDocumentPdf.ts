@@ -43,6 +43,35 @@ function detectImageFormat(dataUrl: string): "PNG" | "JPEG" {
   return dataUrl.startsWith("data:image/png") ? "PNG" : "JPEG";
 }
 
+// A full-res (1655x2340px) letterhead stored as PNG embeds near-
+// losslessly in jsPDF -- that's what made every generated letter
+// ~11MB (discovered 2026-09-25 when it crashed send-hr-email's base64
+// step). Re-encoding to JPEG before addImage() gets real compression
+// on the same visual content, no template re-upload needed. White
+// fill first because JPEG has no alpha channel -- a transparent PNG
+// region would otherwise render black instead of matching the page.
+function convertToJpeg(dataUrl: string, quality = 0.85): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        reject(new Error("Canvas 2D context unavailable"));
+        return;
+      }
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => reject(new Error("Could not load letterhead image for JPEG conversion"));
+    img.src = dataUrl;
+  });
+}
+
 function drawPlainPageNumber(doc: import("jspdf").jsPDF, pageNumber: number) {
   const pw = doc.internal.pageSize.getWidth();
   const ph = doc.internal.pageSize.getHeight();
@@ -52,8 +81,14 @@ function drawPlainPageNumber(doc: import("jspdf").jsPDF, pageNumber: number) {
   doc.text(`Page ${pageNumber}`, pw - 20, ph - 15, { align: "right" });
 }
 
-export async function buildHrDocumentBlob(title: string, bodyText: string, letterhead?: LetterheadImage): Promise<Blob> {
+export async function buildHrDocumentBlob(title: string, bodyText: string, letterheadInput?: LetterheadImage): Promise<Blob> {
   const { jsPDF } = await import("jspdf");
+
+  const letterhead: LetterheadImage | undefined =
+    letterheadInput && detectImageFormat(letterheadInput.dataUrl) === "PNG"
+      ? { dataUrl: await convertToJpeg(letterheadInput.dataUrl, 0.85) }
+      : letterheadInput;
+
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
