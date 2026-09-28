@@ -199,7 +199,7 @@ export interface SalarySlipInput {
   // Payroll master data (employee_payroll_details) -- employeeCode is
   // mandatory (enforced both by a DB CHECK constraint on the table and
   // by the caller before it ever gets here -- see
-  // app/hr/salary/page.tsx), everything else is optional/free-text.
+  // app/payroll/salary/page.tsx), everything else is optional/free-text.
   employeeCode: string;
   gender?: string | null;
   bankName?: string | null;
@@ -215,7 +215,7 @@ export interface SalarySlipInput {
   employeeGrade?: string | null;
   // Paid/LOP/Total-Working Days -- editable at generation time, default
   // Paid Days = Total Working Days = Days in Month and LOP Days = 0
-  // (see app/hr/salary/page.tsx). Real attendance-derived LOP needs an
+  // (see app/payroll/salary/page.tsx). Real attendance-derived LOP needs an
   // actual payroll policy decision (does a weekly-off count as paid,
   // does a half-day cost 0.5 LOP, there's no leave-balance concept yet)
   // this project doesn't have yet -- same deferred-scope class as
@@ -239,6 +239,14 @@ export interface SalarySlipInput {
   // LetterheadImage above). Optional -- a slip renders fine without a
   // logo, just without the small mark next to the company name.
   logoDataUrl?: string;
+  // Computed via lib/computePayrollAdjustments.ts (Payroll phase Step 3),
+  // passed in already-resolved -- this file only draws, never computes.
+  // All optional/default to 0 so a slip with no commission plan or
+  // condition rule assigned renders exactly as before (Incentives row
+  // stays 0, no extra deduction/earnings row appears).
+  commissionAmount?: number;
+  performanceCutAmount?: number;
+  performanceRefundAmount?: number;
 }
 
 // Indian-style (lakh/crore) number-to-words for "Net Pay in Words" --
@@ -482,26 +490,33 @@ function drawOneSlip(doc: import("jspdf").jsPDF, autoTable: any, GState: any, in
 
   const tableStartY = infoRuleY + 6;
 
-  // Earnings/Deductions -- real reference-template field list. Only
-  // Basic carries the real employee_compensation figure; every other
-  // row is a hardcoded 0 (no PF/ESI/TDS calculation logic -- deferred,
-  // real-world-spec-needed work, same as the commission/arrears logic
-  // already deferred). Basic = the whole of Gross/Total Earnings until
-  // a real allowance system exists. Reimbursements and LWF get the
-  // exact same treatment as every other non-Basic row -- a real
-  // amount for either needs a real policy/expense-tracking source
-  // this project doesn't have yet, same as the rest.
+  // Earnings/Deductions -- real reference-template field list. Basic,
+  // Incentives (commission) and Performance Refund carry real figures
+  // when the caller computed them (lib/computePayrollAdjustments.ts,
+  // Payroll phase Step 3); every other row is still a hardcoded 0 (no
+  // PF/ESI/TDS calculation logic -- deferred, real-world-spec-needed
+  // work). Reimbursements and LWF get the exact same treatment as
+  // every other still-0 row -- a real amount needs a real policy/
+  // expense-tracking source this project doesn't have wired in here
+  // yet (see app/payroll/expenses/page.tsx, a separate system).
+  const commissionAmount = input.commissionAmount || 0;
+  const performanceCutAmount = input.performanceCutAmount || 0;
+  const performanceRefundAmount = input.performanceRefundAmount || 0;
+
   const earnings: [string, string][] = [
     ["Basic", formatINR(input.basicPay)],
     ["HRA", formatINR(0)],
     ["Special Allowance", formatINR(0)],
     ["Other Earnings", formatINR(0)],
-    ["Incentives", formatINR(0)],
+    ["Incentives", formatINR(commissionAmount)],
     ["Bonus", formatINR(0)],
     ["Over Time Pay", formatINR(0)],
     ["Reimbursements", formatINR(0)]
   ];
-  const totalEarnings = input.basicPay;
+  if (performanceRefundAmount > 0) {
+    earnings.push(["Performance Refund", formatINR(performanceRefundAmount)]);
+  }
+  const totalEarnings = input.basicPay + commissionAmount + performanceRefundAmount;
 
   const deductions: [string, string][] = [
     ["Provident Fund", formatINR(0)],
@@ -512,7 +527,10 @@ function drawOneSlip(doc: import("jspdf").jsPDF, autoTable: any, GState: any, in
     ["LWF", formatINR(0)],
     ["Other Deduction", formatINR(0)]
   ];
-  const totalDeductions = 0;
+  if (performanceCutAmount > 0) {
+    deductions.push(["Performance Adjustment", formatINR(performanceCutAmount)]);
+  }
+  const totalDeductions = performanceCutAmount;
 
   // Earnings and Deductions side by side in one grid -- padded to
   // equal length so the two columns line up row-for-row rather than
@@ -598,7 +616,7 @@ function drawOneSlip(doc: import("jspdf").jsPDF, autoTable: any, GState: any, in
 // unlike the other generated documents in this file: HR wants this one
 // printed, hand-signed by Accounts and the employee, then the signed
 // scan uploaded back in as the real record (see the upload flow in
-// app/hr/salary/page.tsx). A full-bleed letterhead image would fight
+// app/payroll/salary/page.tsx). A full-bleed letterhead image would fight
 // with that physical-signature workflow, so this stays a plain bordered
 // form instead. Named allowance/deduction rows are shown at Rs. 0
 // rather than omitted, because this company has no allowance system

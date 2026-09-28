@@ -15,6 +15,11 @@ import Footer from "@/components/Footer";
 // used everywhere else in this app -- tickets, leave, lead transfers),
 // so an Admin without a dedicated HR account can still see/manage
 // everything HR can.
+// Salary (Basic Pay, Commission Plans, Payroll Condition Rules,
+// Attendance Deduction Rules) stays HR-owned -- HR sets all of this
+// policy/compensation data (full read/write), Payroll gets a read-only
+// view of the same data at /payroll/salary plus the actual slip-
+// issuing controls (Compute, Generate Slip, Bulk Print).
 const menu = [
   { name: "Attendance", href: "/hr/attendance", icon: "🕒" },
   { name: "Candidates", href: "/hr/candidates", icon: "🧑‍🎓" },

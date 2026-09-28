@@ -246,6 +246,33 @@ const toggleHrRole = async (
 
 };
 
+// Payroll role toggle -- same simple role-only toggle as
+// toggleSalesCoordinator (no department dependency: unlike HR,
+// app/payroll/layout.tsx's role gate never reads department). Only
+// offered for "employee"/"payroll" rows, same admin/team_leader
+// exclusion reasoning as the other toggles here. The 'payroll' role
+// value has existed in the employees_role_check DB constraint since
+// the Expenses module (app/payroll/expenses) was built, but this was
+// the only UI that could ever assign it to someone -- and it had no
+// button for it, so no employee could actually be given the role.
+const togglePayrollRole = async (
+  id: string,
+  currentRole: string
+) => {
+
+  const newRole = currentRole === "payroll" ? "employee" : "payroll";
+
+  const { error } = await supabase
+    .from("employees")
+    .update({ role: newRole })
+    .eq("id", id);
+
+  if (!error) {
+    fetchEmployees();
+  }
+
+};
+
 const updateDepartment = async (id: string, newDepartment: string) => {
 
   const { error } = await supabase
@@ -1009,6 +1036,22 @@ employee.is_field_employee
     }`}
   >
     {employee.role === "hr" ? "Remove HR role" : "Make HR"}
+  </button>
+)}
+
+{(employee.role === "employee" || employee.role === "payroll") && (
+  <button
+    onClick={async (e) => {
+      e.stopPropagation();
+      await togglePayrollRole(employee.id, employee.role);
+    }}
+    className={`px-4 py-2 rounded-xl text-xs font-semibold transition ${
+      employee.role === "payroll"
+        ? "bg-amber-100 text-amber-700 hover:bg-amber-200"
+        : "bg-amber-50 text-amber-700 hover:bg-amber-100"
+    }`}
+  >
+    {employee.role === "payroll" ? "Remove Payroll role" : "Make Payroll"}
   </button>
 )}
 

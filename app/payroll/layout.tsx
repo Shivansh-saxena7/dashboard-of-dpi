@@ -16,7 +16,10 @@ import Footer from "@/components/Footer";
 // Nav items are added incrementally as each Payroll piece lands (same
 // discipline used for /hr -- e.g. the SIM/Email nav entry was only
 // added once that page actually existed).
-const menu = [{ name: "Expenses", href: "/payroll/expenses", icon: "🧾" }];
+const menu = [
+  { name: "Salary", href: "/payroll/salary", icon: "💰" },
+  { name: "Expenses", href: "/payroll/expenses", icon: "🧾" }
+];
 
 // Sidebar is off-canvas on mobile and pinned on desktop (lg:) -- ported
 // verbatim from app/admin/layout.tsx's own proven mechanism (menuOpen

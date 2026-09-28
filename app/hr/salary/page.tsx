@@ -3,10 +3,9 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import toast from "react-hot-toast";
-import { IndianRupee, FileText, Download, History, Upload, Printer, AlertTriangle } from "lucide-react";
+import { IndianRupee, History, AlertTriangle, Percent, ShieldCheck, AlarmClock, Briefcase } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import DateInput from "@/components/DateInput";
-import { buildSalarySlipBlob, buildBulkSalarySlipPdf, SalarySlipInput } from "@/lib/generateHrDocumentPdf";
 import { formatINR } from "@/lib/exportTable";
 
 interface EmployeeRow {
@@ -22,13 +21,6 @@ interface CompensationRow {
   effective_from: string;
   created_at: string;
   set_by: { name: string } | null;
-}
-
-interface SlipRow {
-  id: string;
-  label: string;
-  storage_path: string;
-  created_at: string;
 }
 
 interface PayrollDetails {
@@ -68,47 +60,99 @@ interface CompanySettings {
   company_gstin: string | null;
 }
 
+interface CommissionPlanTier {
+  id: string;
+  plan_id: string;
+  min_bookings: number;
+  rate_type: "PERCENT_OF_SALE_VALUE" | "FLAT_PER_BOOKING";
+  rate_value: number;
+  sort_order: number;
+}
+
+interface CommissionPlan {
+  id: string;
+  name: string;
+  created_at: string;
+  tiers: CommissionPlanTier[];
+}
+
+interface CommissionAssignmentRow {
+  id: string;
+  plan_id: string | null;
+  effective_from: string;
+  plan: { name: string } | null;
+  assigned_by: { name: string } | null;
+}
+
+interface PayrollConditionRuleTier {
+  id: string;
+  rule_id: string;
+  min_metric_value: number;
+  salary_percent: number;
+  sort_order: number;
+}
+
+interface PayrollConditionRule {
+  id: string;
+  name: string;
+  metric: string;
+  refund_on_recovery: boolean;
+  created_at: string;
+  tiers: PayrollConditionRuleTier[];
+}
+
+interface PayrollRuleAssignmentRow {
+  id: string;
+  rule_id: string | null;
+  effective_from: string;
+  rule: { name: string } | null;
+  assigned_by: { name: string } | null;
+}
+
+type AttendanceRuleType = "LATE_COMING_THRESHOLD" | "SANDWICH_LEAVE";
+
+interface AttendanceRule {
+  id: string;
+  name: string;
+  rule_type: AttendanceRuleType;
+  created_at: string;
+}
+
+interface AttendanceRuleAssignmentRow {
+  id: string;
+  rule_id: string | null;
+  effective_from: string;
+  rule: { name: string; rule_type: AttendanceRuleType } | null;
+  assigned_by: { name: string } | null;
+}
+
+const ATTENDANCE_RULE_TYPE_LABELS: Record<AttendanceRuleType, string> = {
+  LATE_COMING_THRESHOLD: "Late Coming",
+  SANDWICH_LEAVE: "Sandwich Leave"
+};
+
+interface LeadOption {
+  id: string;
+  name: string;
+  mobile: string;
+}
+
+interface BookingRow {
+  id: string;
+  sale_value: number;
+  booked_at: string;
+  lead: { name: string } | null;
+}
+
 const EMPLOYMENT_TYPES = ["Full-time", "Part-time", "Contract", "Probation"];
 
-function monthLabel(yyyyMm: string): string {
-  const [y, m] = yyyyMm.split("-").map(Number);
-  return new Date(y, m - 1, 1).toLocaleDateString("en-IN", { year: "numeric", month: "long" });
-}
-
-function daysInMonthOf(yyyyMm: string): number {
-  const [y, m] = yyyyMm.split("-").map(Number);
-  return new Date(y, m, 0).getDate();
-}
-
-// Logo fetched once per generation call, as a data: URL -- same
-// "caller resolves the image, generateHrDocumentPdf.ts just draws it"
-// contract already used for the Offer/Appointment Letter letterhead.
-// Not cached in React state: it's a small static public asset, the
-// browser's own HTTP cache already makes repeat fetches cheap, and
-// this keeps the call sites simple.
-async function getLogoDataUrl(): Promise<string | undefined> {
-  try {
-    const res = await fetch("/dpilogo.png");
-    const blob = await res.blob();
-    return await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  } catch {
-    return undefined;
-  }
-}
-
-// Effective-dated compensation (Basic Pay = Gross, no allowances yet --
-// see HRMS_MASTER_PLAN.md) is its own history table, never a mutable
-// column on employees: a raise inserts a new row, it never edits/deletes
-// an old one, so a slip generated for a past month always resolves the
-// Basic Pay that was actually in effect that month, unaffected by any
-// later raise. Generated slip PDFs register into the existing
-// hr_documents system as document_type SALARY_SLIP -- same storage/
-// viewing path as every other HR document, no parallel system.
+// Salary policy/setup, fully owned by HR (write) -- Payroll gets a
+// separate read-only view of all of this plus the actual slip-
+// generation controls at /payroll/salary. See that file's own comment
+// for the split rationale: HR sets compensation/commission/condition-
+// rule/attendance-deduction policy, Payroll issues the slip built from
+// it. RLS on every table this page writes to is 'hr'-only (+ admin);
+// Payroll's matching tables carry a *_payroll_select-only policy.
 export default function HrSalaryPage() {
   const todayStr = new Date().toISOString().slice(0, 10);
 
@@ -121,14 +165,6 @@ export default function HrSalaryPage() {
   const [newEffectiveFrom, setNewEffectiveFrom] = useState(todayStr);
   const [savingPay, setSavingPay] = useState(false);
 
-  const [slipMonth, setSlipMonth] = useState(todayStr.slice(0, 7));
-  const [generating, setGenerating] = useState(false);
-  const [slips, setSlips] = useState<SlipRow[]>([]);
-  const [paidDaysOverride, setPaidDaysOverride] = useState("");
-  const [lopDaysOverride, setLopDaysOverride] = useState("");
-  const [totalWorkingDaysOverride, setTotalWorkingDaysOverride] = useState("");
-  const [payDate, setPayDate] = useState("");
-
   const [payrollForm, setPayrollForm] = useState<PayrollDetails>(BLANK_PAYROLL_DETAILS);
   const [savingPayrollDetails, setSavingPayrollDetails] = useState(false);
 
@@ -138,14 +174,6 @@ export default function HrSalaryPage() {
   // employees/compensation, not per-employee like payrollForm.
   const [companySettings, setCompanySettings] = useState<CompanySettings>({ company_cin: "", company_gstin: "" });
   const [savingCompanySettings, setSavingCompanySettings] = useState(false);
-
-  const [signedCopyFile, setSignedCopyFile] = useState<File | null>(null);
-  const [signedCopyLabel, setSignedCopyLabel] = useState("");
-  const [uploadingSignedCopy, setUploadingSignedCopy] = useState(false);
-
-  const [bulkMonth, setBulkMonth] = useState(todayStr.slice(0, 7));
-  const [bulkEmployeeIds, setBulkEmployeeIds] = useState<Set<string>>(new Set());
-  const [bulkGenerating, setBulkGenerating] = useState(false);
 
   // Latest Basic Pay per employee, company-wide -- separate from
   // `history`, which only ever holds the ONE currently-selected
@@ -158,23 +186,513 @@ export default function HrSalaryPage() {
   const [bulkPayEffectiveFrom, setBulkPayEffectiveFrom] = useState(todayStr);
   const [bulkPaySaving, setBulkPaySaving] = useState(false);
 
+  // Commission Plans -- company-wide, immutable once created (a rate
+  // change is a new plan, never an edit to an existing one, same
+  // reasoning as Basic Pay never being mutated in place). Assignment
+  // to an employee is its own separate effective-dated history table,
+  // same "drawer" nullable-FK pattern as everywhere else in this phase:
+  // a row with plan_id = null means unassigned from that date.
+  const [commissionPlans, setCommissionPlans] = useState<CommissionPlan[]>([]);
+  const [newPlanName, setNewPlanName] = useState("");
+  const [newPlanTiers, setNewPlanTiers] = useState([{ min_bookings: "0", rate_type: "PERCENT_OF_SALE_VALUE", rate_value: "" }]);
+  const [savingPlan, setSavingPlan] = useState(false);
+
+  const [commissionAssignments, setCommissionAssignments] = useState<CommissionAssignmentRow[]>([]);
+  const [assignPlanId, setAssignPlanId] = useState("");
+  const [assignPlanEffectiveFrom, setAssignPlanEffectiveFrom] = useState(todayStr);
+  const [assigningPlan, setAssigningPlan] = useState(false);
+
+  // Payroll Condition Rules -- same immutable-once-created + effective-
+  // dated-assignment shape as Commission Plans above. metric is fixed to
+  // 'BOOKINGS_COUNT' (the only metric the DB CHECK constraint currently
+  // allows); refund_on_recovery drives the cross-month refund logic at
+  // computation time (lib/computePayrollAdjustments.ts).
+  const [conditionRules, setConditionRules] = useState<PayrollConditionRule[]>([]);
+  const [newRuleName, setNewRuleName] = useState("");
+  const [newRuleRefund, setNewRuleRefund] = useState(false);
+  const [newRuleTiers, setNewRuleTiers] = useState([{ min_metric_value: "0", salary_percent: "" }]);
+  const [savingRule, setSavingRule] = useState(false);
+
+  const [ruleAssignments, setRuleAssignments] = useState<PayrollRuleAssignmentRow[]>([]);
+  const [assignRuleId, setAssignRuleId] = useState("");
+  const [assignRuleEffectiveFrom, setAssignRuleEffectiveFrom] = useState(todayStr);
+  const [assigningRule, setAssigningRule] = useState(false);
+
+  // Attendance Deduction Rules -- simpler than the two systems above: no
+  // tiers, just a name + fixed rule_type (LATE_COMING_THRESHOLD reuses
+  // calculateHrmsAttendanceStatus.ts's existing free-late-comings logic
+  // at computation time, SANDWICH_LEAVE is new logic). Unlike the other
+  // two systems, MULTIPLE concurrent assignments per employee are
+  // allowed (opt into Late Coming without Sandwich Leave, or both), so
+  // "current" is resolved per rule_type, not as one single latest row.
+  // A bare unassign row (rule_id = null) carries no type of its own --
+  // currentAttRuleForType() deliberately resolves that conservatively
+  // (fails toward "None" rather than a stale "Assigned") by unioning
+  // null rows into every type's candidate set; see the function itself.
+  const [attendanceRules, setAttendanceRules] = useState<AttendanceRule[]>([]);
+  const [newAttRuleName, setNewAttRuleName] = useState("");
+  const [newAttRuleType, setNewAttRuleType] = useState<AttendanceRuleType>("LATE_COMING_THRESHOLD");
+  const [savingAttRule, setSavingAttRule] = useState(false);
+
+  const [attRuleAssignments, setAttRuleAssignments] = useState<AttendanceRuleAssignmentRow[]>([]);
+  const [assignLateRuleId, setAssignLateRuleId] = useState("");
+  const [assignSandwichRuleId, setAssignSandwichRuleId] = useState("");
+  const [attAssignEffectiveFrom, setAttAssignEffectiveFrom] = useState(todayStr);
+  const [assigningAttRule, setAssigningAttRule] = useState(false);
+
+  // Booking sale-value entry -- feeds Payroll's Compute step (commission
+  // math and, indirectly, condition-rule booking counts, though that
+  // metric reads leads directly, not this table -- see
+  // lib/computePayrollAdjustments.ts). HR logs it, not Payroll or Sales:
+  // this project has no dedicated deal-value field anywhere else, and
+  // this is the simplest place to put entry for it without a bigger
+  // Sales-side feature. Scoped to leads already marked CONVERTED +
+  // BOOKING for the selected employee, so HR can only log a sale value
+  // against a lead that's actually been booked.
+  const [employeeLeads, setEmployeeLeads] = useState<LeadOption[]>([]);
+  const [selectedLeadId, setSelectedLeadId] = useState("");
+  const [bookingSaleValue, setBookingSaleValue] = useState("");
+  const [bookingDate, setBookingDate] = useState(todayStr);
+  const [savingBooking, setSavingBooking] = useState(false);
+  const [employeeBookings, setEmployeeBookings] = useState<BookingRow[]>([]);
+
   useEffect(() => {
     loadEmployees();
     loadAllCompensation();
     loadCompanySettings();
+    loadCommissionPlans();
+    loadConditionRules();
+    loadAttendanceRules();
   }, []);
 
   useEffect(() => {
     if (employeeId) {
       loadHistory(employeeId);
-      loadSlips(employeeId);
       loadPayrollDetails(employeeId);
+      loadCommissionAssignments(employeeId);
+      loadRuleAssignments(employeeId);
+      loadAttRuleAssignments(employeeId);
+      loadEmployeeLeads(employeeId);
+      loadEmployeeBookings(employeeId);
     } else {
       setHistory([]);
-      setSlips([]);
       setPayrollForm(BLANK_PAYROLL_DETAILS);
+      setCommissionAssignments([]);
+      setRuleAssignments([]);
+      setAttRuleAssignments([]);
+      setEmployeeLeads([]);
+      setEmployeeBookings([]);
     }
   }, [employeeId]);
+
+  async function loadEmployeeLeads(empId: string) {
+    const { data } = await supabase
+      .from("leads")
+      .select("id, name, mobile")
+      .eq("current_owner_id", empId)
+      .eq("status", "CONVERTED")
+      .eq("board_stage", "BOOKING")
+      .order("name");
+    setEmployeeLeads(data || []);
+  }
+
+  async function loadEmployeeBookings(empId: string) {
+    const { data } = await supabase
+      .from("bookings")
+      .select("id, sale_value, booked_at, lead:leads(name)")
+      .eq("employee_id", empId)
+      .order("booked_at", { ascending: false });
+    setEmployeeBookings((data || []) as unknown as BookingRow[]);
+  }
+
+  async function handleLogBooking() {
+    if (!employeeId) return;
+    if (!selectedLeadId) {
+      toast.error("Select a booked lead.");
+      return;
+    }
+    const amount = Number(bookingSaleValue);
+    if (!amount || amount <= 0) {
+      toast.error("Enter a valid sale value.");
+      return;
+    }
+    if (!bookingDate) {
+      toast.error("Pick a booking date.");
+      return;
+    }
+
+    const {
+      data: { user }
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data: me } = await supabase.from("employees").select("id").eq("auth_user_id", user.id).single();
+    if (!me) {
+      toast.error("Could not identify your employee record.");
+      return;
+    }
+
+    setSavingBooking(true);
+    const { error } = await supabase.from("bookings").insert({
+      lead_id: selectedLeadId,
+      employee_id: employeeId,
+      sale_value: amount,
+      booked_at: `${bookingDate}T00:00:00`,
+      created_by_employee_id: me.id
+    });
+    setSavingBooking(false);
+
+    if (error) {
+      toast.error(error.message || "Could not log booking.");
+      return;
+    }
+
+    toast.success("Booking logged.");
+    setSelectedLeadId("");
+    setBookingSaleValue("");
+    loadEmployeeBookings(employeeId);
+  }
+
+  async function loadAttendanceRules() {
+    const { data } = await supabase.from("attendance_deduction_rules").select("id, name, rule_type, created_at").order("created_at", { ascending: false });
+    setAttendanceRules((data || []) as AttendanceRule[]);
+  }
+
+  async function loadAttRuleAssignments(empId: string) {
+    const { data } = await supabase
+      .from("employee_attendance_deduction_rule_assignments")
+      .select(
+        "id, rule_id, effective_from, rule:attendance_deduction_rules(name, rule_type), assigned_by:employees!employee_attendance_deduction_rule_assigned_by_employee_id_fkey(name)"
+      )
+      .eq("employee_id", empId)
+      .order("effective_from", { ascending: false });
+    setAttRuleAssignments((data || []) as unknown as AttendanceRuleAssignmentRow[]);
+  }
+
+  async function handleCreateAttendanceRule() {
+    if (!newAttRuleName.trim()) {
+      toast.error("Enter a rule name.");
+      return;
+    }
+
+    const {
+      data: { user }
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data: me } = await supabase.from("employees").select("id").eq("auth_user_id", user.id).single();
+    if (!me) {
+      toast.error("Could not identify your employee record.");
+      return;
+    }
+
+    setSavingAttRule(true);
+    const { error } = await supabase.from("attendance_deduction_rules").insert({
+      name: newAttRuleName.trim(),
+      rule_type: newAttRuleType,
+      created_by_employee_id: me.id
+    });
+    setSavingAttRule(false);
+
+    if (error) {
+      toast.error(error.message || "Could not create rule.");
+      return;
+    }
+
+    toast.success("Attendance deduction rule created.");
+    setNewAttRuleName("");
+    loadAttendanceRules();
+  }
+
+  async function handleAssignAttendanceRule(ruleId: string) {
+    if (!employeeId) return;
+    if (!attAssignEffectiveFrom) {
+      toast.error("Pick an effective-from date.");
+      return;
+    }
+
+    const {
+      data: { user }
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data: me } = await supabase.from("employees").select("id").eq("auth_user_id", user.id).single();
+    if (!me) {
+      toast.error("Could not identify your employee record.");
+      return;
+    }
+
+    setAssigningAttRule(true);
+    const { error } = await supabase.from("employee_attendance_deduction_rule_assignments").insert({
+      employee_id: employeeId,
+      rule_id: ruleId || null,
+      effective_from: attAssignEffectiveFrom,
+      assigned_by_employee_id: me.id
+    });
+    setAssigningAttRule(false);
+
+    if (error) {
+      toast.error(error.message || "Could not save assignment.");
+      return;
+    }
+
+    toast.success(ruleId ? "Attendance deduction rule assigned." : "Attendance deduction rule unassigned.");
+    loadAttRuleAssignments(employeeId);
+  }
+
+  // See the state-block comment above -- unions null (unassign) rows
+  // into every type's candidate set, so an unassign always wins ties
+  // rather than risk showing a stale "Assigned" for a type it might
+  // actually belong to.
+  function currentAttRuleForType(type: AttendanceRuleType): AttendanceRuleAssignmentRow | null {
+    const relevant = attRuleAssignments.filter((a) => a.effective_from <= todayStr && (a.rule_id === null || a.rule?.rule_type === type));
+    return relevant[0] || null;
+  }
+
+  async function loadConditionRules() {
+    const [{ data: rules }, { data: tiers }] = await Promise.all([
+      supabase.from("payroll_condition_rules").select("id, name, metric, refund_on_recovery, created_at").order("created_at", { ascending: false }),
+      supabase.from("payroll_condition_rule_tiers").select("id, rule_id, min_metric_value, salary_percent, sort_order").order("sort_order")
+    ]);
+    const tiersByRule: Record<string, PayrollConditionRuleTier[]> = {};
+    for (const t of (tiers || []) as PayrollConditionRuleTier[]) {
+      (tiersByRule[t.rule_id] ||= []).push(t);
+    }
+    setConditionRules((rules || []).map((r) => ({ ...r, tiers: tiersByRule[r.id] || [] })));
+  }
+
+  async function loadRuleAssignments(empId: string) {
+    const { data } = await supabase
+      .from("employee_payroll_rule_assignments")
+      .select(
+        "id, rule_id, effective_from, rule:payroll_condition_rules(name), assigned_by:employees!employee_payroll_rule_assignments_assigned_by_employee_id_fkey(name)"
+      )
+      .eq("employee_id", empId)
+      .order("effective_from", { ascending: false });
+    setRuleAssignments((data || []) as unknown as PayrollRuleAssignmentRow[]);
+  }
+
+  function addRuleTierRow() {
+    setNewRuleTiers((prev) => [...prev, { min_metric_value: "", salary_percent: "" }]);
+  }
+
+  function removeRuleTierRow(idx: number) {
+    setNewRuleTiers((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  function updateRuleTierRow(idx: number, patch: Partial<{ min_metric_value: string; salary_percent: string }>) {
+    setNewRuleTiers((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+  }
+
+  async function handleCreateConditionRule() {
+    if (!newRuleName.trim()) {
+      toast.error("Enter a rule name.");
+      return;
+    }
+    const filled = newRuleTiers.filter((t) => t.min_metric_value !== "" && t.salary_percent !== "");
+    if (filled.length === 0) {
+      toast.error("Add at least one valid tier.");
+      return;
+    }
+    const tiers = filled.map((t, i) => ({
+      min_metric_value: Number(t.min_metric_value),
+      salary_percent: Number(t.salary_percent),
+      sort_order: i
+    }));
+    if (tiers.some((t) => !Number.isFinite(t.min_metric_value) || t.min_metric_value < 0 || !Number.isFinite(t.salary_percent) || t.salary_percent < 0 || t.salary_percent > 100)) {
+      toast.error("Tier values out of range (Min Bookings >= 0, Salary % 0-100).");
+      return;
+    }
+
+    const {
+      data: { user }
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data: me } = await supabase.from("employees").select("id").eq("auth_user_id", user.id).single();
+    if (!me) {
+      toast.error("Could not identify your employee record.");
+      return;
+    }
+
+    setSavingRule(true);
+    const { data: rule, error } = await supabase
+      .from("payroll_condition_rules")
+      .insert({ name: newRuleName.trim(), metric: "BOOKINGS_COUNT", refund_on_recovery: newRuleRefund, created_by_employee_id: me.id })
+      .select("id")
+      .single();
+
+    if (error || !rule) {
+      setSavingRule(false);
+      toast.error(error?.message || "Could not create rule.");
+      return;
+    }
+
+    const { error: tiersError } = await supabase.from("payroll_condition_rule_tiers").insert(tiers.map((t) => ({ ...t, rule_id: rule.id })));
+    setSavingRule(false);
+
+    if (tiersError) {
+      toast.error(tiersError.message || "Could not save tiers.");
+      return;
+    }
+
+    toast.success("Payroll condition rule created.");
+    setNewRuleName("");
+    setNewRuleRefund(false);
+    setNewRuleTiers([{ min_metric_value: "0", salary_percent: "" }]);
+    loadConditionRules();
+  }
+
+  async function handleAssignConditionRule() {
+    if (!employeeId) return;
+    if (!assignRuleEffectiveFrom) {
+      toast.error("Pick an effective-from date.");
+      return;
+    }
+
+    const {
+      data: { user }
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data: me } = await supabase.from("employees").select("id").eq("auth_user_id", user.id).single();
+    if (!me) {
+      toast.error("Could not identify your employee record.");
+      return;
+    }
+
+    setAssigningRule(true);
+    const { error } = await supabase.from("employee_payroll_rule_assignments").insert({
+      employee_id: employeeId,
+      rule_id: assignRuleId || null,
+      effective_from: assignRuleEffectiveFrom,
+      assigned_by_employee_id: me.id
+    });
+    setAssigningRule(false);
+
+    if (error) {
+      toast.error(error.message || "Could not save assignment.");
+      return;
+    }
+
+    toast.success(assignRuleId ? "Payroll condition rule assigned." : "Payroll condition rule unassigned.");
+    loadRuleAssignments(employeeId);
+  }
+
+  async function loadCommissionPlans() {
+    const [{ data: plans }, { data: tiers }] = await Promise.all([
+      supabase.from("commission_plans").select("id, name, created_at").order("created_at", { ascending: false }),
+      supabase.from("commission_plan_tiers").select("id, plan_id, min_bookings, rate_type, rate_value, sort_order").order("sort_order")
+    ]);
+    const tiersByPlan: Record<string, CommissionPlanTier[]> = {};
+    for (const t of (tiers || []) as CommissionPlanTier[]) {
+      (tiersByPlan[t.plan_id] ||= []).push(t);
+    }
+    setCommissionPlans((plans || []).map((p) => ({ ...p, tiers: tiersByPlan[p.id] || [] })));
+  }
+
+  async function loadCommissionAssignments(empId: string) {
+    const { data } = await supabase
+      .from("employee_commission_plan_assignments")
+      .select(
+        "id, plan_id, effective_from, plan:commission_plans(name), assigned_by:employees!employee_commission_plan_assignmen_assigned_by_employee_id_fkey(name)"
+      )
+      .eq("employee_id", empId)
+      .order("effective_from", { ascending: false });
+    setCommissionAssignments((data || []) as unknown as CommissionAssignmentRow[]);
+  }
+
+  function addPlanTierRow() {
+    setNewPlanTiers((prev) => [...prev, { min_bookings: "", rate_type: "PERCENT_OF_SALE_VALUE", rate_value: "" }]);
+  }
+
+  function removePlanTierRow(idx: number) {
+    setNewPlanTiers((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  function updatePlanTierRow(idx: number, patch: Partial<{ min_bookings: string; rate_type: string; rate_value: string }>) {
+    setNewPlanTiers((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+  }
+
+  async function handleCreateCommissionPlan() {
+    if (!newPlanName.trim()) {
+      toast.error("Enter a plan name.");
+      return;
+    }
+    const tiers = newPlanTiers
+      .map((t, i) => ({ min_bookings: Number(t.min_bookings), rate_type: t.rate_type, rate_value: Number(t.rate_value), sort_order: i }))
+      .filter((t) => Number.isFinite(t.min_bookings) && t.min_bookings >= 0 && t.rate_value > 0);
+    if (tiers.length === 0) {
+      toast.error("Add at least one valid tier.");
+      return;
+    }
+
+    const {
+      data: { user }
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data: me } = await supabase.from("employees").select("id").eq("auth_user_id", user.id).single();
+    if (!me) {
+      toast.error("Could not identify your employee record.");
+      return;
+    }
+
+    setSavingPlan(true);
+    const { data: plan, error } = await supabase
+      .from("commission_plans")
+      .insert({ name: newPlanName.trim(), created_by_employee_id: me.id })
+      .select("id")
+      .single();
+
+    if (error || !plan) {
+      setSavingPlan(false);
+      toast.error(error?.message || "Could not create plan.");
+      return;
+    }
+
+    const { error: tiersError } = await supabase.from("commission_plan_tiers").insert(tiers.map((t) => ({ ...t, plan_id: plan.id })));
+    setSavingPlan(false);
+
+    if (tiersError) {
+      toast.error(tiersError.message || "Could not save tiers.");
+      return;
+    }
+
+    toast.success("Commission plan created.");
+    setNewPlanName("");
+    setNewPlanTiers([{ min_bookings: "0", rate_type: "PERCENT_OF_SALE_VALUE", rate_value: "" }]);
+    loadCommissionPlans();
+  }
+
+  async function handleAssignCommissionPlan() {
+    if (!employeeId) return;
+    if (!assignPlanEffectiveFrom) {
+      toast.error("Pick an effective-from date.");
+      return;
+    }
+
+    const {
+      data: { user }
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data: me } = await supabase.from("employees").select("id").eq("auth_user_id", user.id).single();
+    if (!me) {
+      toast.error("Could not identify your employee record.");
+      return;
+    }
+
+    setAssigningPlan(true);
+    const { error } = await supabase.from("employee_commission_plan_assignments").insert({
+      employee_id: employeeId,
+      plan_id: assignPlanId || null,
+      effective_from: assignPlanEffectiveFrom,
+      assigned_by_employee_id: me.id
+    });
+    setAssigningPlan(false);
+
+    if (error) {
+      toast.error(error.message || "Could not save assignment.");
+      return;
+    }
+
+    toast.success(assignPlanId ? "Commission plan assigned." : "Commission plan unassigned.");
+    loadCommissionAssignments(employeeId);
+  }
 
   async function loadEmployees() {
     const { data } = await supabase.from("employees").select("id, name, department, role").eq("is_active", true).order("name");
@@ -291,17 +809,11 @@ export default function HrSalaryPage() {
     toast.success("Payroll details saved.");
   }
 
-  async function loadSlips(empId: string) {
-    const { data } = await supabase
-      .from("hr_documents")
-      .select("id, label, storage_path, created_at")
-      .eq("employee_id", empId)
-      .eq("document_type", "SALARY_SLIP")
-      .order("created_at", { ascending: false });
-    setSlips(data || []);
-  }
-
   const currentBasicPay = history.find((h) => h.effective_from <= todayStr)?.basic_pay ?? null;
+  const currentCommissionAssignment = commissionAssignments.find((a) => a.effective_from <= todayStr) || null;
+  const currentRuleAssignment = ruleAssignments.find((a) => a.effective_from <= todayStr) || null;
+  const currentLateRule = currentAttRuleForType("LATE_COMING_THRESHOLD");
+  const currentSandwichRule = currentAttRuleForType("SANDWICH_LEAVE");
 
   async function handleSetBasicPay() {
     const amount = Number(newBasicPay);
@@ -398,280 +910,6 @@ export default function HrSalaryPage() {
     if (employeeId && rows.some((r) => r.empId === employeeId)) loadHistory(employeeId);
   }
 
-  async function handleGenerateSlip() {
-    if (!employeeId) return;
-    const employee = employees.find((e) => e.id === employeeId);
-    if (!employee) return;
-
-    // Resolve Basic Pay as of the LAST day of the selected month, not
-    // today -- generating a slip for a past month must use the pay that
-    // was in effect then, unaffected by any raise since.
-    const [y, m] = slipMonth.split("-").map(Number);
-    const periodEndDate = new Date(y, m, 0).toISOString().slice(0, 10);
-    const asOfRow = history.filter((h) => h.effective_from <= periodEndDate).sort((a, b) => (a.effective_from < b.effective_from ? 1 : -1))[0];
-
-    if (!asOfRow) {
-      toast.error("No Basic Pay set for this employee as of that month.");
-      return;
-    }
-    if (!payrollForm.employee_code || !payrollForm.employee_code.trim()) {
-      toast.error("Set and save an Employee Code (Payroll Details above) before generating a slip.");
-      return;
-    }
-
-    setGenerating(true);
-    try {
-      const periodLabel = monthLabel(slipMonth);
-      const daysInMonth = daysInMonthOf(slipMonth);
-      const logoDataUrl = await getLogoDataUrl();
-      const blob = await buildSalarySlipBlob({
-        employeeName: employee.name,
-        department: employee.department,
-        role: employee.role,
-        periodLabel,
-        basicPay: asOfRow.basic_pay,
-        systemId: employeeId,
-        employeeCode: payrollForm.employee_code,
-        gender: payrollForm.gender,
-        bankName: payrollForm.bank_name,
-        bankAccountNumber: payrollForm.bank_account_number,
-        bankIfscCode: payrollForm.bank_ifsc_code,
-        uanNumber: payrollForm.uan_number,
-        pfAccountNumber: payrollForm.pf_account_number,
-        esiNumber: payrollForm.esi_number,
-        panNumber: payrollForm.pan_number,
-        dateOfJoining: payrollForm.date_of_joining,
-        workLocation: payrollForm.work_location,
-        employmentType: payrollForm.employment_type,
-        employeeGrade: payrollForm.employee_grade,
-        paidDays: paidDaysOverride !== "" ? Number(paidDaysOverride) : daysInMonth,
-        lopDays: lopDaysOverride !== "" ? Number(lopDaysOverride) : 0,
-        totalWorkingDays: totalWorkingDaysOverride !== "" ? Number(totalWorkingDaysOverride) : daysInMonth,
-        daysInMonth,
-        payDate: payDate || null,
-        companyCin: companySettings.company_cin,
-        companyGstin: companySettings.company_gstin,
-        logoDataUrl
-      });
-
-      const storagePath = `${employeeId}/${crypto.randomUUID()}-salary-slip.pdf`;
-      const { error: uploadError } = await supabase.storage.from("hr-documents").upload(storagePath, blob, { contentType: "application/pdf" });
-      if (uploadError) {
-        toast.error(uploadError.message || "Upload failed.");
-        return;
-      }
-
-      const { error: registerError } = await supabase.rpc("register_hr_document_atomic", {
-        p_employee_id: employeeId,
-        p_document_type: "SALARY_SLIP",
-        p_label: `Salary Slip - ${periodLabel}`,
-        p_storage_path: storagePath,
-        p_file_mime_type: "application/pdf",
-        p_is_generated: true
-      });
-
-      if (registerError) {
-        await supabase.storage.from("hr-documents").remove([storagePath]);
-        toast.error(registerError.message || "Could not save slip record.");
-        return;
-      }
-
-      toast.success(`Salary slip generated for ${periodLabel}.`);
-      loadSlips(employeeId);
-    } catch (err) {
-      console.error(err);
-      toast.error("Something went wrong.");
-    } finally {
-      setGenerating(false);
-    }
-  }
-
-  async function handleDownloadSlip(slip: SlipRow) {
-    const { data, error } = await supabase.storage.from("hr-documents").createSignedUrl(slip.storage_path, 300);
-    if (error || !data) {
-      toast.error(error?.message || "Could not generate download link.");
-      return;
-    }
-    const a = document.createElement("a");
-    a.href = data.signedUrl;
-    a.download = `${slip.label}.pdf`;
-    a.click();
-  }
-
-  // Signed hard-copy upload -- the generated slip above is meant to be
-  // printed and physically signed (Accounts + employee), then that
-  // signed scan comes back in here as the real record. Same
-  // upload-then-register flow as Application Form on the Candidates
-  // page, just targeting an employee instead of a candidate.
-  async function handleUploadSignedCopy() {
-    if (!employeeId) return;
-    if (!signedCopyFile) {
-      toast.error("Choose a file first.");
-      return;
-    }
-    const label = signedCopyLabel.trim() || `Salary Slip - ${monthLabel(slipMonth)} (Signed)`;
-
-    setUploadingSignedCopy(true);
-    try {
-      const sanitizedName = signedCopyFile.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-      const storagePath = `${employeeId}/${crypto.randomUUID()}-${sanitizedName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("hr-documents")
-        .upload(storagePath, signedCopyFile, { contentType: signedCopyFile.type });
-
-      if (uploadError) {
-        toast.error(uploadError.message || "Upload failed.");
-        return;
-      }
-
-      const { error: registerError } = await supabase.rpc("register_hr_document_atomic", {
-        p_employee_id: employeeId,
-        p_document_type: "SALARY_SLIP",
-        p_label: label,
-        p_storage_path: storagePath,
-        p_file_mime_type: signedCopyFile.type,
-        p_is_generated: false
-      });
-
-      if (registerError) {
-        await supabase.storage.from("hr-documents").remove([storagePath]);
-        toast.error(registerError.message || "Could not save document record.");
-        return;
-      }
-
-      toast.success("Signed copy uploaded.");
-      setSignedCopyFile(null);
-      setSignedCopyLabel("");
-      loadSlips(employeeId);
-    } finally {
-      setUploadingSignedCopy(false);
-    }
-  }
-
-  function toggleBulkEmployee(id: string) {
-    setBulkEmployeeIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  function toggleSelectAllBulk() {
-    setBulkEmployeeIds((prev) => (prev.size === employees.length ? new Set() : new Set(employees.map((e) => e.id))));
-  }
-
-  // Bulk Print -- a separate, print-only convenience (see
-  // generateHrDocumentPdf.ts's own comment on buildBulkSalarySlipPdf):
-  // it never touches hr_documents, never calls register_hr_document_atomic,
-  // and doesn't change the individual Generate Slip flow above at all.
-  // It just lays each selected employee's slip (resolved the same
-  // as-of-that-month way handleGenerateSlip does) onto shared A4 sheets
-  // and triggers a direct download.
-  async function handleBulkGenerate() {
-    if (bulkEmployeeIds.size === 0) {
-      toast.error("Select at least one employee.");
-      return;
-    }
-
-    setBulkGenerating(true);
-    try {
-      const ids = Array.from(bulkEmployeeIds);
-      const [{ data: compRows, error }, { data: payrollRows }, logoDataUrl] = await Promise.all([
-        supabase.from("employee_compensation").select("employee_id, basic_pay, effective_from").in("employee_id", ids),
-        supabase
-          .from("employee_payroll_details")
-          .select(
-            "employee_id, employee_code, gender, bank_name, bank_account_number, bank_ifsc_code, uan_number, pf_account_number, esi_number, pan_number, date_of_joining, work_location, employment_type, employee_grade"
-          )
-          .in("employee_id", ids),
-        getLogoDataUrl()
-      ]);
-
-      if (error) {
-        toast.error(error.message || "Could not load compensation data.");
-        return;
-      }
-
-      const payrollMap = new Map((payrollRows || []).map((r) => [r.employee_id, r]));
-      const [y, m] = bulkMonth.split("-").map(Number);
-      const periodEndDate = new Date(y, m, 0).toISOString().slice(0, 10);
-      const periodLabel = monthLabel(bulkMonth);
-      const daysInMonth = daysInMonthOf(bulkMonth);
-
-      const slipsInput: SalarySlipInput[] = [];
-      const skipped: string[] = [];
-
-      for (const emp of employees.filter((e) => bulkEmployeeIds.has(e.id))) {
-        const asOfRow = (compRows || [])
-          .filter((r) => r.employee_id === emp.id && r.effective_from <= periodEndDate)
-          .sort((a, b) => (a.effective_from < b.effective_from ? 1 : -1))[0];
-
-        if (!asOfRow) {
-          skipped.push(`${emp.name} (no Basic Pay)`);
-          continue;
-        }
-
-        const payroll = payrollMap.get(emp.id);
-        if (!payroll?.employee_code || !payroll.employee_code.trim()) {
-          skipped.push(`${emp.name} (no Employee Code)`);
-          continue;
-        }
-
-        slipsInput.push({
-          employeeName: emp.name,
-          department: emp.department,
-          role: emp.role,
-          periodLabel,
-          basicPay: asOfRow.basic_pay,
-          systemId: emp.id,
-          employeeCode: payroll.employee_code,
-          gender: payroll?.gender,
-          bankName: payroll?.bank_name,
-          bankAccountNumber: payroll?.bank_account_number,
-          bankIfscCode: payroll?.bank_ifsc_code,
-          uanNumber: payroll?.uan_number,
-          pfAccountNumber: payroll?.pf_account_number,
-          esiNumber: payroll?.esi_number,
-          panNumber: payroll?.pan_number,
-          dateOfJoining: payroll?.date_of_joining,
-          workLocation: payroll?.work_location,
-          employmentType: payroll?.employment_type,
-          employeeGrade: payroll?.employee_grade,
-          paidDays: daysInMonth,
-          lopDays: 0,
-          totalWorkingDays: daysInMonth,
-          daysInMonth,
-          payDate: null,
-          companyCin: companySettings.company_cin,
-          companyGstin: companySettings.company_gstin,
-          logoDataUrl
-        });
-      }
-
-      if (slipsInput.length === 0) {
-        toast.error("None of the selected employees are ready (need Basic Pay and a saved Employee Code).");
-        return;
-      }
-
-      const blob = await buildBulkSalarySlipPdf(slipsInput);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `Salary-Slips-Bulk-${bulkMonth}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
-
-      if (skipped.length > 0) {
-        toast.error(`Skipped: ${skipped.join(", ")}`);
-      }
-      toast.success(`Bulk PDF generated — ${slipsInput.length} slip(s).`);
-    } finally {
-      setBulkGenerating(false);
-    }
-  }
-
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="space-y-5">
       <div>
@@ -679,7 +917,9 @@ export default function HrSalaryPage() {
           <IndianRupee size={20} className="text-emerald-600" />
           Salary
         </h1>
-        <p className="text-xs text-slate-500 mt-1">Set Basic Pay (effective-dated) and generate salary slips.</p>
+        <p className="text-xs text-slate-500 mt-1">
+          Set Basic Pay, commission plans, condition rules, and attendance deduction rules — Payroll reads all of this to issue slips.
+        </p>
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
@@ -712,6 +952,267 @@ export default function HrSalaryPage() {
             {savingCompanySettings ? "Saving..." : "Save"}
           </button>
         </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
+        <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+          <Percent size={15} className="text-violet-600" /> Commission Plans
+        </p>
+        <p className="text-xs text-slate-500 -mt-2">
+          Plans are immutable once created — to change rates, create a new plan and reassign affected employees to it.
+        </p>
+
+        <div className="space-y-2 pb-3 border-b border-slate-100">
+          <div>
+            <label className="text-xs font-semibold text-slate-500">Plan Name</label>
+            <input
+              type="text"
+              value={newPlanName}
+              onChange={(e) => setNewPlanName(e.target.value)}
+              placeholder="e.g. Sales Executive — Standard"
+              className="mt-1 h-9 w-64 rounded-lg bg-slate-50 border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            {newPlanTiers.map((tier, idx) => (
+              <div key={idx} className="flex items-end gap-2">
+                <div>
+                  <label className="text-xs font-semibold text-slate-500">Min Bookings</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={tier.min_bookings}
+                    onChange={(e) => updatePlanTierRow(idx, { min_bookings: e.target.value })}
+                    className="mt-1 h-8 w-20 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-500">Rate Type</label>
+                  <select
+                    value={tier.rate_type}
+                    onChange={(e) => updatePlanTierRow(idx, { rate_type: e.target.value })}
+                    className="mt-1 h-8 w-44 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300"
+                  >
+                    <option value="PERCENT_OF_SALE_VALUE">% of Sale Value</option>
+                    <option value="FLAT_PER_BOOKING">Flat Rs. per Booking</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-500">{tier.rate_type === "FLAT_PER_BOOKING" ? "Rs. / booking" : "Rate %"}</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={tier.rate_value}
+                    onChange={(e) => updatePlanTierRow(idx, { rate_value: e.target.value })}
+                    className="mt-1 h-8 w-24 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300"
+                  />
+                </div>
+                {newPlanTiers.length > 1 && (
+                  <button onClick={() => removePlanTierRow(idx)} className="h-8 text-xs font-bold text-red-500 hover:underline">
+                    Remove
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button onClick={addPlanTierRow} className="text-xs font-bold text-violet-600 hover:underline">
+              + Add Tier
+            </button>
+            <button
+              onClick={handleCreateCommissionPlan}
+              disabled={savingPlan}
+              className="h-9 px-4 rounded-xl bg-violet-600 text-white text-xs font-bold disabled:opacity-40 hover:bg-violet-700 transition"
+            >
+              {savingPlan ? "Creating..." : "Create Plan"}
+            </button>
+          </div>
+        </div>
+
+        {commissionPlans.length === 0 ? (
+          <p className="text-xs text-slate-400">No commission plans yet.</p>
+        ) : (
+          <div className="space-y-1.5 max-h-56 overflow-y-auto">
+            {commissionPlans.map((p) => (
+              <div key={p.id} className="text-xs">
+                <span className="font-bold text-slate-700">{p.name}</span>
+                <span className="text-slate-500">
+                  {" — "}
+                  {p.tiers
+                    .slice()
+                    .sort((a, b) => a.sort_order - b.sort_order)
+                    .map((t) =>
+                      t.rate_type === "FLAT_PER_BOOKING"
+                        ? `${t.min_bookings}+ bookings: Rs. ${t.rate_value}/booking`
+                        : `${t.min_bookings}+ bookings: ${t.rate_value}% of sale value`
+                    )
+                    .join("; ")}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
+        <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+          <ShieldCheck size={15} className="text-rose-600" /> Payroll Condition Rules
+        </p>
+        <p className="text-xs text-slate-500 -mt-2">
+          Performance-gate rules (e.g. "4+ bookings/month for full pay, else 50%"). Immutable once created — metric is monthly booking
+          count. "Refund on recovery" means: if a cut month is immediately followed by a month that clears the top tier, the cut is
+          refunded in that next slip.
+        </p>
+
+        <div className="space-y-2 pb-3 border-b border-slate-100">
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <label className="text-xs font-semibold text-slate-500">Rule Name</label>
+              <input
+                type="text"
+                value={newRuleName}
+                onChange={(e) => setNewRuleName(e.target.value)}
+                placeholder="e.g. Team Lead — 4 Booking Minimum"
+                className="mt-1 h-9 w-64 rounded-lg bg-slate-50 border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-rose-100 focus:border-rose-300"
+              />
+            </div>
+            <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 cursor-pointer h-9">
+              <input
+                type="checkbox"
+                checked={newRuleRefund}
+                onChange={(e) => setNewRuleRefund(e.target.checked)}
+                style={{ appearance: "auto" }}
+                className="h-4 w-4 shrink-0 accent-rose-600 cursor-pointer"
+              />
+              Refund on recovery (consecutive month only)
+            </label>
+          </div>
+
+          <div className="space-y-1.5">
+            {newRuleTiers.map((tier, idx) => (
+              <div key={idx} className="flex items-end gap-2">
+                <div>
+                  <label className="text-xs font-semibold text-slate-500">Min Bookings/Month</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={tier.min_metric_value}
+                    onChange={(e) => updateRuleTierRow(idx, { min_metric_value: e.target.value })}
+                    className="mt-1 h-8 w-32 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-rose-100 focus:border-rose-300"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-500">Salary % Paid</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={tier.salary_percent}
+                    onChange={(e) => updateRuleTierRow(idx, { salary_percent: e.target.value })}
+                    className="mt-1 h-8 w-24 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-rose-100 focus:border-rose-300"
+                  />
+                </div>
+                {newRuleTiers.length > 1 && (
+                  <button onClick={() => removeRuleTierRow(idx)} className="h-8 text-xs font-bold text-red-500 hover:underline">
+                    Remove
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button onClick={addRuleTierRow} className="text-xs font-bold text-rose-600 hover:underline">
+              + Add Tier
+            </button>
+            <button
+              onClick={handleCreateConditionRule}
+              disabled={savingRule}
+              className="h-9 px-4 rounded-xl bg-rose-600 text-white text-xs font-bold disabled:opacity-40 hover:bg-rose-700 transition"
+            >
+              {savingRule ? "Creating..." : "Create Rule"}
+            </button>
+          </div>
+        </div>
+
+        {conditionRules.length === 0 ? (
+          <p className="text-xs text-slate-400">No payroll condition rules yet.</p>
+        ) : (
+          <div className="space-y-1.5 max-h-56 overflow-y-auto">
+            {conditionRules.map((r) => (
+              <div key={r.id} className="text-xs">
+                <span className="font-bold text-slate-700">{r.name}</span>
+                {r.refund_on_recovery && <span className="ml-1.5 text-rose-600 font-semibold">(refund-eligible)</span>}
+                <span className="text-slate-500">
+                  {" — "}
+                  {r.tiers
+                    .slice()
+                    .sort((a, b) => a.sort_order - b.sort_order)
+                    .map((t) => `${t.min_metric_value}+ bookings: ${t.salary_percent}% pay`)
+                    .join("; ")}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
+        <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+          <AlarmClock size={15} className="text-cyan-600" /> Attendance Deduction Rules
+        </p>
+        <p className="text-xs text-slate-500 -mt-2">
+          Opt-in per employee — not every employee needs these. Late Coming reuses the existing 2-free-per-month policy; Sandwich Leave
+          treats a weekly-off between two absences as a paid deduction too. No numeric setup here; each is just a named rule of one of
+          the two types.
+        </p>
+
+        <div className="flex flex-wrap items-end gap-3 pb-3 border-b border-slate-100">
+          <div>
+            <label className="text-xs font-semibold text-slate-500">Rule Name</label>
+            <input
+              type="text"
+              value={newAttRuleName}
+              onChange={(e) => setNewAttRuleName(e.target.value)}
+              placeholder="e.g. Late Coming Deduction"
+              className="mt-1 h-9 w-64 rounded-lg bg-slate-50 border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-cyan-100 focus:border-cyan-300"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-500">Type</label>
+            <select
+              value={newAttRuleType}
+              onChange={(e) => setNewAttRuleType(e.target.value as AttendanceRuleType)}
+              className="mt-1 h-9 w-48 rounded-lg bg-slate-50 border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-cyan-100 focus:border-cyan-300"
+            >
+              <option value="LATE_COMING_THRESHOLD">Late Coming</option>
+              <option value="SANDWICH_LEAVE">Sandwich Leave</option>
+            </select>
+          </div>
+          <button
+            onClick={handleCreateAttendanceRule}
+            disabled={savingAttRule}
+            className="h-9 px-4 rounded-xl bg-cyan-600 text-white text-xs font-bold disabled:opacity-40 hover:bg-cyan-700 transition"
+          >
+            {savingAttRule ? "Creating..." : "Create Rule"}
+          </button>
+        </div>
+
+        {attendanceRules.length === 0 ? (
+          <p className="text-xs text-slate-400">No attendance deduction rules yet.</p>
+        ) : (
+          <div className="space-y-1.5 max-h-56 overflow-y-auto">
+            {attendanceRules.map((r) => (
+              <div key={r.id} className="text-xs">
+                <span className="font-bold text-slate-700">{r.name}</span>
+                <span className="text-slate-500"> — {ATTENDANCE_RULE_TYPE_LABELS[r.rule_type]}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
@@ -781,57 +1282,6 @@ export default function HrSalaryPage() {
         })()}
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
-        <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-          <Printer size={15} /> Bulk Print (2 slips per A4 sheet)
-        </p>
-        <p className="text-xs text-slate-500">
-          Print-only — doesn't affect each employee's individually generated/archived slip above.
-        </p>
-
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="text-xs font-semibold text-slate-500">Month</label>
-            <DateInput value={bulkMonth} onChange={setBulkMonth} mode="month" />
-          </div>
-          <button
-            onClick={handleBulkGenerate}
-            disabled={bulkGenerating}
-            className="h-10 px-4 rounded-xl bg-indigo-600 text-white text-xs font-bold disabled:opacity-40 hover:bg-indigo-700 transition"
-          >
-            {bulkGenerating ? "Generating..." : "Generate Bulk PDF"}
-          </button>
-        </div>
-
-        <div>
-          <button onClick={toggleSelectAllBulk} className="text-xs font-bold text-indigo-600 hover:underline">
-            {bulkEmployeeIds.size === employees.length ? "Deselect all" : "Select all"}
-          </button>
-          <div className="mt-2 max-h-48 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 gap-1.5 border border-slate-100 rounded-xl p-2">
-            {employees.map((e) => (
-              <label key={e.id} className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={bulkEmployeeIds.has(e.id)}
-                  onChange={() => toggleBulkEmployee(e.id)}
-                  // globals.css sets `appearance: none` on every <input>
-                  // (an iOS-Safari fix for text/date/number inputs, which
-                  // all carry their own explicit Tailwind sizing) -- a
-                  // bare checkbox has no such sizing, so it collapsed to
-                  // 0x0 and was genuinely un-clickable, not just invisible.
-                  // `appearance: auto` restores native checkbox rendering
-                  // for this input specifically so accent-color + the
-                  // explicit size actually show up.
-                  style={{ appearance: "auto" }}
-                  className="h-4 w-4 shrink-0 accent-indigo-600 cursor-pointer"
-                />
-                {e.name}
-              </label>
-            ))}
-          </div>
-        </div>
-      </div>
-
       <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm max-w-sm">
         <label className="text-xs font-semibold text-slate-500">Employee</label>
         <select
@@ -898,6 +1348,228 @@ export default function HrSalaryPage() {
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-bold text-slate-800">Commission Plan Assignment</p>
+              <p className="text-sm font-bold text-violet-600">Current: {currentCommissionAssignment?.plan?.name || "None"}</p>
+            </div>
+
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <label className="text-xs font-semibold text-slate-500">Plan</label>
+                <select
+                  value={assignPlanId}
+                  onChange={(e) => setAssignPlanId(e.target.value)}
+                  className="mt-1 h-9 w-56 rounded-lg bg-slate-50 border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300"
+                >
+                  <option value="">— Unassign —</option>
+                  {commissionPlans.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500">Effective From</label>
+                <DateInput value={assignPlanEffectiveFrom} onChange={setAssignPlanEffectiveFrom} />
+              </div>
+              <button
+                onClick={handleAssignCommissionPlan}
+                disabled={assigningPlan}
+                className="h-9 px-4 rounded-xl bg-violet-600 text-white text-xs font-bold disabled:opacity-40 hover:bg-violet-700 transition"
+              >
+                {assigningPlan ? "Saving..." : "Assign"}
+              </button>
+            </div>
+
+            {commissionAssignments.length > 0 && (
+              <div className="pt-2 border-t border-slate-100 space-y-1.5">
+                {commissionAssignments.map((a) => (
+                  <div key={a.id} className="flex items-center justify-between text-xs">
+                    <span className="text-slate-600">
+                      From {a.effective_from} — {a.plan?.name || "Unassigned"}
+                    </span>
+                    <span className="text-slate-400">by {a.assigned_by?.name || "—"}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-bold text-slate-800">Payroll Condition Rule Assignment</p>
+              <p className="text-sm font-bold text-rose-600">Current: {currentRuleAssignment?.rule?.name || "None"}</p>
+            </div>
+
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <label className="text-xs font-semibold text-slate-500">Rule</label>
+                <select
+                  value={assignRuleId}
+                  onChange={(e) => setAssignRuleId(e.target.value)}
+                  className="mt-1 h-9 w-56 rounded-lg bg-slate-50 border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-rose-100 focus:border-rose-300"
+                >
+                  <option value="">— Unassign —</option>
+                  {conditionRules.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500">Effective From</label>
+                <DateInput value={assignRuleEffectiveFrom} onChange={setAssignRuleEffectiveFrom} />
+              </div>
+              <button
+                onClick={handleAssignConditionRule}
+                disabled={assigningRule}
+                className="h-9 px-4 rounded-xl bg-rose-600 text-white text-xs font-bold disabled:opacity-40 hover:bg-rose-700 transition"
+              >
+                {assigningRule ? "Saving..." : "Assign"}
+              </button>
+            </div>
+
+            {ruleAssignments.length > 0 && (
+              <div className="pt-2 border-t border-slate-100 space-y-1.5">
+                {ruleAssignments.map((a) => (
+                  <div key={a.id} className="flex items-center justify-between text-xs">
+                    <span className="text-slate-600">
+                      From {a.effective_from} — {a.rule?.name || "Unassigned"}
+                    </span>
+                    <span className="text-slate-400">by {a.assigned_by?.name || "—"}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
+            <p className="text-sm font-bold text-slate-800">Attendance Deduction Rule Assignment</p>
+            <p className="text-xs text-slate-500 -mt-2">Opt-in — leave both unassigned for a flat-salary employee with no attendance deductions.</p>
+
+            <div>
+              <label className="text-xs font-semibold text-slate-500">Effective From (applies to whichever you assign below)</label>
+              <DateInput value={attAssignEffectiveFrom} onChange={setAttAssignEffectiveFrom} />
+            </div>
+
+            {(
+              [
+                ["LATE_COMING_THRESHOLD", currentLateRule, assignLateRuleId, setAssignLateRuleId] as const,
+                ["SANDWICH_LEAVE", currentSandwichRule, assignSandwichRuleId, setAssignSandwichRuleId] as const
+              ]
+            ).map(([type, current, selected, setSelected]) => (
+              <div key={type} className="flex flex-wrap items-end gap-3 pt-2 border-t border-slate-100">
+                <div className="w-32">
+                  <p className="text-xs font-bold text-slate-600">{ATTENDANCE_RULE_TYPE_LABELS[type]}</p>
+                  <p className="text-xs font-bold text-cyan-600">{current?.rule?.name || "None"}</p>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-500">Rule</label>
+                  <select
+                    value={selected}
+                    onChange={(e) => setSelected(e.target.value)}
+                    className="mt-1 h-9 w-56 rounded-lg bg-slate-50 border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-cyan-100 focus:border-cyan-300"
+                  >
+                    <option value="">— Unassign —</option>
+                    {attendanceRules
+                      .filter((r) => r.rule_type === type)
+                      .map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+                <button
+                  onClick={() => handleAssignAttendanceRule(selected)}
+                  disabled={assigningAttRule}
+                  className="h-9 px-4 rounded-xl bg-cyan-600 text-white text-xs font-bold disabled:opacity-40 hover:bg-cyan-700 transition"
+                >
+                  {assigningAttRule ? "Saving..." : "Assign"}
+                </button>
+              </div>
+            ))}
+
+            {attRuleAssignments.length > 0 && (
+              <div className="pt-2 border-t border-slate-100 space-y-1.5">
+                {attRuleAssignments.map((a) => (
+                  <div key={a.id} className="flex items-center justify-between text-xs">
+                    <span className="text-slate-600">
+                      From {a.effective_from} — {a.rule ? `${a.rule.name} (${ATTENDANCE_RULE_TYPE_LABELS[a.rule.rule_type]})` : "Unassigned"}
+                    </span>
+                    <span className="text-slate-400">by {a.assigned_by?.name || "—"}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
+            <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+              <Briefcase size={15} className="text-emerald-600" /> Log Booking
+            </p>
+            <p className="text-xs text-slate-500 -mt-2">
+              Records the sale value behind one of this employee's booked leads — feeds Payroll's commission calculation. Only shows
+              leads already marked Converted / Booking.
+            </p>
+
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <label className="text-xs font-semibold text-slate-500">Booked Lead</label>
+                <select
+                  value={selectedLeadId}
+                  onChange={(e) => setSelectedLeadId(e.target.value)}
+                  className="mt-1 h-9 w-56 rounded-lg bg-slate-50 border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-300"
+                >
+                  <option value="">{employeeLeads.length === 0 ? "No booked leads" : "Select lead"}</option>
+                  {employeeLeads.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.name} ({l.mobile})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500">Sale Value (Rs.)</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={bookingSaleValue}
+                  onChange={(e) => setBookingSaleValue(e.target.value)}
+                  placeholder="e.g. 2500000"
+                  className="mt-1 h-9 w-40 rounded-lg bg-slate-50 border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-300"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500">Booking Date</label>
+                <DateInput value={bookingDate} onChange={setBookingDate} />
+              </div>
+              <button
+                onClick={handleLogBooking}
+                disabled={savingBooking}
+                className="h-9 px-4 rounded-xl bg-emerald-600 text-white text-xs font-bold disabled:opacity-40 hover:bg-emerald-700 transition"
+              >
+                {savingBooking ? "Saving..." : "Log Booking"}
+              </button>
+            </div>
+
+            {employeeBookings.length > 0 && (
+              <div className="pt-2 border-t border-slate-100 space-y-1.5">
+                {employeeBookings.map((b) => (
+                  <div key={b.id} className="flex items-center justify-between text-xs">
+                    <span className="text-slate-600">
+                      {b.booked_at.slice(0, 10)} — {b.lead?.name || "—"}
+                    </span>
+                    <span className="font-bold text-emerald-600">Rs. {formatINR(b.sale_value)}</span>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -980,106 +1652,6 @@ export default function HrSalaryPage() {
             >
               {savingPayrollDetails ? "Saving..." : "Save Payroll Details"}
             </button>
-          </div>
-
-          <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-4">
-            <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-              <FileText size={15} /> Generate Salary Slip
-            </p>
-
-            <div className="flex flex-wrap items-end gap-3">
-              <div>
-                <label className="text-xs font-semibold text-slate-500">Month</label>
-                <DateInput value={slipMonth} onChange={setSlipMonth} mode="month" />
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-slate-500">Paid Days</label>
-                <input
-                  type="number"
-                  min={0}
-                  value={paidDaysOverride}
-                  onChange={(e) => setPaidDaysOverride(e.target.value)}
-                  placeholder={String(daysInMonthOf(slipMonth))}
-                  className="h-10 w-24 rounded-xl bg-slate-50 border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-slate-500">LOP Days</label>
-                <input
-                  type="number"
-                  min={0}
-                  value={lopDaysOverride}
-                  onChange={(e) => setLopDaysOverride(e.target.value)}
-                  placeholder="0"
-                  className="h-10 w-24 rounded-xl bg-slate-50 border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-slate-500">Working Days</label>
-                <input
-                  type="number"
-                  min={0}
-                  value={totalWorkingDaysOverride}
-                  onChange={(e) => setTotalWorkingDaysOverride(e.target.value)}
-                  placeholder={String(daysInMonthOf(slipMonth))}
-                  className="h-10 w-24 rounded-xl bg-slate-50 border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-slate-500">Pay Date</label>
-                <DateInput value={payDate} onChange={setPayDate} />
-              </div>
-              <button
-                onClick={handleGenerateSlip}
-                disabled={generating || currentBasicPay === null || !payrollForm.employee_code?.trim()}
-                className="h-10 px-4 rounded-xl bg-blue-600 text-white text-xs font-bold disabled:opacity-40 hover:bg-blue-700 transition"
-              >
-                {generating ? "Generating..." : "Generate Slip"}
-              </button>
-            </div>
-            {!payrollForm.employee_code?.trim() && (
-              <p className="text-xs text-amber-600">Save an Employee Code in Payroll Details above to enable generation.</p>
-            )}
-
-            <div className="pt-2 border-t border-slate-100 flex flex-wrap items-end gap-3">
-              <div>
-                <label className="text-xs font-semibold text-slate-500">Upload Signed Copy</label>
-                <input
-                  type="file"
-                  accept=".pdf,.jpg,.jpeg,.png"
-                  onChange={(e) => setSignedCopyFile(e.target.files?.[0] || null)}
-                  className="mt-1 block text-xs text-slate-600 file:mr-3 file:h-9 file:px-3 file:rounded-lg file:border-0 file:bg-slate-100 file:text-xs file:font-semibold file:text-slate-700 hover:file:bg-slate-200"
-                />
-              </div>
-              <input
-                type="text"
-                value={signedCopyLabel}
-                onChange={(e) => setSignedCopyLabel(e.target.value)}
-                placeholder={`Salary Slip - ${monthLabel(slipMonth)} (Signed)`}
-                className="h-10 w-56 rounded-xl bg-slate-50 border border-slate-200 px-3 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
-              />
-              <button
-                onClick={handleUploadSignedCopy}
-                disabled={uploadingSignedCopy}
-                className="h-10 px-4 rounded-xl bg-slate-800 text-white text-xs font-bold disabled:opacity-40 hover:bg-slate-900 transition flex items-center gap-1.5"
-              >
-                <Upload size={13} />
-                {uploadingSignedCopy ? "Uploading..." : "Upload"}
-              </button>
-            </div>
-
-            {slips.length > 0 && (
-              <div className="pt-2 border-t border-slate-100 space-y-1.5">
-                {slips.map((s) => (
-                  <div key={s.id} className="flex items-center justify-between text-xs">
-                    <span className="text-slate-600">{s.label}</span>
-                    <button onClick={() => handleDownloadSlip(s)} className="flex items-center gap-1 text-blue-600 font-bold hover:underline">
-                      <Download size={12} /> Download
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         </>
       )}
