@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect,useState } from "react";
+import { Pencil } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import AddEmployeeModal from "../components/AddEmployeeesModal";
 import DeleteModal from "../components/DeleteModal";
@@ -32,6 +33,43 @@ const [filter,setFilter]=useState("all");
 const [openModal,setOpenModal]=useState(false);
 const [deleteOpen,setDeleteOpen]=useState(false);
 const [selectedId,setSelectedId]=useState("");
+
+// Edit employee email (2026-09-25) -- employees.email is also the
+// Supabase Auth login email (see create-employee/route.ts), so this
+// goes through /api/update-employee-email (service role) which
+// updates BOTH the Auth user and this row, rather than a plain
+// client-side .update() that would only touch the profile copy and
+// silently desync it from what the person actually logs in with.
+const [editingEmailFor, setEditingEmailFor] = useState("");
+const [emailDraft, setEmailDraft] = useState("");
+const [savingEmail, setSavingEmail] = useState(false);
+
+async function handleSaveEmployeeEmail(employeeId: string) {
+  const trimmed = emailDraft.trim();
+  if (!trimmed) {
+    alert("Email cannot be empty.");
+    return;
+  }
+  setSavingEmail(true);
+  try {
+    const res = await fetch("/api/update-employee-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ employeeId, newEmail: trimmed })
+    });
+    const result = await res.json();
+    if (!result.success) {
+      alert(result.message || "Could not update email.");
+      return;
+    }
+    setEditingEmailFor("");
+    fetchEmployees();
+  } catch (err: any) {
+    alert(err.message || "Something went wrong.");
+  } finally {
+    setSavingEmail(false);
+  }
+}
 
 useEffect(()=>{
 
@@ -181,6 +219,33 @@ const toggleSalesCoordinator = async (
 // sales_coordinator either, since those roles have their own separate
 // dashboards (/admin, /coordinator) that don't read this field at
 // all.
+// Sets department='hr' together with role='hr' in the same update --
+// department is what actually activates the existing ticket_categories
+// HR routing (resolver_value='hr'), so setting role without it would
+// leave that routing silently inactive despite the role looking
+// correctly set. Reverts department back to "sales" (the default) when
+// removing the role, so toggling off doesn't leave a stale department.
+const toggleHrRole = async (
+  id: string,
+  currentRole: string
+) => {
+
+  const turningOn = currentRole !== "hr";
+
+  const { error } = await supabase
+    .from("employees")
+    .update({
+      role: turningOn ? "hr" : "employee",
+      department: turningOn ? "hr" : "sales"
+    })
+    .eq("id", id);
+
+  if (!error) {
+    fetchEmployees();
+  }
+
+};
+
 const updateDepartment = async (id: string, newDepartment: string) => {
 
   const { error } = await supabase
@@ -649,14 +714,42 @@ text-slate-800
 
 </h2>
 
-<p className="
-text-sm
-text-slate-500
-">
-
-{employee.email}
-
-</p>
+{editingEmailFor === employee.id ? (
+  <div className="flex items-center gap-1.5 mt-0.5" onClick={(e) => e.stopPropagation()}>
+    <input
+      autoFocus
+      type="email"
+      value={emailDraft}
+      onChange={(e) => setEmailDraft(e.target.value)}
+      className="h-7 w-48 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition"
+    />
+    <button
+      disabled={savingEmail}
+      onClick={() => handleSaveEmployeeEmail(employee.id)}
+      className="h-7 px-2 rounded-lg bg-blue-600 text-white text-[11px] font-bold disabled:opacity-50"
+    >
+      {savingEmail ? "..." : "Save"}
+    </button>
+    <button
+      disabled={savingEmail}
+      onClick={() => setEditingEmailFor("")}
+      className="h-7 px-2 rounded-lg text-slate-400 text-[11px] font-bold"
+    >
+      Cancel
+    </button>
+  </div>
+) : (
+  <p
+    className="text-sm text-slate-500 flex items-center gap-1.5 group cursor-pointer hover:text-blue-600 transition"
+    onClick={() => {
+      setEditingEmailFor(employee.id);
+      setEmailDraft(employee.email || "");
+    }}
+  >
+    {employee.email}
+    <Pencil size={11} className="opacity-0 group-hover:opacity-60 transition" />
+  </p>
+)}
 
 </div>
 
@@ -903,7 +996,23 @@ employee.is_field_employee
   </button>
 )}
 
-{employee.role === "employee" && (
+{(employee.role === "employee" || employee.role === "hr") && (
+  <button
+    onClick={async (e) => {
+      e.stopPropagation();
+      await toggleHrRole(employee.id, employee.role);
+    }}
+    className={`px-4 py-2 rounded-xl text-xs font-semibold transition ${
+      employee.role === "hr"
+        ? "bg-teal-100 text-teal-700 hover:bg-teal-200"
+        : "bg-teal-50 text-teal-700 hover:bg-teal-100"
+    }`}
+  >
+    {employee.role === "hr" ? "Remove HR role" : "Make HR"}
+  </button>
+)}
+
+{(employee.role === "employee" || employee.role === "hr") && (
   <select
     value={employee.department || "sales"}
     onChange={async (e) => {
