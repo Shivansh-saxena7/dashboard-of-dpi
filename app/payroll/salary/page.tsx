@@ -3,7 +3,22 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import toast from "react-hot-toast";
-import { IndianRupee, FileText, Download, Upload, Printer, Percent, ShieldCheck, AlarmClock, ClipboardCheck, Briefcase } from "lucide-react";
+import {
+  IndianRupee,
+  FileText,
+  Download,
+  Upload,
+  Printer,
+  Percent,
+  ShieldCheck,
+  AlarmClock,
+  ClipboardCheck,
+  Briefcase,
+  SlidersHorizontal,
+  ClipboardList,
+  User,
+  Landmark
+} from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import DateInput from "@/components/DateInput";
 import { buildSalarySlipBlob, buildBulkSalarySlipPdf, SalarySlipInput } from "@/lib/generateHrDocumentPdf";
@@ -18,6 +33,7 @@ import {
   AttendanceDeductionComputeResult,
   ReimbursementComputeResult
 } from "@/lib/computePayrollAdjustments";
+import { SectionTabBar, SectionTabPanel } from "@/components/SectionTabs";
 import CompanyRegistrationDetails from "@/components/payroll/CompanyRegistrationDetails";
 import CommissionPlansBuilder from "@/components/payroll/CommissionPlansBuilder";
 import PayrollConditionRulesBuilder from "@/components/payroll/PayrollConditionRulesBuilder";
@@ -156,9 +172,17 @@ async function getLogoDataUrl(): Promise<string | undefined> {
 // onAssigned callback keeps it fresh after an edit. This page
 // additionally owns the slip-issuing machinery: Compute, Generate Slip,
 // Bulk Print, Upload Signed Copy, which HR's page doesn't have.
+const SALARY_TABS = [
+  { id: "setup", label: "Setup", icon: SlidersHorizontal },
+  { id: "overview", label: "Overview", icon: ClipboardList },
+  { id: "employee", label: "Employee", icon: User },
+  { id: "payroll-ops", label: "Payroll Ops", icon: Landmark }
+];
+
 export default function PayrollSalaryPage() {
   const todayStr = new Date().toISOString().slice(0, 10);
 
+  const [activeTab, setActiveTab] = useState("setup");
   const [employees, setEmployees] = useState<EmployeeRow[]>([]);
   const [employeeId, setEmployeeId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -820,10 +844,16 @@ export default function PayrollSalaryPage() {
         </p>
       </div>
 
+      <SectionTabBar tabs={SALARY_TABS} activeTab={activeTab} onTabChange={setActiveTab} />
+
+      <SectionTabPanel id="setup" activeTab={activeTab}>
       <CompanyRegistrationDetails onSaved={loadCompanySettings} />
       <CommissionPlansBuilder />
       <PayrollConditionRulesBuilder />
       <AttendanceDeductionRulesBuilder />
+      </SectionTabPanel>
+
+      <SectionTabPanel id="overview" activeTab={activeTab}>
       <BasicPayOverview
         employeeId={employeeId}
         onSavedForEmployee={() => {
@@ -857,7 +887,9 @@ export default function PayrollSalaryPage() {
           ))}
         </div>
       </div>
+      </SectionTabPanel>
 
+      <SectionTabPanel id="payroll-ops" activeTab={activeTab}>
       <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
         <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
           <Printer size={15} /> Bulk Print (2 slips per A4 sheet)
@@ -900,7 +932,9 @@ export default function PayrollSalaryPage() {
           </div>
         </div>
       </div>
+      </SectionTabPanel>
 
+      <SectionTabPanel id="employee" activeTab={activeTab}>
       <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm max-w-sm">
         <label className="text-xs font-semibold text-slate-500">Employee</label>
         <select
@@ -1025,7 +1059,18 @@ export default function PayrollSalaryPage() {
               </div>
             )}
           </div>
+        </>
+      )}
+      </SectionTabPanel>
 
+      <SectionTabPanel id="payroll-ops" activeTab={activeTab}>
+      {!employeeId && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm text-center">
+          <p className="text-sm font-semibold text-slate-500">Select an employee on the Employee tab first to compute adjustments or generate a slip.</p>
+        </div>
+      )}
+      {employeeId && (
+        <>
           <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <p className="text-sm font-bold text-slate-800">Compute Payroll Adjustments</p>
@@ -1206,6 +1251,7 @@ export default function PayrollSalaryPage() {
           </div>
         </>
       )}
+      </SectionTabPanel>
     </motion.div>
   );
 }

@@ -3,11 +3,12 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import toast from "react-hot-toast";
-import { IndianRupee, AlertTriangle, Briefcase, Cake } from "lucide-react";
+import { IndianRupee, AlertTriangle, Briefcase, Cake, SlidersHorizontal, ClipboardList, User } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import DateInput from "@/components/DateInput";
 import { formatINR } from "@/lib/exportTable";
 import { fetchAllRows } from "@/lib/fetchAllRows";
+import { SectionTabBar, SectionTabPanel } from "@/components/SectionTabs";
 import CompanyRegistrationDetails from "@/components/payroll/CompanyRegistrationDetails";
 import CommissionPlansBuilder from "@/components/payroll/CommissionPlansBuilder";
 import PayrollConditionRulesBuilder from "@/components/payroll/PayrollConditionRulesBuilder";
@@ -60,7 +61,14 @@ interface MissingSaleValueLead {
 // Booking is duplicated inline on the Payroll page) since they're small
 // and don't have the same "shared state read by two different
 // displays" staleness risk the extracted forms did.
+const SALARY_TABS = [
+  { id: "setup", label: "Setup", icon: SlidersHorizontal },
+  { id: "overview", label: "Overview", icon: ClipboardList },
+  { id: "employee", label: "Employee", icon: User }
+];
+
 export default function HrSalaryPage() {
+  const [activeTab, setActiveTab] = useState("setup");
   const [employees, setEmployees] = useState<EmployeeRow[]>([]);
   const [employeeId, setEmployeeId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -309,15 +317,20 @@ export default function HrSalaryPage() {
         </p>
       </div>
 
-      <CompanyRegistrationDetails />
+      <SectionTabBar tabs={SALARY_TABS} activeTab={activeTab} onTabChange={setActiveTab} />
 
-      <CommissionPlansBuilder />
+      <SectionTabPanel id="setup" activeTab={activeTab}>
+        <CompanyRegistrationDetails />
 
-      <PayrollConditionRulesBuilder />
+        <CommissionPlansBuilder />
 
-      <AttendanceDeductionRulesBuilder />
+        <PayrollConditionRulesBuilder />
 
-      <BasicPayOverview employeeId={employeeId} onSavedForEmployee={() => setBasicPayRefreshNonce((n) => n + 1)} />
+        <AttendanceDeductionRulesBuilder />
+      </SectionTabPanel>
+
+      <SectionTabPanel id="overview" activeTab={activeTab}>
+        <BasicPayOverview employeeId={employeeId} onSavedForEmployee={() => setBasicPayRefreshNonce((n) => n + 1)} />
 
       <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
         <div className="flex items-center justify-between flex-wrap gap-2">
@@ -403,7 +416,10 @@ export default function HrSalaryPage() {
               return (
                 <button
                   key={l.id}
-                  onClick={() => setEmployeeId(l.current_owner_id || "")}
+                  onClick={() => {
+                    setEmployeeId(l.current_owner_id || "");
+                    setActiveTab("employee");
+                  }}
                   disabled={!l.current_owner_id}
                   className="flex items-center gap-3 text-xs w-full text-left rounded-lg px-2 py-1.5 hover:bg-amber-50 transition disabled:hover:bg-transparent disabled:cursor-default"
                 >
@@ -420,7 +436,9 @@ export default function HrSalaryPage() {
           </div>
         )}
       </div>
+      </SectionTabPanel>
 
+      <SectionTabPanel id="employee" activeTab={activeTab}>
       <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm max-w-sm">
         <label className="text-xs font-semibold text-slate-500">Employee</label>
         <select
@@ -513,6 +531,7 @@ export default function HrSalaryPage() {
           </div>
         </>
       )}
+      </SectionTabPanel>
     </motion.div>
   );
 }
