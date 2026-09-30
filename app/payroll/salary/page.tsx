@@ -23,6 +23,11 @@ import CommissionPlansBuilder from "@/components/payroll/CommissionPlansBuilder"
 import PayrollConditionRulesBuilder from "@/components/payroll/PayrollConditionRulesBuilder";
 import AttendanceDeductionRulesBuilder from "@/components/payroll/AttendanceDeductionRulesBuilder";
 import BasicPayOverview from "@/components/payroll/BasicPayOverview";
+import BasicPaySetForm from "@/components/payroll/BasicPaySetForm";
+import CommissionAssignmentForm from "@/components/payroll/CommissionAssignmentForm";
+import ConditionRuleAssignmentForm from "@/components/payroll/ConditionRuleAssignmentForm";
+import AttendanceRuleAssignmentForm from "@/components/payroll/AttendanceRuleAssignmentForm";
+import PayrollDetailsForm from "@/components/payroll/PayrollDetailsForm";
 
 interface EmployeeRow {
   id: string;
@@ -141,13 +146,16 @@ async function getLogoDataUrl(): Promise<string | undefined> {
 
 // Payroll's side of the Salary split. Payroll now has the same write
 // access as HR on Basic Pay, Commission Plans, Condition Rules and
-// Attendance Deduction Rules -- the company-wide setup sections
-// (components/payroll/*) are the same shared components app/hr/salary
+// Attendance Deduction Rules, both company-wide (the builder sections)
+// and per-employee (the set/assignment forms below) -- all of it lives
+// in components/payroll/*, the same shared components app/hr/salary
 // /page.tsx mounts, one owner each, not a second copy kept in sync by
-// hand. This page additionally owns the slip-issuing machinery: Compute,
-// Generate Slip, Bulk Print, Upload Signed Copy, which HR's page doesn't
-// have. Per-employee assignment (which plan/rule is assigned to whom)
-// is still HR-only for now, pending the same extraction there.
+// hand. This page's own history/payrollForm/current*Assignment state
+// stays here (not folded into the shared forms) because Compute/Generate
+// Slip/Bulk Print below read it directly -- each shared form's onSaved/
+// onAssigned callback keeps it fresh after an edit. This page
+// additionally owns the slip-issuing machinery: Compute, Generate Slip,
+// Bulk Print, Upload Signed Copy, which HR's page doesn't have.
 export default function PayrollSalaryPage() {
   const todayStr = new Date().toISOString().slice(0, 10);
 
@@ -163,6 +171,13 @@ export default function PayrollSalaryPage() {
   const [currentRuleAssignment, setCurrentRuleAssignment] = useState<PayrollRuleAssignmentRow | null>(null);
   const [currentLateRule, setCurrentLateRule] = useState<AttendanceRuleAssignmentRow | null>(null);
   const [currentSandwichRule, setCurrentSandwichRule] = useState<AttendanceRuleAssignmentRow | null>(null);
+
+  // Bumped whenever Basic Pay Overview's bulk-set touches the currently
+  // selected employee, forcing BasicPaySetForm to remount (and thus
+  // reload its own history) -- the only per-employee section here with
+  // a SECOND write path into the same table, so it's the only one that
+  // needs this vs. just an onSaved callback.
+  const [basicPayRefreshNonce, setBasicPayRefreshNonce] = useState(0);
 
   const [slipMonth, setSlipMonth] = useState(todayStr.slice(0, 7));
   const [generating, setGenerating] = useState(false);
@@ -490,7 +505,7 @@ export default function PayrollSalaryPage() {
       return;
     }
     if (!payrollForm.employee_code || !payrollForm.employee_code.trim()) {
-      toast.error("This employee has no Employee Code saved yet — ask HR to set it in Payroll Details.");
+      toast.error("This employee has no Employee Code saved yet — set it in Payroll Details below.");
       return;
     }
 
@@ -809,7 +824,13 @@ export default function PayrollSalaryPage() {
       <CommissionPlansBuilder />
       <PayrollConditionRulesBuilder />
       <AttendanceDeductionRulesBuilder />
-      <BasicPayOverview employeeId={employeeId} onSavedForEmployee={() => loadHistory(employeeId)} />
+      <BasicPayOverview
+        employeeId={employeeId}
+        onSavedForEmployee={() => {
+          loadHistory(employeeId);
+          setBasicPayRefreshNonce((n) => n + 1);
+        }}
+      />
 
       <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
         <div className="flex items-center justify-between flex-wrap gap-2">
@@ -927,6 +948,20 @@ export default function PayrollSalaryPage() {
               </div>
             </div>
           </div>
+
+          <BasicPaySetForm
+            key={`${employeeId}-${basicPayRefreshNonce}`}
+            employeeId={employeeId}
+            onSaved={() => loadHistory(employeeId)}
+          />
+
+          <CommissionAssignmentForm employeeId={employeeId} onAssigned={() => loadCurrentCommission(employeeId)} />
+
+          <ConditionRuleAssignmentForm employeeId={employeeId} onAssigned={() => loadCurrentConditionRule(employeeId)} />
+
+          <AttendanceRuleAssignmentForm employeeId={employeeId} onAssigned={() => loadCurrentAttendanceRules(employeeId)} />
+
+          <PayrollDetailsForm employeeId={employeeId} onSaved={() => loadPayrollDetails(employeeId)} />
 
           <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
             <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
@@ -1118,7 +1153,7 @@ export default function PayrollSalaryPage() {
               </button>
             </div>
             {!payrollForm.employee_code?.trim() && (
-              <p className="text-xs text-amber-600">This employee has no Employee Code saved yet — ask HR to set it in Payroll Details.</p>
+              <p className="text-xs text-amber-600">This employee has no Employee Code saved yet — set it in Payroll Details below.</p>
             )}
             {computedForKey === `${employeeId}:${slipMonth}` ? (
               <p className="text-xs text-emerald-600">Computed commission/condition-rule adjustments for {monthLabel(slipMonth)} will be included in this slip.</p>
