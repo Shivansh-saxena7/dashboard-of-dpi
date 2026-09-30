@@ -19,6 +19,7 @@ interface PayrollDetails {
   work_location: string | null;
   employment_type: string | null;
   employee_grade: string | null;
+  date_of_birth: string | null;
   updated_at: string | null;
   updated_by: { name: string } | null;
 }
@@ -37,6 +38,7 @@ const BLANK_PAYROLL_DETAILS: PayrollDetails = {
   work_location: "",
   employment_type: "",
   employee_grade: "",
+  date_of_birth: "",
   updated_at: null,
   updated_by: null
 };
@@ -60,11 +62,30 @@ export default function PayrollDetailsForm({ employeeId, onSaved }: { employeeId
     const { data } = await supabase
       .from("employee_payroll_details")
       .select(
-        "employee_code, gender, bank_name, bank_account_number, bank_ifsc_code, uan_number, pf_account_number, esi_number, pan_number, date_of_joining, work_location, employment_type, employee_grade, updated_at, updated_by:employees!employee_payroll_details_updated_by_employee_id_fkey(name)"
+        "employee_code, gender, bank_name, bank_account_number, bank_ifsc_code, uan_number, pf_account_number, esi_number, pan_number, date_of_joining, work_location, employment_type, employee_grade, date_of_birth, updated_at, updated_by:employees!employee_payroll_details_updated_by_employee_id_fkey(name)"
       )
       .eq("employee_id", employeeId)
       .maybeSingle();
-    setPayrollForm(data ? ({ ...BLANK_PAYROLL_DETAILS, ...data } as unknown as PayrollDetails) : BLANK_PAYROLL_DETAILS);
+
+    let form = data ? ({ ...BLANK_PAYROLL_DETAILS, ...data } as unknown as PayrollDetails) : BLANK_PAYROLL_DETAILS;
+
+    // Pre-fill (never overwrite) from the candidate record this employee
+    // was converted from, if their own Date of Birth is still blank --
+    // captured once at application intake (app/hr/candidates/page.tsx),
+    // so HR is never asked twice. Still just a suggestion sitting in the
+    // form until Save is clicked.
+    if (!form.date_of_birth) {
+      const { data: candidate } = await supabase
+        .from("candidates")
+        .select("date_of_birth")
+        .eq("converted_employee_id", employeeId)
+        .maybeSingle();
+      if (candidate?.date_of_birth) {
+        form = { ...form, date_of_birth: candidate.date_of_birth };
+      }
+    }
+
+    setPayrollForm(form);
   }
 
   useEffect(() => {
@@ -105,6 +126,7 @@ export default function PayrollDetailsForm({ employeeId, onSaved }: { employeeId
         work_location: payrollForm.work_location || null,
         employment_type: payrollForm.employment_type || null,
         employee_grade: payrollForm.employee_grade || null,
+        date_of_birth: payrollForm.date_of_birth || null,
         updated_by_employee_id: me.id,
         updated_at: new Date().toISOString()
       },
@@ -150,6 +172,14 @@ export default function PayrollDetailsForm({ employeeId, onSaved }: { employeeId
           <DateInput
             value={payrollForm.date_of_joining || ""}
             onChange={(v) => setPayrollForm((prev) => ({ ...prev, date_of_joining: v }))}
+            className="mt-1 h-9 w-full rounded-lg bg-slate-50 border border-slate-200 pl-2.5 pr-8 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-300 cursor-pointer"
+          />
+        </div>
+        <div>
+          <label className="text-xs font-semibold text-slate-500">Date of Birth</label>
+          <DateInput
+            value={payrollForm.date_of_birth || ""}
+            onChange={(v) => setPayrollForm((prev) => ({ ...prev, date_of_birth: v }))}
             className="mt-1 h-9 w-full rounded-lg bg-slate-50 border border-slate-200 pl-2.5 pr-8 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-300 cursor-pointer"
           />
         </div>

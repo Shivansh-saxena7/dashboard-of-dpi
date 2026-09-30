@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import toast from "react-hot-toast";
-import { IndianRupee, AlertTriangle, Briefcase } from "lucide-react";
+import { IndianRupee, AlertTriangle, Briefcase, Cake } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import DateInput from "@/components/DateInput";
 import { formatINR } from "@/lib/exportTable";
@@ -54,11 +54,12 @@ interface MissingSaleValueLead {
 // Rules, Basic Pay Overview) and per-employee (Basic Pay set, plan/rule
 // assignment, Payroll Details) -- lives in components/payroll/* and is
 // mounted on both this page and app/payroll/salary/page.tsx: one owner
-// for each, not a second copy kept in sync by hand. Log Booking and the
-// Bookings Missing Sale Value overview stay inline here (and duplicated
-// inline on the Payroll page) since they're small and don't have the
-// same "shared state read by two different displays" staleness risk
-// the extracted forms did.
+// for each, not a second copy kept in sync by hand. Log Booking, the
+// Bookings Missing Sale Value overview, and the Date of Birth Overview
+// (feeds the birthday celebration toast) stay inline here (and Log
+// Booking is duplicated inline on the Payroll page) since they're small
+// and don't have the same "shared state read by two different
+// displays" staleness risk the extracted forms did.
 export default function HrSalaryPage() {
   const [employees, setEmployees] = useState<EmployeeRow[]>([]);
   const [employeeId, setEmployeeId] = useState("");
@@ -70,6 +71,12 @@ export default function HrSalaryPage() {
   // SECOND write path into the same table, so it's the only one that
   // needs this vs. just an onSaved callback.
   const [basicPayRefreshNonce, setBasicPayRefreshNonce] = useState(0);
+
+  // Same remount-via-key pattern as basicPayRefreshNonce above, for the
+  // same reason: the Date of Birth Overview's bulk-set below is a
+  // SECOND write path into employee_payroll_details, the same table
+  // PayrollDetailsForm reads/writes for the selected employee.
+  const [payrollDetailsRefreshNonce, setPayrollDetailsRefreshNonce] = useState(0);
 
   // Booking sale-value entry -- feeds Payroll's Compute step (commission
   // math and, indirectly, condition-rule booking counts, though that
@@ -96,9 +103,24 @@ export default function HrSalaryPage() {
   // pattern as Basic Pay Overview above.
   const [missingSaleValueLeads, setMissingSaleValueLeads] = useState<MissingSaleValueLead[]>([]);
 
+  // Date of Birth, company-wide -- same "overview + bulk-fill" shape as
+  // Basic Pay above. employee_payroll_details has a hard CHECK
+  // constraint requiring employee_code on every row (see
+  // handleSavePayrollDetails' own comment), so an employee with no
+  // payroll_details row yet (Employee Code never set) genuinely can't
+  // be bulk-upserted here -- payrollDetailsExistsSet is what tells the
+  // UI which rows are safe to offer an input for vs. which need
+  // Employee Code set first, via the individual Payroll Details form.
+  const [dobMap, setDobMap] = useState<Record<string, string | null>>({});
+  const [payrollDetailsExistsSet, setPayrollDetailsExistsSet] = useState<Set<string>>(new Set());
+  const [showOnlyMissingDob, setShowOnlyMissingDob] = useState(true);
+  const [bulkDobValues, setBulkDobValues] = useState<Record<string, string>>({});
+  const [bulkDobSaving, setBulkDobSaving] = useState(false);
+
   useEffect(() => {
     loadEmployees();
     loadMissingSaleValueLeads();
+    loadAllDob();
   }, []);
 
   useEffect(() => {
@@ -206,6 +228,75 @@ export default function HrSalaryPage() {
     setLoading(false);
   }
 
+  async function loadAllDob() {
+    const { data } = await supabase.from("employee_payroll_details").select("employee_id, date_of_birth");
+    const map: Record<string, string | null> = {};
+    const existsSet = new Set<string>();
+    for (const row of data || []) {
+      existsSet.add(row.employee_id);
+      map[row.employee_id] = row.date_of_birth;
+    }
+    setDobMap(map);
+    setPayrollDetailsExistsSet(existsSet);
+  }
+
+  // Same partial-column upsert pattern as handleSavePayrollDetails --
+  // only date_of_birth (+ audit columns) is sent, so other existing
+  // fields on that row (gender, bank details, ...) are never touched.
+  // Rows with no payroll_details row yet are filtered out before this
+  // even runs (see the CHECK-constraint comment on the state block
+  // above) -- the UI never offers an input for them in the first
+  // place, this filter is just defense in depth.
+  async function handleBulkSetDob() {
+    const rows = Object.entries(bulkDobValues).filter(([empId, val]) => val && payrollDetailsExistsSet.has(empId));
+
+    if (rows.length === 0) {
+      toast.error("Enter at least one date of birth for an employee that already has an Employee Code set.");
+      return;
+    }
+
+    const {
+      data: { user }
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data: me } = await supabase.from("employees").select("id").eq("auth_user_id", user.id).single();
+    if (!me) {
+      toast.error("Could not identify your employee record.");
+      return;
+    }
+
+    // Plain UPDATE, not upsert -- Postgres validates CHECK constraints
+    // (employee_code required) against the candidate INSERT row BEFORE
+    // conflict detection even runs, so a partial-column .upsert() here
+    // fails that check even when the row already exists and would only
+    // ever take the update branch (confirmed live, 2026-09-28: an
+    // .upsert() sending only employee_id/date_of_birth genuinely threw
+    // employee_payroll_details_employee_code_required). Safe here
+    // specifically because payrollDetailsExistsSet already guarantees
+    // every row in `rows` exists.
+    setBulkDobSaving(true);
+    const results = await Promise.all(
+      rows.map(([empId, val]) =>
+        supabase
+          .from("employee_payroll_details")
+          .update({ date_of_birth: val, updated_by_employee_id: me.id, updated_at: new Date().toISOString() })
+          .eq("employee_id", empId)
+      )
+    );
+    setBulkDobSaving(false);
+
+    const error = results.find((r) => r.error)?.error;
+    if (error) {
+      toast.error(error.message || "Could not save dates of birth.");
+      return;
+    }
+
+    toast.success(`Date of Birth set for ${rows.length} employee(s).`);
+    setBulkDobValues({});
+    loadAllDob();
+    if (employeeId && rows.some(([empId]) => empId === employeeId)) setPayrollDetailsRefreshNonce((n) => n + 1);
+  }
+
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="space-y-5">
       <div>
@@ -227,6 +318,72 @@ export default function HrSalaryPage() {
       <AttendanceDeductionRulesBuilder />
 
       <BasicPayOverview employeeId={employeeId} onSavedForEmployee={() => setBasicPayRefreshNonce((n) => n + 1)} />
+
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+            <Cake size={15} className="text-pink-500" /> Date of Birth Overview
+          </p>
+          <div className="flex gap-1.5">
+            <button
+              onClick={() => setShowOnlyMissingDob(true)}
+              className={`h-8 px-3 rounded-lg text-xs font-bold transition ${showOnlyMissingDob ? "bg-pink-100 text-pink-700" : "bg-slate-50 text-slate-500"}`}
+            >
+              Missing DOB ({employees.filter((e) => !dobMap[e.id]).length})
+            </button>
+            <button
+              onClick={() => setShowOnlyMissingDob(false)}
+              className={`h-8 px-3 rounded-lg text-xs font-bold transition ${!showOnlyMissingDob ? "bg-slate-800 text-white" : "bg-slate-50 text-slate-500"}`}
+            >
+              All Employees
+            </button>
+          </div>
+        </div>
+        <p className="text-xs text-slate-500 -mt-2">
+          Powers the automatic birthday celebration. Employees without an Employee Code set yet can't be bulk-saved here — set that
+          first in their individual Payroll Details below.
+        </p>
+
+        {(() => {
+          const rows = employees.filter((e) => !showOnlyMissingDob || !dobMap[e.id]);
+          if (rows.length === 0) {
+            return <p className="text-xs text-slate-400">Everyone has a Date of Birth set.</p>;
+          }
+          return (
+            <>
+              <div className="flex justify-end">
+                <button
+                  onClick={handleBulkSetDob}
+                  disabled={bulkDobSaving}
+                  className="h-10 px-4 rounded-xl bg-pink-600 text-white text-xs font-bold disabled:opacity-40 hover:bg-pink-700 transition"
+                >
+                  {bulkDobSaving ? "Saving..." : "Save All"}
+                </button>
+              </div>
+
+              <div className="max-h-72 overflow-y-auto space-y-1.5">
+                {rows.map((e) => (
+                  <div key={e.id} className="flex items-center gap-3 text-xs">
+                    <span className="flex-1 text-slate-700 font-semibold">{e.name}</span>
+                    <span className={`w-24 shrink-0 text-right font-bold ${dobMap[e.id] ? "text-emerald-600" : "text-pink-600"}`}>
+                      {dobMap[e.id] ? new Date(dobMap[e.id]!).toLocaleDateString("en-IN") : "Missing"}
+                    </span>
+                    {payrollDetailsExistsSet.has(e.id) ? (
+                      <DateInput
+                        value={bulkDobValues[e.id] || ""}
+                        onChange={(v) => setBulkDobValues((prev) => ({ ...prev, [e.id]: v }))}
+                        className="w-40 h-8 rounded-lg bg-slate-50 border border-slate-200 pl-2 pr-7 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-pink-100 focus:border-pink-300"
+                      />
+                    ) : (
+                      <span className="w-40 h-8 flex items-center justify-center text-slate-400 italic text-[11px]">Set Employee Code first</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </>
+          );
+        })()}
+      </div>
 
       <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
         <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
@@ -290,7 +447,9 @@ export default function HrSalaryPage() {
 
           <AttendanceRuleAssignmentForm employeeId={employeeId} />
 
-          <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
+          <PayrollDetailsForm key={`${employeeId}-${payrollDetailsRefreshNonce}`} employeeId={employeeId} />
+
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-4">
             <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
               <Briefcase size={15} className="text-emerald-600" /> Log Booking
             </p>
@@ -352,8 +511,6 @@ export default function HrSalaryPage() {
               </div>
             )}
           </div>
-
-          <PayrollDetailsForm employeeId={employeeId} />
         </>
       )}
     </motion.div>
