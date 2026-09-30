@@ -439,7 +439,7 @@ export default function HrSalaryPage() {
 
       {employeeId && (
         <>
-          <BasicPaySetForm key={`${employeeId}-${basicPayRefreshNonce}`} employeeId={employeeId} />
+          <BasicPaySetForm key={`basic-pay-${employeeId}-${basicPayRefreshNonce}`} employeeId={employeeId} />
 
           <CommissionAssignmentForm employeeId={employeeId} />
 
@@ -447,7 +447,7 @@ export default function HrSalaryPage() {
 
           <AttendanceRuleAssignmentForm employeeId={employeeId} />
 
-          <PayrollDetailsForm key={`${employeeId}-${payrollDetailsRefreshNonce}`} employeeId={employeeId} />
+          <PayrollDetailsForm key={`payroll-details-${employeeId}-${payrollDetailsRefreshNonce}`} employeeId={employeeId} onSaved={loadAllDob} />
 
           <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-4">
             <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
