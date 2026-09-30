@@ -30,6 +30,12 @@ interface CelebrationQueueItem {
   message: string;
 }
 
+// Both event types share the exact same queue/popup mechanism below
+// (BookingCelebrationModal just renders whatever message text it's
+// given) -- this is the one place that list of types lives, so adding
+// a third celebration type later only means adding it here.
+const CELEBRATION_TYPES = ["BOOKING_CELEBRATION", "BIRTHDAY_CELEBRATION"];
+
 interface LeaderboardPopupState {
   title: string;
   subtitle: string;
@@ -139,7 +145,7 @@ useEffect(() => {
             // single place that marks celebration_shown_at, so a live
             // one and a catch-up one (found on mount) can never race
             // on which "owns" that update.
-            if (payload.new?.type === "BOOKING_CELEBRATION") {
+            if (CELEBRATION_TYPES.includes(payload.new?.type)) {
               setCelebrationQueue((prev) => [...prev, { id: payload.new.id, message: payload.new.message }]);
             }
           }
@@ -224,7 +230,7 @@ useEffect(() => {
         .from("notification")
         .update({ celebration_shown_at: new Date().toISOString() })
         .eq("employee_id", employee.id)
-        .eq("type", "BOOKING_CELEBRATION")
+        .in("type", CELEBRATION_TYPES)
         .is("celebration_shown_at", null)
         .lt("created_at", cutoffIso);
 
@@ -234,7 +240,7 @@ useEffect(() => {
         .from("notification")
         .select("id, message")
         .eq("employee_id", employee.id)
-        .eq("type", "BOOKING_CELEBRATION")
+        .in("type", CELEBRATION_TYPES)
         .is("celebration_shown_at", null)
         .gte("created_at", cutoffIso)
         .order("created_at", { ascending: true })

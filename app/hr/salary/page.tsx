@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import toast from "react-hot-toast";
-import { IndianRupee, FileText, Download, History, Upload, Printer, AlertTriangle } from "lucide-react";
+import { IndianRupee, FileText, Download, History, Upload, Printer, AlertTriangle, Cake } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import DateInput from "@/components/DateInput";
 import { buildSalarySlipBlob, buildBulkSalarySlipPdf, SalarySlipInput } from "@/lib/generateHrDocumentPdf";
@@ -45,6 +45,7 @@ interface PayrollDetails {
   work_location: string | null;
   employment_type: string | null;
   employee_grade: string | null;
+  date_of_birth: string | null;
 }
 
 const BLANK_PAYROLL_DETAILS: PayrollDetails = {
@@ -60,7 +61,8 @@ const BLANK_PAYROLL_DETAILS: PayrollDetails = {
   date_of_joining: "",
   work_location: "",
   employment_type: "",
-  employee_grade: ""
+  employee_grade: "",
+  date_of_birth: ""
 };
 
 interface CompanySettings {
@@ -158,10 +160,25 @@ export default function HrSalaryPage() {
   const [bulkPayEffectiveFrom, setBulkPayEffectiveFrom] = useState(todayStr);
   const [bulkPaySaving, setBulkPaySaving] = useState(false);
 
+  // Date of Birth, company-wide -- same "overview + bulk-fill" shape as
+  // Basic Pay above. employee_payroll_details has a hard CHECK
+  // constraint requiring employee_code on every row (see
+  // handleSavePayrollDetails' own comment), so an employee with no
+  // payroll_details row yet (Employee Code never set) genuinely can't
+  // be bulk-upserted here -- payrollDetailsExistsSet is what tells the
+  // UI which rows are safe to offer an input for vs. which need
+  // Employee Code set first, via the individual Payroll Details form.
+  const [dobMap, setDobMap] = useState<Record<string, string | null>>({});
+  const [payrollDetailsExistsSet, setPayrollDetailsExistsSet] = useState<Set<string>>(new Set());
+  const [showOnlyMissingDob, setShowOnlyMissingDob] = useState(true);
+  const [bulkDobValues, setBulkDobValues] = useState<Record<string, string>>({});
+  const [bulkDobSaving, setBulkDobSaving] = useState(false);
+
   useEffect(() => {
     loadEmployees();
     loadAllCompensation();
     loadCompanySettings();
+    loadAllDob();
   }, []);
 
   useEffect(() => {
@@ -198,6 +215,75 @@ export default function HrSalaryPage() {
     setCompensationMap(map);
   }
 
+  async function loadAllDob() {
+    const { data } = await supabase.from("employee_payroll_details").select("employee_id, date_of_birth");
+    const map: Record<string, string | null> = {};
+    const existsSet = new Set<string>();
+    for (const row of data || []) {
+      existsSet.add(row.employee_id);
+      map[row.employee_id] = row.date_of_birth;
+    }
+    setDobMap(map);
+    setPayrollDetailsExistsSet(existsSet);
+  }
+
+  // Same partial-column upsert pattern as handleSavePayrollDetails --
+  // only date_of_birth (+ audit columns) is sent, so other existing
+  // fields on that row (gender, bank details, ...) are never touched.
+  // Rows with no payroll_details row yet are filtered out before this
+  // even runs (see the CHECK-constraint comment on the state block
+  // above) -- the UI never offers an input for them in the first
+  // place, this filter is just defense in depth.
+  async function handleBulkSetDob() {
+    const rows = Object.entries(bulkDobValues).filter(([empId, val]) => val && payrollDetailsExistsSet.has(empId));
+
+    if (rows.length === 0) {
+      toast.error("Enter at least one date of birth for an employee that already has an Employee Code set.");
+      return;
+    }
+
+    const {
+      data: { user }
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data: me } = await supabase.from("employees").select("id").eq("auth_user_id", user.id).single();
+    if (!me) {
+      toast.error("Could not identify your employee record.");
+      return;
+    }
+
+    // Plain UPDATE, not upsert -- Postgres validates CHECK constraints
+    // (employee_code required) against the candidate INSERT row BEFORE
+    // conflict detection even runs, so a partial-column .upsert() here
+    // fails that check even when the row already exists and would only
+    // ever take the update branch (confirmed live, 2026-09-28: an
+    // .upsert() sending only employee_id/date_of_birth genuinely threw
+    // employee_payroll_details_employee_code_required). Safe here
+    // specifically because payrollDetailsExistsSet already guarantees
+    // every row in `rows` exists.
+    setBulkDobSaving(true);
+    const results = await Promise.all(
+      rows.map(([empId, val]) =>
+        supabase
+          .from("employee_payroll_details")
+          .update({ date_of_birth: val, updated_by_employee_id: me.id, updated_at: new Date().toISOString() })
+          .eq("employee_id", empId)
+      )
+    );
+    setBulkDobSaving(false);
+
+    const error = results.find((r) => r.error)?.error;
+    if (error) {
+      toast.error(error.message || "Could not save dates of birth.");
+      return;
+    }
+
+    toast.success(`Date of Birth set for ${rows.length} employee(s).`);
+    setBulkDobValues({});
+    loadAllDob();
+    if (employeeId && rows.some(([empId]) => empId === employeeId)) loadPayrollDetails(employeeId);
+  }
+
   async function loadHistory(empId: string) {
     const { data } = await supabase
       .from("employee_compensation")
@@ -211,11 +297,30 @@ export default function HrSalaryPage() {
     const { data } = await supabase
       .from("employee_payroll_details")
       .select(
-        "employee_code, gender, bank_name, bank_account_number, bank_ifsc_code, uan_number, pf_account_number, esi_number, pan_number, date_of_joining, work_location, employment_type, employee_grade"
+        "employee_code, gender, bank_name, bank_account_number, bank_ifsc_code, uan_number, pf_account_number, esi_number, pan_number, date_of_joining, work_location, employment_type, employee_grade, date_of_birth"
       )
       .eq("employee_id", empId)
       .maybeSingle();
-    setPayrollForm(data ? { ...BLANK_PAYROLL_DETAILS, ...data } : BLANK_PAYROLL_DETAILS);
+
+    let form = data ? { ...BLANK_PAYROLL_DETAILS, ...data } : BLANK_PAYROLL_DETAILS;
+
+    // Pre-fill (never overwrite) from the candidate record this
+    // employee was converted from, if their own Date of Birth is
+    // still blank -- captured once at application intake
+    // (app/hr/candidates/page.tsx), so HR is never asked twice. Still
+    // just a suggestion sitting in the form until Save is clicked.
+    if (!form.date_of_birth) {
+      const { data: candidate } = await supabase
+        .from("candidates")
+        .select("date_of_birth")
+        .eq("converted_employee_id", empId)
+        .maybeSingle();
+      if (candidate?.date_of_birth) {
+        form = { ...form, date_of_birth: candidate.date_of_birth };
+      }
+    }
+
+    setPayrollForm(form);
   }
 
   async function loadCompanySettings() {
@@ -277,6 +382,7 @@ export default function HrSalaryPage() {
         work_location: payrollForm.work_location || null,
         employment_type: payrollForm.employment_type || null,
         employee_grade: payrollForm.employee_grade || null,
+        date_of_birth: payrollForm.date_of_birth || null,
         updated_by_employee_id: me.id,
         updated_at: new Date().toISOString()
       },
@@ -782,6 +888,72 @@ export default function HrSalaryPage() {
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+            <Cake size={15} className="text-pink-500" /> Date of Birth Overview
+          </p>
+          <div className="flex gap-1.5">
+            <button
+              onClick={() => setShowOnlyMissingDob(true)}
+              className={`h-8 px-3 rounded-lg text-xs font-bold transition ${showOnlyMissingDob ? "bg-pink-100 text-pink-700" : "bg-slate-50 text-slate-500"}`}
+            >
+              Missing DOB ({employees.filter((e) => !dobMap[e.id]).length})
+            </button>
+            <button
+              onClick={() => setShowOnlyMissingDob(false)}
+              className={`h-8 px-3 rounded-lg text-xs font-bold transition ${!showOnlyMissingDob ? "bg-slate-800 text-white" : "bg-slate-50 text-slate-500"}`}
+            >
+              All Employees
+            </button>
+          </div>
+        </div>
+        <p className="text-xs text-slate-500 -mt-2">
+          Powers the automatic birthday celebration. Employees without an Employee Code set yet can't be bulk-saved here — set that
+          first in their individual Payroll Details below.
+        </p>
+
+        {(() => {
+          const rows = employees.filter((e) => !showOnlyMissingDob || !dobMap[e.id]);
+          if (rows.length === 0) {
+            return <p className="text-xs text-slate-400">Everyone has a Date of Birth set.</p>;
+          }
+          return (
+            <>
+              <div className="flex justify-end">
+                <button
+                  onClick={handleBulkSetDob}
+                  disabled={bulkDobSaving}
+                  className="h-10 px-4 rounded-xl bg-pink-600 text-white text-xs font-bold disabled:opacity-40 hover:bg-pink-700 transition"
+                >
+                  {bulkDobSaving ? "Saving..." : "Save All"}
+                </button>
+              </div>
+
+              <div className="max-h-72 overflow-y-auto space-y-1.5">
+                {rows.map((e) => (
+                  <div key={e.id} className="flex items-center gap-3 text-xs">
+                    <span className="flex-1 text-slate-700 font-semibold">{e.name}</span>
+                    <span className={`w-24 shrink-0 text-right font-bold ${dobMap[e.id] ? "text-emerald-600" : "text-pink-600"}`}>
+                      {dobMap[e.id] ? new Date(dobMap[e.id]!).toLocaleDateString("en-IN") : "Missing"}
+                    </span>
+                    {payrollDetailsExistsSet.has(e.id) ? (
+                      <DateInput
+                        value={bulkDobValues[e.id] || ""}
+                        onChange={(v) => setBulkDobValues((prev) => ({ ...prev, [e.id]: v }))}
+                        className="w-40 h-8 rounded-lg bg-slate-50 border border-slate-200 pl-2 pr-7 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-pink-100 focus:border-pink-300"
+                      />
+                    ) : (
+                      <span className="w-40 h-8 flex items-center justify-center text-slate-400 italic text-[11px]">Set Employee Code first</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </>
+          );
+        })()}
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
         <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
           <Printer size={15} /> Bulk Print (2 slips per A4 sheet)
         </p>
@@ -930,6 +1102,14 @@ export default function HrSalaryPage() {
                 <DateInput
                   value={payrollForm.date_of_joining || ""}
                   onChange={(v) => setPayrollForm((prev) => ({ ...prev, date_of_joining: v }))}
+                  className="mt-1 h-9 w-full rounded-lg bg-slate-50 border border-slate-200 pl-2.5 pr-8 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-300 cursor-pointer"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500">Date of Birth</label>
+                <DateInput
+                  value={payrollForm.date_of_birth || ""}
+                  onChange={(v) => setPayrollForm((prev) => ({ ...prev, date_of_birth: v }))}
                   className="mt-1 h-9 w-full rounded-lg bg-slate-50 border border-slate-200 pl-2.5 pr-8 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-300 cursor-pointer"
                 />
               </div>

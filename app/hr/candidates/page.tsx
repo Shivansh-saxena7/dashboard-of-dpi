@@ -224,6 +224,7 @@ interface CandidateRow {
   notes: string | null;
   status: string;
   converted_employee_id: string | null;
+  date_of_birth: string | null;
   created_at: string;
 }
 
@@ -346,6 +347,13 @@ export default function HrCandidatesPage() {
   const [addEmail, setAddEmail] = useState("");
   const [addPosition, setAddPosition] = useState("");
   const [addNotes, setAddNotes] = useState("");
+  // Captured once here at application intake so it's never re-asked --
+  // Payroll Details on app/hr/salary/page.tsx pre-fills an employee's
+  // Date of Birth from this same field via candidates.converted_employee_id
+  // once they're hired, HR just confirms + saves. Optional: an existing
+  // candidate already mid-pipeline before this field existed can still
+  // convert without one, same as any other optional field here.
+  const [addDob, setAddDob] = useState("");
   const [adding, setAdding] = useState(false);
 
   const [interviewOpenFor, setInterviewOpenFor] = useState<string | null>(null);
@@ -479,6 +487,7 @@ export default function HrCandidatesPage() {
       email: addEmail.trim() || null,
       position_applied_for: addPosition.trim(),
       notes: addNotes.trim() || null,
+      date_of_birth: addDob || null,
       created_by_employee_id: myEmployeeId
     });
 
@@ -492,6 +501,7 @@ export default function HrCandidatesPage() {
       setAddEmail("");
       setAddPosition("");
       setAddNotes("");
+      setAddDob("");
       loadAll();
     }
     setAdding(false);
@@ -954,6 +964,12 @@ export default function HrCandidatesPage() {
               <input value={addMobile} onChange={(e) => setAddMobile(e.target.value)} placeholder="Mobile" className="h-11 rounded-xl bg-slate-50 border border-slate-200 px-3 text-sm outline-none" />
               <input value={addEmail} onChange={(e) => setAddEmail(e.target.value)} placeholder="Email (optional)" className="h-11 rounded-xl bg-slate-50 border border-slate-200 px-3 text-sm outline-none" />
               <input value={addPosition} onChange={(e) => setAddPosition(e.target.value)} placeholder="Position applied for" className="h-11 rounded-xl bg-slate-50 border border-slate-200 px-3 text-sm outline-none" />
+              <DateInput
+                value={addDob}
+                onChange={setAddDob}
+                placeholder="Date of birth (optional)"
+                className="h-11 w-full rounded-xl bg-slate-50 border border-slate-200 pl-3 pr-9 text-sm outline-none"
+              />
             </div>
             <textarea
               value={addNotes}
