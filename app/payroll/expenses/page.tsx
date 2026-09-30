@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import toast from "react-hot-toast";
+import { Download, Receipt as ReceiptIcon } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { exportExpenseBillToPDF, exportExpenseConsolidatedToPDF } from "@/lib/exportExpenseReport";
 import ExpenseDetailModal from "@/components/ExpenseDetailModal";
@@ -268,13 +269,13 @@ export default function PayrollExpensesPage() {
               onClick={handleExportConsolidated}
               className="shrink-0 flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition"
             >
-              📄 Export Report
+              <Download size={14} /> Export Report
             </button>
             <button
               onClick={() => setLogOpen(true)}
               className="shrink-0 flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition"
             >
-              🧾 Log Office Expense
+              <ReceiptIcon size={14} /> Log Office Expense
             </button>
           </div>
         </div>
@@ -378,9 +379,11 @@ export default function PayrollExpensesPage() {
       </div>
 
       {loading ? (
-        <p className="text-sm text-slate-400 px-1">Loading...</p>
+        <div className="text-center text-sm text-slate-400 py-10">Loading...</div>
       ) : visibleExpenses.length === 0 ? (
-        <p className="text-sm text-slate-400 px-1">No expenses here.</p>
+        <div className="bg-white rounded-[24px] border border-slate-100 shadow-[0_4px_20px_rgba(15,23,42,0.06)] p-10 text-center text-sm text-slate-400">
+          No expenses match these filters.
+        </div>
       ) : (
         <div className="space-y-3">
           {visibleExpenses.map((exp) => (

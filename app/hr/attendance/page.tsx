@@ -424,7 +424,7 @@ export default function HrAttendancePage() {
         </select>
 
         {viewMode === "DAILY" ? (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <div className="w-[150px]">
               <DateInput value={dateFrom} onChange={setDateFrom} className={TEAL_DATE_INPUT_CLASS} />
             </div>
@@ -434,7 +434,7 @@ export default function HrAttendancePage() {
             </div>
           </div>
         ) : (
-          <div className="w-[170px]">
+          <div className="w-full sm:w-[170px]">
             <DateInput value={selectedMonth} onChange={setSelectedMonth} mode="month" className={TEAL_DATE_INPUT_CLASS} />
           </div>
         )}
