@@ -1148,12 +1148,17 @@ export default function HrCandidatesPage() {
                   </div>
                 </div>
 
-                <div className="mt-4 pt-4 border-t border-slate-100">
-                  <CandidateStepper status={candidate.status} />
-                </div>
-
                 {expanded && (
                   <div className="mt-5 pt-5 border-t border-slate-100 space-y-5">
+                    {/* Pipeline stepper -- moved here (out of the
+                        always-visible collapsed view, 2026-09-30) since
+                        the status badge in the header already answers
+                        "what stage" at a glance; rendering the full
+                        multi-step breakdown for every row in a list of
+                        dozens of candidates was the actual density
+                        problem, not the card design itself. */}
+                    <CandidateStepper status={candidate.status} />
+
                     {/* Interviews */}
                     <div>
                       <div className="flex items-center gap-2 mb-3">
