@@ -18,6 +18,11 @@ import {
   AttendanceDeductionComputeResult,
   ReimbursementComputeResult
 } from "@/lib/computePayrollAdjustments";
+import CompanyRegistrationDetails from "@/components/payroll/CompanyRegistrationDetails";
+import CommissionPlansBuilder from "@/components/payroll/CommissionPlansBuilder";
+import PayrollConditionRulesBuilder from "@/components/payroll/PayrollConditionRulesBuilder";
+import AttendanceDeductionRulesBuilder from "@/components/payroll/AttendanceDeductionRulesBuilder";
+import BasicPayOverview from "@/components/payroll/BasicPayOverview";
 
 interface EmployeeRow {
   id: string;
@@ -134,15 +139,15 @@ async function getLogoDataUrl(): Promise<string | undefined> {
   }
 }
 
-// Payroll's side of the Salary split -- read-only visibility into
-// everything HR sets (Basic Pay, Commission Plan, Condition Rule,
-// Attendance Deduction Rules: see app/hr/salary/page.tsx, the only
-// place any of that is editable), plus the actual slip-issuing
-// machinery: Compute, Generate Slip, Bulk Print, Upload Signed Copy.
-// RLS backs this split for real -- every table here is either a
-// *_payroll_select-only policy (definitions/assignments) or payroll-
-// write or hr+payroll-select (the three computed-result tables Compute
-// writes to). This page never inserts/updates any HR-owned table.
+// Payroll's side of the Salary split. Payroll now has the same write
+// access as HR on Basic Pay, Commission Plans, Condition Rules and
+// Attendance Deduction Rules -- the company-wide setup sections
+// (components/payroll/*) are the same shared components app/hr/salary
+// /page.tsx mounts, one owner each, not a second copy kept in sync by
+// hand. This page additionally owns the slip-issuing machinery: Compute,
+// Generate Slip, Bulk Print, Upload Signed Copy, which HR's page doesn't
+// have. Per-employee assignment (which plan/rule is assigned to whom)
+// is still HR-only for now, pending the same extraction there.
 export default function PayrollSalaryPage() {
   const todayStr = new Date().toISOString().slice(0, 10);
 
@@ -795,10 +800,16 @@ export default function PayrollSalaryPage() {
           Salary
         </h1>
         <p className="text-xs text-slate-500 mt-1">
-          Compute adjustments and issue salary slips. Basic Pay, Commission Plans, Condition Rules, and Attendance Deduction Rules are
-          set by HR — shown here read-only.
+          Set Basic Pay, Commission Plans, Condition Rules, and Attendance Deduction Rules — same access as HR — then compute
+          adjustments and issue salary slips.
         </p>
       </div>
+
+      <CompanyRegistrationDetails onSaved={loadCompanySettings} />
+      <CommissionPlansBuilder />
+      <PayrollConditionRulesBuilder />
+      <AttendanceDeductionRulesBuilder />
+      <BasicPayOverview employeeId={employeeId} onSavedForEmployee={() => loadHistory(employeeId)} />
 
       <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
         <div className="flex items-center justify-between flex-wrap gap-2">

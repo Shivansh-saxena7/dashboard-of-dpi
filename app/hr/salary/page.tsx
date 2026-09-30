@@ -3,11 +3,16 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import toast from "react-hot-toast";
-import { IndianRupee, History, AlertTriangle, Percent, ShieldCheck, AlarmClock, Briefcase } from "lucide-react";
+import { IndianRupee, History, AlertTriangle, Briefcase } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import DateInput from "@/components/DateInput";
 import { formatINR } from "@/lib/exportTable";
 import { fetchAllRows } from "@/lib/fetchAllRows";
+import CompanyRegistrationDetails from "@/components/payroll/CompanyRegistrationDetails";
+import CommissionPlansBuilder from "@/components/payroll/CommissionPlansBuilder";
+import PayrollConditionRulesBuilder from "@/components/payroll/PayrollConditionRulesBuilder";
+import AttendanceDeductionRulesBuilder from "@/components/payroll/AttendanceDeductionRulesBuilder";
+import BasicPayOverview from "@/components/payroll/BasicPayOverview";
 
 interface EmployeeRow {
   id: string;
@@ -55,11 +60,6 @@ const BLANK_PAYROLL_DETAILS: PayrollDetails = {
   employment_type: "",
   employee_grade: ""
 };
-
-interface CompanySettings {
-  company_cin: string | null;
-  company_gstin: string | null;
-}
 
 interface CommissionPlanTier {
   id: string;
@@ -155,13 +155,15 @@ interface MissingSaleValueLead {
 
 const EMPLOYMENT_TYPES = ["Full-time", "Part-time", "Contract", "Probation"];
 
-// Salary policy/setup, fully owned by HR (write) -- Payroll gets a
-// separate read-only view of all of this plus the actual slip-
-// generation controls at /payroll/salary. See that file's own comment
-// for the split rationale: HR sets compensation/commission/condition-
-// rule/attendance-deduction policy, Payroll issues the slip built from
-// it. RLS on every table this page writes to is 'hr'-only (+ admin);
-// Payroll's matching tables carry a *_payroll_select-only policy.
+// Salary policy/setup. Payroll now has equal write access on every
+// table this page touches (RLS was expanded to full HR/Payroll parity),
+// so the company-wide sections (Company Registration Details, Commission
+// Plans, Payroll Condition Rules, Attendance Deduction Rules, Basic Pay
+// Overview) live in components/payroll/* and are mounted on both this
+// page and app/payroll/salary/page.tsx -- one owner for each, not a
+// second copy kept in sync by hand. Per-employee assignment sections
+// (Basic Pay set, plan/rule assignment, Payroll Details, Log Booking)
+// are still inline here only, pending the same extraction.
 export default function HrSalaryPage() {
   const todayStr = new Date().toISOString().slice(0, 10);
 
@@ -177,71 +179,42 @@ export default function HrSalaryPage() {
   const [payrollForm, setPayrollForm] = useState<PayrollDetails>(BLANK_PAYROLL_DETAILS);
   const [savingPayrollDetails, setSavingPayrollDetails] = useState(false);
 
-  // Company-wide (not per-employee) registration numbers -- single row
-  // in hrms_settings, same shape as the existing attendance-cutoff
-  // settings that table already holds. Loaded once on mount alongside
-  // employees/compensation, not per-employee like payrollForm.
-  const [companySettings, setCompanySettings] = useState<CompanySettings>({ company_cin: "", company_gstin: "" });
-  const [savingCompanySettings, setSavingCompanySettings] = useState(false);
-
-  // Latest Basic Pay per employee, company-wide -- separate from
-  // `history`, which only ever holds the ONE currently-selected
-  // employee's full history. This map is what makes "who's missing
-  // Basic Pay" visible at all; without it there was no query anywhere
-  // that looked across every employee at once.
-  const [compensationMap, setCompensationMap] = useState<Record<string, number>>({});
-  const [showOnlyMissing, setShowOnlyMissing] = useState(true);
-  const [bulkPayAmounts, setBulkPayAmounts] = useState<Record<string, string>>({});
-  const [bulkPayEffectiveFrom, setBulkPayEffectiveFrom] = useState(todayStr);
-  const [bulkPaySaving, setBulkPaySaving] = useState(false);
-
-  // Commission Plans -- company-wide, immutable once created (a rate
-  // change is a new plan, never an edit to an existing one, same
-  // reasoning as Basic Pay never being mutated in place). Assignment
-  // to an employee is its own separate effective-dated history table,
-  // same "drawer" nullable-FK pattern as everywhere else in this phase:
-  // a row with plan_id = null means unassigned from that date.
+  // Commission Plans list -- the create form now lives in
+  // components/payroll/CommissionPlansBuilder.tsx (mounted below,
+  // passed loadCommissionPlans as onCreated); this state stays here
+  // because the plan-assignment dropdown further down still needs it.
+  // Assignment to an employee is its own separate effective-dated
+  // history table, same "drawer" nullable-FK pattern as everywhere else
+  // in this phase: a row with plan_id = null means unassigned from that
+  // date.
   const [commissionPlans, setCommissionPlans] = useState<CommissionPlan[]>([]);
-  const [newPlanName, setNewPlanName] = useState("");
-  const [newPlanTiers, setNewPlanTiers] = useState([{ min_bookings: "0", rate_type: "PERCENT_OF_SALE_VALUE", rate_value: "" }]);
-  const [savingPlan, setSavingPlan] = useState(false);
 
   const [commissionAssignments, setCommissionAssignments] = useState<CommissionAssignmentRow[]>([]);
   const [assignPlanId, setAssignPlanId] = useState("");
   const [assignPlanEffectiveFrom, setAssignPlanEffectiveFrom] = useState(todayStr);
   const [assigningPlan, setAssigningPlan] = useState(false);
 
-  // Payroll Condition Rules -- same immutable-once-created + effective-
-  // dated-assignment shape as Commission Plans above. metric is fixed to
-  // 'BOOKINGS_COUNT' (the only metric the DB CHECK constraint currently
-  // allows); refund_on_recovery drives the cross-month refund logic at
-  // computation time (lib/computePayrollAdjustments.ts).
+  // Payroll Condition Rules list -- create form lives in
+  // components/payroll/PayrollConditionRulesBuilder.tsx; this state
+  // stays here for the rule-assignment dropdown below.
   const [conditionRules, setConditionRules] = useState<PayrollConditionRule[]>([]);
-  const [newRuleName, setNewRuleName] = useState("");
-  const [newRuleRefund, setNewRuleRefund] = useState(false);
-  const [newRuleTiers, setNewRuleTiers] = useState([{ min_metric_value: "0", salary_percent: "" }]);
-  const [savingRule, setSavingRule] = useState(false);
 
   const [ruleAssignments, setRuleAssignments] = useState<PayrollRuleAssignmentRow[]>([]);
   const [assignRuleId, setAssignRuleId] = useState("");
   const [assignRuleEffectiveFrom, setAssignRuleEffectiveFrom] = useState(todayStr);
   const [assigningRule, setAssigningRule] = useState(false);
 
-  // Attendance Deduction Rules -- simpler than the two systems above: no
-  // tiers, just a name + fixed rule_type (LATE_COMING_THRESHOLD reuses
-  // calculateHrmsAttendanceStatus.ts's existing free-late-comings logic
-  // at computation time, SANDWICH_LEAVE is new logic). Unlike the other
-  // two systems, MULTIPLE concurrent assignments per employee are
-  // allowed (opt into Late Coming without Sandwich Leave, or both), so
-  // "current" is resolved per rule_type, not as one single latest row.
-  // A bare unassign row (rule_id = null) carries no type of its own --
-  // currentAttRuleForType() deliberately resolves that conservatively
-  // (fails toward "None" rather than a stale "Assigned") by unioning
-  // null rows into every type's candidate set; see the function itself.
+  // Attendance Deduction Rules list -- create form lives in
+  // components/payroll/AttendanceDeductionRulesBuilder.tsx; this state
+  // stays here for the per-type assignment dropdowns below. MULTIPLE
+  // concurrent assignments per employee are allowed (opt into Late
+  // Coming without Sandwich Leave, or both), so "current" is resolved
+  // per rule_type, not as one single latest row. A bare unassign row
+  // (rule_id = null) carries no type of its own -- currentAttRuleForType()
+  // deliberately resolves that conservatively (fails toward "None"
+  // rather than a stale "Assigned") by unioning null rows into every
+  // type's candidate set; see the function itself.
   const [attendanceRules, setAttendanceRules] = useState<AttendanceRule[]>([]);
-  const [newAttRuleName, setNewAttRuleName] = useState("");
-  const [newAttRuleType, setNewAttRuleType] = useState<AttendanceRuleType>("LATE_COMING_THRESHOLD");
-  const [savingAttRule, setSavingAttRule] = useState(false);
 
   const [attRuleAssignments, setAttRuleAssignments] = useState<AttendanceRuleAssignmentRow[]>([]);
   const [assignLateRuleId, setAssignLateRuleId] = useState("");
@@ -276,8 +249,6 @@ export default function HrSalaryPage() {
 
   useEffect(() => {
     loadEmployees();
-    loadAllCompensation();
-    loadCompanySettings();
     loadCommissionPlans();
     loadConditionRules();
     loadAttendanceRules();
@@ -409,40 +380,6 @@ export default function HrSalaryPage() {
     setAttRuleAssignments((data || []) as unknown as AttendanceRuleAssignmentRow[]);
   }
 
-  async function handleCreateAttendanceRule() {
-    if (!newAttRuleName.trim()) {
-      toast.error("Enter a rule name.");
-      return;
-    }
-
-    const {
-      data: { user }
-    } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data: me } = await supabase.from("employees").select("id").eq("auth_user_id", user.id).single();
-    if (!me) {
-      toast.error("Could not identify your employee record.");
-      return;
-    }
-
-    setSavingAttRule(true);
-    const { error } = await supabase.from("attendance_deduction_rules").insert({
-      name: newAttRuleName.trim(),
-      rule_type: newAttRuleType,
-      created_by_employee_id: me.id
-    });
-    setSavingAttRule(false);
-
-    if (error) {
-      toast.error(error.message || "Could not create rule.");
-      return;
-    }
-
-    toast.success("Attendance deduction rule created.");
-    setNewAttRuleName("");
-    loadAttendanceRules();
-  }
-
   async function handleAssignAttendanceRule(ruleId: string) {
     if (!employeeId) return;
     if (!attAssignEffectiveFrom) {
@@ -510,76 +447,6 @@ export default function HrSalaryPage() {
     setRuleAssignments((data || []) as unknown as PayrollRuleAssignmentRow[]);
   }
 
-  function addRuleTierRow() {
-    setNewRuleTiers((prev) => [...prev, { min_metric_value: "", salary_percent: "" }]);
-  }
-
-  function removeRuleTierRow(idx: number) {
-    setNewRuleTiers((prev) => prev.filter((_, i) => i !== idx));
-  }
-
-  function updateRuleTierRow(idx: number, patch: Partial<{ min_metric_value: string; salary_percent: string }>) {
-    setNewRuleTiers((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
-  }
-
-  async function handleCreateConditionRule() {
-    if (!newRuleName.trim()) {
-      toast.error("Enter a rule name.");
-      return;
-    }
-    const filled = newRuleTiers.filter((t) => t.min_metric_value !== "" && t.salary_percent !== "");
-    if (filled.length === 0) {
-      toast.error("Add at least one valid tier.");
-      return;
-    }
-    const tiers = filled.map((t, i) => ({
-      min_metric_value: Number(t.min_metric_value),
-      salary_percent: Number(t.salary_percent),
-      sort_order: i
-    }));
-    if (tiers.some((t) => !Number.isFinite(t.min_metric_value) || t.min_metric_value < 0 || !Number.isFinite(t.salary_percent) || t.salary_percent < 0 || t.salary_percent > 100)) {
-      toast.error("Tier values out of range (Min Bookings >= 0, Salary % 0-100).");
-      return;
-    }
-
-    const {
-      data: { user }
-    } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data: me } = await supabase.from("employees").select("id").eq("auth_user_id", user.id).single();
-    if (!me) {
-      toast.error("Could not identify your employee record.");
-      return;
-    }
-
-    setSavingRule(true);
-    const { data: rule, error } = await supabase
-      .from("payroll_condition_rules")
-      .insert({ name: newRuleName.trim(), metric: "BOOKINGS_COUNT", refund_on_recovery: newRuleRefund, created_by_employee_id: me.id })
-      .select("id")
-      .single();
-
-    if (error || !rule) {
-      setSavingRule(false);
-      toast.error(error?.message || "Could not create rule.");
-      return;
-    }
-
-    const { error: tiersError } = await supabase.from("payroll_condition_rule_tiers").insert(tiers.map((t) => ({ ...t, rule_id: rule.id })));
-    setSavingRule(false);
-
-    if (tiersError) {
-      toast.error(tiersError.message || "Could not save tiers.");
-      return;
-    }
-
-    toast.success("Payroll condition rule created.");
-    setNewRuleName("");
-    setNewRuleRefund(false);
-    setNewRuleTiers([{ min_metric_value: "0", salary_percent: "" }]);
-    loadConditionRules();
-  }
-
   async function handleAssignConditionRule() {
     if (!employeeId) return;
     if (!assignRuleEffectiveFrom) {
@@ -638,67 +505,6 @@ export default function HrSalaryPage() {
     setCommissionAssignments((data || []) as unknown as CommissionAssignmentRow[]);
   }
 
-  function addPlanTierRow() {
-    setNewPlanTiers((prev) => [...prev, { min_bookings: "", rate_type: "PERCENT_OF_SALE_VALUE", rate_value: "" }]);
-  }
-
-  function removePlanTierRow(idx: number) {
-    setNewPlanTiers((prev) => prev.filter((_, i) => i !== idx));
-  }
-
-  function updatePlanTierRow(idx: number, patch: Partial<{ min_bookings: string; rate_type: string; rate_value: string }>) {
-    setNewPlanTiers((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
-  }
-
-  async function handleCreateCommissionPlan() {
-    if (!newPlanName.trim()) {
-      toast.error("Enter a plan name.");
-      return;
-    }
-    const tiers = newPlanTiers
-      .map((t, i) => ({ min_bookings: Number(t.min_bookings), rate_type: t.rate_type, rate_value: Number(t.rate_value), sort_order: i }))
-      .filter((t) => Number.isFinite(t.min_bookings) && t.min_bookings >= 0 && t.rate_value > 0);
-    if (tiers.length === 0) {
-      toast.error("Add at least one valid tier.");
-      return;
-    }
-
-    const {
-      data: { user }
-    } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data: me } = await supabase.from("employees").select("id").eq("auth_user_id", user.id).single();
-    if (!me) {
-      toast.error("Could not identify your employee record.");
-      return;
-    }
-
-    setSavingPlan(true);
-    const { data: plan, error } = await supabase
-      .from("commission_plans")
-      .insert({ name: newPlanName.trim(), created_by_employee_id: me.id })
-      .select("id")
-      .single();
-
-    if (error || !plan) {
-      setSavingPlan(false);
-      toast.error(error?.message || "Could not create plan.");
-      return;
-    }
-
-    const { error: tiersError } = await supabase.from("commission_plan_tiers").insert(tiers.map((t) => ({ ...t, plan_id: plan.id })));
-    setSavingPlan(false);
-
-    if (tiersError) {
-      toast.error(tiersError.message || "Could not save tiers.");
-      return;
-    }
-
-    toast.success("Commission plan created.");
-    setNewPlanName("");
-    setNewPlanTiers([{ min_bookings: "0", rate_type: "PERCENT_OF_SALE_VALUE", rate_value: "" }]);
-    loadCommissionPlans();
-  }
 
   async function handleAssignCommissionPlan() {
     if (!employeeId) return;
@@ -741,22 +547,6 @@ export default function HrSalaryPage() {
     setLoading(false);
   }
 
-  async function loadAllCompensation() {
-    const { data } = await supabase
-      .from("employee_compensation")
-      .select("employee_id, basic_pay, effective_from")
-      .order("effective_from", { ascending: false });
-
-    // Reduce to the latest row per employee -- rows already arrive
-    // newest-first, so the first row seen for a given employee_id is
-    // their current Basic Pay, later ones for the same id are ignored.
-    const map: Record<string, number> = {};
-    for (const row of data || []) {
-      if (!(row.employee_id in map)) map[row.employee_id] = row.basic_pay;
-    }
-    setCompensationMap(map);
-  }
-
   async function loadHistory(empId: string) {
     const { data } = await supabase
       .from("employee_compensation")
@@ -775,26 +565,6 @@ export default function HrSalaryPage() {
       .eq("employee_id", empId)
       .maybeSingle();
     setPayrollForm(data ? { ...BLANK_PAYROLL_DETAILS, ...data } : BLANK_PAYROLL_DETAILS);
-  }
-
-  async function loadCompanySettings() {
-    const { data } = await supabase.from("hrms_settings").select("company_cin, company_gstin").eq("id", 1).maybeSingle();
-    if (data) setCompanySettings(data);
-  }
-
-  async function handleSaveCompanySettings() {
-    setSavingCompanySettings(true);
-    const { error } = await supabase
-      .from("hrms_settings")
-      .update({ company_cin: companySettings.company_cin || null, company_gstin: companySettings.company_gstin || null })
-      .eq("id", 1);
-    setSavingCompanySettings(false);
-
-    if (error) {
-      toast.error(error.message || "Could not save company details.");
-      return;
-    }
-    toast.success("Company registration details saved.");
   }
 
   // Payroll master data (bank/PAN/UAN/ESI/employee code/gender) -- a
@@ -894,61 +664,6 @@ export default function HrSalaryPage() {
     toast.success("Basic Pay updated.");
     setNewBasicPay("");
     loadHistory(employeeId);
-    loadAllCompensation();
-  }
-
-  // Bulk Set Basic Pay -- same insert-only/effective-dated model as
-  // handleSetBasicPay above, just N rows in one request instead of one
-  // at a time. No RPC: this insert has no cross-cutting side effect
-  // (no notification fan-out, nothing else to keep atomic with it), so
-  // a plain multi-row client insert is the right shape here, same
-  // precedent hr_document_templates already established for tables
-  // with no wrapper RPC. Only rows where HR actually typed an amount
-  // are included -- a blank row is skipped, never treated as "set to 0".
-  async function handleBulkSetBasicPay() {
-    const rows = Object.entries(bulkPayAmounts)
-      .map(([empId, amountStr]) => ({ empId, amount: Number(amountStr) }))
-      .filter((r) => r.amount > 0);
-
-    if (rows.length === 0) {
-      toast.error("Enter at least one amount.");
-      return;
-    }
-    if (!bulkPayEffectiveFrom) {
-      toast.error("Pick an effective-from date.");
-      return;
-    }
-
-    const {
-      data: { user }
-    } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data: me } = await supabase.from("employees").select("id").eq("auth_user_id", user.id).single();
-    if (!me) {
-      toast.error("Could not identify your employee record.");
-      return;
-    }
-
-    setBulkPaySaving(true);
-    const { error } = await supabase.from("employee_compensation").insert(
-      rows.map((r) => ({
-        employee_id: r.empId,
-        basic_pay: r.amount,
-        effective_from: bulkPayEffectiveFrom,
-        set_by_employee_id: me.id
-      }))
-    );
-    setBulkPaySaving(false);
-
-    if (error) {
-      toast.error(error.message || "Could not save Basic Pay.");
-      return;
-    }
-
-    toast.success(`Basic Pay set for ${rows.length} employee(s).`);
-    setBulkPayAmounts({});
-    loadAllCompensation();
-    if (employeeId && rows.some((r) => r.empId === employeeId)) loadHistory(employeeId);
   }
 
   return (
@@ -963,365 +678,15 @@ export default function HrSalaryPage() {
         </p>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
-        <p className="text-sm font-bold text-slate-800">Company Registration Details</p>
-        <p className="text-xs text-slate-500 -mt-2">Shown in the slip header, blank until set. Company-wide, not per-employee.</p>
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="text-xs font-semibold text-slate-500">CIN</label>
-            <input
-              type="text"
-              value={companySettings.company_cin || ""}
-              onChange={(e) => setCompanySettings((prev) => ({ ...prev, company_cin: e.target.value }))}
-              className="mt-1 h-9 w-48 rounded-lg bg-slate-50 border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-300"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-semibold text-slate-500">GSTIN</label>
-            <input
-              type="text"
-              value={companySettings.company_gstin || ""}
-              onChange={(e) => setCompanySettings((prev) => ({ ...prev, company_gstin: e.target.value }))}
-              className="mt-1 h-9 w-48 rounded-lg bg-slate-50 border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-300"
-            />
-          </div>
-          <button
-            onClick={handleSaveCompanySettings}
-            disabled={savingCompanySettings}
-            className="h-9 px-4 rounded-xl bg-slate-800 text-white text-xs font-bold disabled:opacity-40 hover:bg-slate-900 transition"
-          >
-            {savingCompanySettings ? "Saving..." : "Save"}
-          </button>
-        </div>
-      </div>
+      <CompanyRegistrationDetails />
 
-      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
-        <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-          <Percent size={15} className="text-violet-600" /> Commission Plans
-        </p>
-        <p className="text-xs text-slate-500 -mt-2">
-          Plans are immutable once created — to change rates, create a new plan and reassign affected employees to it.
-        </p>
+      <CommissionPlansBuilder onCreated={loadCommissionPlans} />
 
-        <div className="space-y-2 pb-3 border-b border-slate-100">
-          <div>
-            <label className="text-xs font-semibold text-slate-500">Plan Name</label>
-            <input
-              type="text"
-              value={newPlanName}
-              onChange={(e) => setNewPlanName(e.target.value)}
-              placeholder="e.g. Sales Executive — Standard"
-              className="mt-1 h-9 w-64 rounded-lg bg-slate-50 border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300"
-            />
-          </div>
+      <PayrollConditionRulesBuilder onCreated={loadConditionRules} />
 
-          <div className="space-y-1.5">
-            {newPlanTiers.map((tier, idx) => (
-              <div key={idx} className="flex items-end gap-2">
-                <div>
-                  <label className="text-xs font-semibold text-slate-500">Min Bookings</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={tier.min_bookings}
-                    onChange={(e) => updatePlanTierRow(idx, { min_bookings: e.target.value })}
-                    className="mt-1 h-8 w-20 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-slate-500">Rate Type</label>
-                  <select
-                    value={tier.rate_type}
-                    onChange={(e) => updatePlanTierRow(idx, { rate_type: e.target.value })}
-                    className="mt-1 h-8 w-44 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300"
-                  >
-                    <option value="PERCENT_OF_SALE_VALUE">% of Sale Value</option>
-                    <option value="FLAT_PER_BOOKING">Flat Rs. per Booking</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-slate-500">{tier.rate_type === "FLAT_PER_BOOKING" ? "Rs. / booking" : "Rate %"}</label>
-                  <input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={tier.rate_value}
-                    onChange={(e) => updatePlanTierRow(idx, { rate_value: e.target.value })}
-                    className="mt-1 h-8 w-24 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300"
-                  />
-                </div>
-                {newPlanTiers.length > 1 && (
-                  <button onClick={() => removePlanTierRow(idx)} className="h-8 text-xs font-bold text-red-500 hover:underline">
-                    Remove
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
+      <AttendanceDeductionRulesBuilder onCreated={loadAttendanceRules} />
 
-          <div className="flex items-center gap-3">
-            <button onClick={addPlanTierRow} className="text-xs font-bold text-violet-600 hover:underline">
-              + Add Tier
-            </button>
-            <button
-              onClick={handleCreateCommissionPlan}
-              disabled={savingPlan}
-              className="h-9 px-4 rounded-xl bg-violet-600 text-white text-xs font-bold disabled:opacity-40 hover:bg-violet-700 transition"
-            >
-              {savingPlan ? "Creating..." : "Create Plan"}
-            </button>
-          </div>
-        </div>
-
-        {commissionPlans.length === 0 ? (
-          <p className="text-xs text-slate-400">No commission plans yet.</p>
-        ) : (
-          <div className="space-y-1.5 max-h-56 overflow-y-auto">
-            {commissionPlans.map((p) => (
-              <div key={p.id} className="text-xs">
-                <span className="font-bold text-slate-700">{p.name}</span>
-                <span className="text-slate-500">
-                  {" — "}
-                  {p.tiers
-                    .slice()
-                    .sort((a, b) => a.sort_order - b.sort_order)
-                    .map((t) =>
-                      t.rate_type === "FLAT_PER_BOOKING"
-                        ? `${t.min_bookings}+ bookings: Rs. ${t.rate_value}/booking`
-                        : `${t.min_bookings}+ bookings: ${t.rate_value}% of sale value`
-                    )
-                    .join("; ")}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
-        <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-          <ShieldCheck size={15} className="text-rose-600" /> Payroll Condition Rules
-        </p>
-        <p className="text-xs text-slate-500 -mt-2">
-          Performance-gate rules (e.g. "4+ bookings/month for full pay, else 50%"). Immutable once created — metric is monthly booking
-          count. "Refund on recovery" means: if a cut month is immediately followed by a month that clears the top tier, the cut is
-          refunded in that next slip.
-        </p>
-
-        <div className="space-y-2 pb-3 border-b border-slate-100">
-          <div className="flex flex-wrap items-end gap-3">
-            <div>
-              <label className="text-xs font-semibold text-slate-500">Rule Name</label>
-              <input
-                type="text"
-                value={newRuleName}
-                onChange={(e) => setNewRuleName(e.target.value)}
-                placeholder="e.g. Team Lead — 4 Booking Minimum"
-                className="mt-1 h-9 w-64 rounded-lg bg-slate-50 border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-rose-100 focus:border-rose-300"
-              />
-            </div>
-            <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 cursor-pointer h-9">
-              <input
-                type="checkbox"
-                checked={newRuleRefund}
-                onChange={(e) => setNewRuleRefund(e.target.checked)}
-                style={{ appearance: "auto" }}
-                className="h-4 w-4 shrink-0 accent-rose-600 cursor-pointer"
-              />
-              Refund on recovery (consecutive month only)
-            </label>
-          </div>
-
-          <div className="space-y-1.5">
-            {newRuleTiers.map((tier, idx) => (
-              <div key={idx} className="flex items-end gap-2">
-                <div>
-                  <label className="text-xs font-semibold text-slate-500">Min Bookings/Month</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={tier.min_metric_value}
-                    onChange={(e) => updateRuleTierRow(idx, { min_metric_value: e.target.value })}
-                    className="mt-1 h-8 w-32 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-rose-100 focus:border-rose-300"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-slate-500">Salary % Paid</label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    value={tier.salary_percent}
-                    onChange={(e) => updateRuleTierRow(idx, { salary_percent: e.target.value })}
-                    className="mt-1 h-8 w-24 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-rose-100 focus:border-rose-300"
-                  />
-                </div>
-                {newRuleTiers.length > 1 && (
-                  <button onClick={() => removeRuleTierRow(idx)} className="h-8 text-xs font-bold text-red-500 hover:underline">
-                    Remove
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-
-          <div className="flex items-center gap-3">
-            <button onClick={addRuleTierRow} className="text-xs font-bold text-rose-600 hover:underline">
-              + Add Tier
-            </button>
-            <button
-              onClick={handleCreateConditionRule}
-              disabled={savingRule}
-              className="h-9 px-4 rounded-xl bg-rose-600 text-white text-xs font-bold disabled:opacity-40 hover:bg-rose-700 transition"
-            >
-              {savingRule ? "Creating..." : "Create Rule"}
-            </button>
-          </div>
-        </div>
-
-        {conditionRules.length === 0 ? (
-          <p className="text-xs text-slate-400">No payroll condition rules yet.</p>
-        ) : (
-          <div className="space-y-1.5 max-h-56 overflow-y-auto">
-            {conditionRules.map((r) => (
-              <div key={r.id} className="text-xs">
-                <span className="font-bold text-slate-700">{r.name}</span>
-                {r.refund_on_recovery && <span className="ml-1.5 text-rose-600 font-semibold">(refund-eligible)</span>}
-                <span className="text-slate-500">
-                  {" — "}
-                  {r.tiers
-                    .slice()
-                    .sort((a, b) => a.sort_order - b.sort_order)
-                    .map((t) => `${t.min_metric_value}+ bookings: ${t.salary_percent}% pay`)
-                    .join("; ")}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
-        <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-          <AlarmClock size={15} className="text-cyan-600" /> Attendance Deduction Rules
-        </p>
-        <p className="text-xs text-slate-500 -mt-2">
-          Opt-in per employee — not every employee needs these. Late Coming reuses the existing 2-free-per-month policy; Sandwich Leave
-          treats a weekly-off between two absences as a paid deduction too. No numeric setup here; each is just a named rule of one of
-          the two types.
-        </p>
-
-        <div className="flex flex-wrap items-end gap-3 pb-3 border-b border-slate-100">
-          <div>
-            <label className="text-xs font-semibold text-slate-500">Rule Name</label>
-            <input
-              type="text"
-              value={newAttRuleName}
-              onChange={(e) => setNewAttRuleName(e.target.value)}
-              placeholder="e.g. Late Coming Deduction"
-              className="mt-1 h-9 w-64 rounded-lg bg-slate-50 border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-cyan-100 focus:border-cyan-300"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-semibold text-slate-500">Type</label>
-            <select
-              value={newAttRuleType}
-              onChange={(e) => setNewAttRuleType(e.target.value as AttendanceRuleType)}
-              className="mt-1 h-9 w-48 rounded-lg bg-slate-50 border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-cyan-100 focus:border-cyan-300"
-            >
-              <option value="LATE_COMING_THRESHOLD">Late Coming</option>
-              <option value="SANDWICH_LEAVE">Sandwich Leave</option>
-            </select>
-          </div>
-          <button
-            onClick={handleCreateAttendanceRule}
-            disabled={savingAttRule}
-            className="h-9 px-4 rounded-xl bg-cyan-600 text-white text-xs font-bold disabled:opacity-40 hover:bg-cyan-700 transition"
-          >
-            {savingAttRule ? "Creating..." : "Create Rule"}
-          </button>
-        </div>
-
-        {attendanceRules.length === 0 ? (
-          <p className="text-xs text-slate-400">No attendance deduction rules yet.</p>
-        ) : (
-          <div className="space-y-1.5 max-h-56 overflow-y-auto">
-            {attendanceRules.map((r) => (
-              <div key={r.id} className="text-xs">
-                <span className="font-bold text-slate-700">{r.name}</span>
-                <span className="text-slate-500"> — {ATTENDANCE_RULE_TYPE_LABELS[r.rule_type]}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-            <AlertTriangle size={15} className="text-amber-500" /> Basic Pay Overview
-          </p>
-          <div className="flex gap-1.5">
-            <button
-              onClick={() => setShowOnlyMissing(true)}
-              className={`h-8 px-3 rounded-lg text-xs font-bold transition ${showOnlyMissing ? "bg-amber-100 text-amber-700" : "bg-slate-50 text-slate-500"}`}
-            >
-              Missing Basic Pay ({employees.filter((e) => !(e.id in compensationMap)).length})
-            </button>
-            <button
-              onClick={() => setShowOnlyMissing(false)}
-              className={`h-8 px-3 rounded-lg text-xs font-bold transition ${!showOnlyMissing ? "bg-slate-800 text-white" : "bg-slate-50 text-slate-500"}`}
-            >
-              All Employees
-            </button>
-          </div>
-        </div>
-
-        {(() => {
-          const rows = employees.filter((e) => !showOnlyMissing || !(e.id in compensationMap));
-          if (rows.length === 0) {
-            return <p className="text-xs text-slate-400">Everyone has Basic Pay set.</p>;
-          }
-          return (
-            <>
-              <div className="flex flex-wrap items-end gap-3 pb-2 border-b border-slate-100">
-                <div>
-                  <label className="text-xs font-semibold text-slate-500">Effective From (applies to all rows filled below)</label>
-                  <DateInput value={bulkPayEffectiveFrom} onChange={setBulkPayEffectiveFrom} />
-                </div>
-                <button
-                  onClick={handleBulkSetBasicPay}
-                  disabled={bulkPaySaving}
-                  className="h-10 px-4 rounded-xl bg-emerald-600 text-white text-xs font-bold disabled:opacity-40 hover:bg-emerald-700 transition"
-                >
-                  {bulkPaySaving ? "Saving..." : "Save All"}
-                </button>
-              </div>
-
-              <div className="max-h-72 overflow-y-auto space-y-1.5">
-                {rows.map((e) => (
-                  <div key={e.id} className="flex items-center gap-3 text-xs">
-                    <span className="flex-1 text-slate-700 font-semibold">{e.name}</span>
-                    <span
-                      className={`w-24 shrink-0 text-right font-bold ${e.id in compensationMap ? "text-emerald-600" : "text-amber-600"}`}
-                    >
-                      {e.id in compensationMap ? `Rs. ${formatINR(compensationMap[e.id])}` : "Missing"}
-                    </span>
-                    <input
-                      type="number"
-                      min={0}
-                      value={bulkPayAmounts[e.id] || ""}
-                      onChange={(ev) => setBulkPayAmounts((prev) => ({ ...prev, [e.id]: ev.target.value }))}
-                      placeholder="New amount"
-                      className="w-28 h-8 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-300"
-                    />
-                  </div>
-                ))}
-              </div>
-            </>
-          );
-        })()}
-      </div>
+      <BasicPayOverview employeeId={employeeId} onSavedForEmployee={() => loadHistory(employeeId)} />
 
       <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
         <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
