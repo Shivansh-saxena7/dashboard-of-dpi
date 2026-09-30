@@ -7,6 +7,7 @@ import { IndianRupee, History, AlertTriangle, Percent, ShieldCheck, AlarmClock, 
 import { supabase } from "@/lib/supabase";
 import DateInput from "@/components/DateInput";
 import { formatINR } from "@/lib/exportTable";
+import { fetchAllRows } from "@/lib/fetchAllRows";
 
 interface EmployeeRow {
   id: string;
@@ -144,6 +145,14 @@ interface BookingRow {
   lead: { name: string } | null;
 }
 
+interface MissingSaleValueLead {
+  id: string;
+  name: string;
+  mobile: string;
+  current_owner_id: string | null;
+  board_stage_changed_at: string | null;
+}
+
 const EMPLOYMENT_TYPES = ["Full-time", "Part-time", "Contract", "Probation"];
 
 // Salary policy/setup, fully owned by HR (write) -- Payroll gets a
@@ -256,6 +265,15 @@ export default function HrSalaryPage() {
   const [savingBooking, setSavingBooking] = useState(false);
   const [employeeBookings, setEmployeeBookings] = useState<BookingRow[]>([]);
 
+  // Company-wide "who still needs a sale value logged" -- every
+  // CONVERTED/BOOKING lead with no matching bookings row. Booking COUNT
+  // (for condition rules) updates the instant a lead is marked booked;
+  // the sale VALUE (for commission) requires this separate manual HR
+  // step with no reminder otherwise, so commission can silently stay
+  // Rs. 0 for weeks with nothing surfacing it. Same "overview card"
+  // pattern as Basic Pay Overview above.
+  const [missingSaleValueLeads, setMissingSaleValueLeads] = useState<MissingSaleValueLead[]>([]);
+
   useEffect(() => {
     loadEmployees();
     loadAllCompensation();
@@ -263,6 +281,7 @@ export default function HrSalaryPage() {
     loadCommissionPlans();
     loadConditionRules();
     loadAttendanceRules();
+    loadMissingSaleValueLeads();
   }, []);
 
   useEffect(() => {
@@ -286,14 +305,15 @@ export default function HrSalaryPage() {
   }, [employeeId]);
 
   async function loadEmployeeLeads(empId: string) {
-    const { data } = await supabase
-      .from("leads")
-      .select("id, name, mobile")
-      .eq("current_owner_id", empId)
-      .eq("status", "CONVERTED")
-      .eq("board_stage", "BOOKING")
-      .order("name");
-    setEmployeeLeads(data || []);
+    const [{ data }, { data: bookingRows }] = await Promise.all([
+      supabase.from("leads").select("id, name, mobile").eq("current_owner_id", empId).eq("status", "CONVERTED").eq("board_stage", "BOOKING").order("name"),
+      supabase.from("bookings").select("lead_id").eq("employee_id", empId)
+    ]);
+    // Excludes leads that already have a sale value logged -- a lead
+    // should only ever get one bookings row, this keeps the dropdown
+    // from making it easy to accidentally log a second one.
+    const loggedLeadIds = new Set((bookingRows || []).map((b) => b.lead_id));
+    setEmployeeLeads((data || []).filter((l) => !loggedLeadIds.has(l.id)));
   }
 
   async function loadEmployeeBookings(empId: string) {
@@ -303,6 +323,25 @@ export default function HrSalaryPage() {
       .eq("employee_id", empId)
       .order("booked_at", { ascending: false });
     setEmployeeBookings((data || []) as unknown as BookingRow[]);
+  }
+
+  // leads is in CLAUDE.md's large-table allowlist -- fetchAllRows, not a
+  // bare .select(), even though this filtered CONVERTED/BOOKING subset
+  // is realistically small today.
+  async function loadMissingSaleValueLeads() {
+    const { data: bookedLeads } = await fetchAllRows(
+      () =>
+        supabase
+          .from("leads")
+          .select("id, name, mobile, current_owner_id, board_stage_changed_at", { count: "exact" })
+          .eq("status", "CONVERTED")
+          .eq("board_stage", "BOOKING")
+          .order("id"),
+      { anomalyContext: { supabase, source: "hr_salary_missing_sale_value" } }
+    );
+    const { data: bookingRows } = await supabase.from("bookings").select("lead_id");
+    const loggedLeadIds = new Set((bookingRows || []).map((b) => b.lead_id));
+    setMissingSaleValueLeads((bookedLeads || []).filter((l) => !loggedLeadIds.has(l.id)));
   }
 
   async function handleLogBooking() {
@@ -350,6 +389,8 @@ export default function HrSalaryPage() {
     setSelectedLeadId("");
     setBookingSaleValue("");
     loadEmployeeBookings(employeeId);
+    loadEmployeeLeads(employeeId);
+    loadMissingSaleValueLeads();
   }
 
   async function loadAttendanceRules() {
@@ -1280,6 +1321,42 @@ export default function HrSalaryPage() {
             </>
           );
         })()}
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
+        <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+          <AlertTriangle size={15} className="text-amber-500" /> Bookings Missing Sale Value ({missingSaleValueLeads.length})
+        </p>
+        <p className="text-xs text-slate-500 -mt-2">
+          Leads already marked Converted / Booking with no sale value logged yet — their commission stays Rs. 0 until you log one below.
+          Click a row to jump straight to that employee's Log Booking section.
+        </p>
+
+        {missingSaleValueLeads.length === 0 ? (
+          <p className="text-xs text-slate-400">Every booked lead has a sale value logged.</p>
+        ) : (
+          <div className="max-h-56 overflow-y-auto space-y-1.5">
+            {missingSaleValueLeads.map((l) => {
+              const owner = employees.find((e) => e.id === l.current_owner_id);
+              return (
+                <button
+                  key={l.id}
+                  onClick={() => setEmployeeId(l.current_owner_id || "")}
+                  disabled={!l.current_owner_id}
+                  className="flex items-center gap-3 text-xs w-full text-left rounded-lg px-2 py-1.5 hover:bg-amber-50 transition disabled:hover:bg-transparent disabled:cursor-default"
+                >
+                  <span className="flex-1 text-slate-700 font-semibold truncate">
+                    {l.name} <span className="text-slate-400 font-normal">({l.mobile})</span>
+                  </span>
+                  <span className="text-slate-500">{owner?.name || "Unowned"}</span>
+                  <span className="text-slate-400 w-24 shrink-0 text-right">
+                    {l.board_stage_changed_at ? new Date(l.board_stage_changed_at).toLocaleDateString("en-IN") : "—"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm max-w-sm">

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import toast from "react-hot-toast";
-import { IndianRupee, FileText, Download, Upload, Printer, Percent, ShieldCheck, AlarmClock } from "lucide-react";
+import { IndianRupee, FileText, Download, Upload, Printer, Percent, ShieldCheck, AlarmClock, ClipboardCheck, Briefcase } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import DateInput from "@/components/DateInput";
 import { buildSalarySlipBlob, buildBulkSalarySlipPdf, SalarySlipInput } from "@/lib/generateHrDocumentPdf";
@@ -12,9 +12,11 @@ import {
   computeCommissionForMonth,
   computeConditionRuleForMonth,
   computeAttendanceDeductionForMonth,
+  computeReimbursementForMonth,
   CommissionComputeResult,
   ConditionRuleComputeResult,
-  AttendanceDeductionComputeResult
+  AttendanceDeductionComputeResult,
+  ReimbursementComputeResult
 } from "@/lib/computePayrollAdjustments";
 
 interface EmployeeRow {
@@ -91,6 +93,19 @@ interface AttendanceRuleAssignmentRow {
   rule: { name: string; rule_type: AttendanceRuleType } | null;
 }
 
+interface LeadOption {
+  id: string;
+  name: string;
+  mobile: string;
+}
+
+interface BookingRow {
+  id: string;
+  sale_value: number;
+  booked_at: string;
+  lead: { name: string } | null;
+}
+
 function monthLabel(yyyyMm: string): string {
   const [y, m] = yyyyMm.split("-").map(Number);
   return new Date(y, m - 1, 1).toLocaleDateString("en-IN", { year: "numeric", month: "long" });
@@ -156,6 +171,19 @@ export default function PayrollSalaryPage() {
   const [signedCopyLabel, setSignedCopyLabel] = useState("");
   const [uploadingSignedCopy, setUploadingSignedCopy] = useState(false);
 
+  // Log Booking -- ported verbatim from app/hr/salary/page.tsx now that
+  // Payroll has full write access on `bookings` too (the RLS parity
+  // change), not just HR. Same scoping: only leads already marked
+  // Converted/Booking for this employee, excluding ones that already
+  // have a sale value logged (a lead should only ever get one bookings
+  // row).
+  const [employeeLeads, setEmployeeLeads] = useState<LeadOption[]>([]);
+  const [selectedLeadId, setSelectedLeadId] = useState("");
+  const [bookingSaleValue, setBookingSaleValue] = useState("");
+  const [bookingDate, setBookingDate] = useState(todayStr);
+  const [savingBooking, setSavingBooking] = useState(false);
+  const [employeeBookings, setEmployeeBookings] = useState<BookingRow[]>([]);
+
   const [bulkMonth, setBulkMonth] = useState(todayStr.slice(0, 7));
   const [bulkEmployeeIds, setBulkEmployeeIds] = useState<Set<string>>(new Set());
   const [bulkGenerating, setBulkGenerating] = useState(false);
@@ -164,6 +192,7 @@ export default function PayrollSalaryPage() {
   const [commissionResult, setCommissionResult] = useState<CommissionComputeResult | null>(null);
   const [conditionRuleResult, setConditionRuleResult] = useState<ConditionRuleComputeResult | null>(null);
   const [attendanceDeductionResult, setAttendanceDeductionResult] = useState<AttendanceDeductionComputeResult | null>(null);
+  const [reimbursementResult, setReimbursementResult] = useState<ReimbursementComputeResult | null>(null);
   // Which month + employee the results above were actually computed
   // for -- Generate Slip only ever uses them when both still match its
   // own employeeId/slipMonth at click time, so switching the month (or
@@ -171,10 +200,37 @@ export default function PayrollSalaryPage() {
   // numbers to a different slip.
   const [computedForKey, setComputedForKey] = useState<string | null>(null);
 
+  // Compute completion tracking -- company-wide, for a given month: has
+  // Compute been run for this employee at all, and has a slip actually
+  // been generated. employee_monthly_attendance_deduction_results is the
+  // completion signal: Compute always upserts a row there now (the
+  // absence-LOP fix made it unconditional, no more skip-without-
+  // persisting), so its presence for (employee_id, pay_period) alone
+  // means "this employee has been computed this month," independent of
+  // whether they have commission/condition-rules assigned at all.
+  const [completionMonth, setCompletionMonth] = useState(todayStr.slice(0, 7));
+  const [computedEmployeeIds, setComputedEmployeeIds] = useState<Set<string>>(new Set());
+  const [slipGeneratedEmployeeIds, setSlipGeneratedEmployeeIds] = useState<Set<string>>(new Set());
+
   useEffect(() => {
     loadEmployees();
     loadCompanySettings();
   }, []);
+
+  useEffect(() => {
+    loadCompletionStatus(completionMonth);
+  }, [completionMonth]);
+
+  async function loadCompletionStatus(month: string) {
+    const payPeriod = `${month}-01`;
+    const periodLabel = monthLabel(month);
+    const [{ data: computedRows }, { data: slipRows }] = await Promise.all([
+      supabase.from("employee_monthly_attendance_deduction_results").select("employee_id").eq("pay_period", payPeriod),
+      supabase.from("hr_documents").select("employee_id").eq("document_type", "SALARY_SLIP").eq("label", `Salary Slip - ${periodLabel}`)
+    ]);
+    setComputedEmployeeIds(new Set((computedRows || []).map((r) => r.employee_id)));
+    setSlipGeneratedEmployeeIds(new Set((slipRows || []).filter((r) => r.employee_id).map((r) => r.employee_id as string)));
+  }
 
   useEffect(() => {
     if (employeeId) {
@@ -184,6 +240,8 @@ export default function PayrollSalaryPage() {
       loadCurrentCommission(employeeId);
       loadCurrentConditionRule(employeeId);
       loadCurrentAttendanceRules(employeeId);
+      loadEmployeeLeads(employeeId);
+      loadEmployeeBookings(employeeId);
     } else {
       setHistory([]);
       setPayrollForm(BLANK_PAYROLL_DETAILS);
@@ -192,11 +250,24 @@ export default function PayrollSalaryPage() {
       setCurrentRuleAssignment(null);
       setCurrentLateRule(null);
       setCurrentSandwichRule(null);
+      setEmployeeLeads([]);
+      setEmployeeBookings([]);
+      setSelectedLeadId("");
+      setBookingSaleValue("");
     }
     setCommissionResult(null);
     setConditionRuleResult(null);
     setAttendanceDeductionResult(null);
+    setReimbursementResult(null);
     setComputedForKey(null);
+    // Same staleness risk as the Compute-reclick clobbering bug, just
+    // the other direction: without this, switching to a different
+    // employee left the PREVIOUS employee's Paid/LOP/Working Days
+    // sitting in the form, easy to miss and silently apply to the
+    // wrong person's slip.
+    setPaidDaysOverride("");
+    setLopDaysOverride("");
+    setTotalWorkingDaysOverride("");
   }, [employeeId]);
 
   async function loadEmployees() {
@@ -228,6 +299,74 @@ export default function PayrollSalaryPage() {
       .eq("employee_id", empId)
       .maybeSingle();
     setPayrollForm(data ? { ...BLANK_PAYROLL_DETAILS, ...data } : BLANK_PAYROLL_DETAILS);
+  }
+
+  async function loadEmployeeLeads(empId: string) {
+    const [{ data }, { data: bookingRows }] = await Promise.all([
+      supabase
+        .from("leads")
+        .select("id, name, mobile")
+        .eq("current_owner_id", empId)
+        .eq("status", "CONVERTED")
+        .eq("board_stage", "BOOKING")
+        .order("name"),
+      supabase.from("bookings").select("lead_id").eq("employee_id", empId)
+    ]);
+    const loggedLeadIds = new Set((bookingRows || []).map((b) => b.lead_id));
+    setEmployeeLeads((data || []).filter((l) => !loggedLeadIds.has(l.id)));
+  }
+
+  async function loadEmployeeBookings(empId: string) {
+    const { data } = await supabase
+      .from("bookings")
+      .select("id, sale_value, booked_at, lead:leads(name)")
+      .eq("employee_id", empId)
+      .order("booked_at", { ascending: false });
+    setEmployeeBookings((data || []) as unknown as BookingRow[]);
+  }
+
+  async function handleLogBooking() {
+    if (!employeeId) return;
+    if (!selectedLeadId) {
+      toast.error("Select a booked lead.");
+      return;
+    }
+    const amount = Number(bookingSaleValue);
+    if (!amount || amount <= 0) {
+      toast.error("Enter a valid sale value.");
+      return;
+    }
+    if (!bookingDate) {
+      toast.error("Pick a booking date.");
+      return;
+    }
+    const {
+      data: { user }
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data: me } = await supabase.from("employees").select("id").eq("auth_user_id", user.id).single();
+    if (!me) {
+      toast.error("Could not identify your employee record.");
+      return;
+    }
+    setSavingBooking(true);
+    const { error } = await supabase.from("bookings").insert({
+      lead_id: selectedLeadId,
+      employee_id: employeeId,
+      sale_value: amount,
+      booked_at: `${bookingDate}T00:00:00`,
+      created_by_employee_id: me.id
+    });
+    setSavingBooking(false);
+    if (error) {
+      toast.error(error.message || "Could not log booking.");
+      return;
+    }
+    toast.success("Booking logged.");
+    setSelectedLeadId("");
+    setBookingSaleValue("");
+    loadEmployeeBookings(employeeId);
+    loadEmployeeLeads(employeeId);
   }
 
   async function loadSlips(empId: string) {
@@ -293,21 +432,34 @@ export default function PayrollSalaryPage() {
       return;
     }
 
+    // Captured before setComputedForKey below overwrites it -- true only
+    // the FIRST time Compute runs for this exact employee+month. Without
+    // this guard, LOP Days always got overwritten on every re-click
+    // (absenceLopDays' fix made attendanceDeduction.skipped permanently
+    // falsy), so a manual correction Payroll typed in by hand -- e.g.
+    // for an approved leave this project has no other way to represent
+    // yet -- was silently wiped the next time Compute ran for any
+    // reason (say, to refresh a late-logged commission number).
+    const isFirstComputeForThisKey = computedForKey !== `${employeeId}:${slipMonth}`;
+
     setComputingAdjustments(true);
     try {
-      const [commission, conditionRule, attendanceDeduction] = await Promise.all([
+      const [commission, conditionRule, attendanceDeduction, reimbursement] = await Promise.all([
         computeCommissionForMonth(employeeId, slipMonth, me.id),
         computeConditionRuleForMonth(employeeId, slipMonth, me.id),
-        computeAttendanceDeductionForMonth(employeeId, slipMonth, me.id)
+        computeAttendanceDeductionForMonth(employeeId, slipMonth, me.id),
+        computeReimbursementForMonth(employeeId, slipMonth)
       ]);
       setCommissionResult(commission);
       setConditionRuleResult(conditionRule);
       setAttendanceDeductionResult(attendanceDeduction);
+      setReimbursementResult(reimbursement);
       setComputedForKey(`${employeeId}:${slipMonth}`);
-      if (!attendanceDeduction.skipped) {
+      if (!attendanceDeduction.skipped && isFirstComputeForThisKey) {
         setLopDaysOverride(String(attendanceDeduction.totalLopDays));
       }
       toast.success(`Adjustments computed for ${monthLabel(slipMonth)}.`);
+      if (slipMonth === completionMonth) loadCompletionStatus(completionMonth);
     } catch (err) {
       console.error(err);
       toast.error("Could not compute adjustments.");
@@ -349,6 +501,7 @@ export default function PayrollSalaryPage() {
       const commissionAmount = adjustmentsMatchCurrent ? commissionResult?.commissionAmount || 0 : 0;
       const performanceCutAmount = adjustmentsMatchCurrent ? conditionRuleResult?.baseCutAmount || 0 : 0;
       const performanceRefundAmount = adjustmentsMatchCurrent ? conditionRuleResult?.refundAppliedAmount || 0 : 0;
+      const reimbursementAmount = adjustmentsMatchCurrent ? reimbursementResult?.reimbursementAmount || 0 : 0;
 
       const blob = await buildSalarySlipBlob({
         employeeName: employee.name,
@@ -380,7 +533,8 @@ export default function PayrollSalaryPage() {
         logoDataUrl,
         commissionAmount,
         performanceCutAmount,
-        performanceRefundAmount
+        performanceRefundAmount,
+        reimbursementAmount
       });
 
       const storagePath = `${employeeId}/${crypto.randomUUID()}-salary-slip.pdf`;
@@ -407,6 +561,7 @@ export default function PayrollSalaryPage() {
 
       toast.success(`Salary slip generated for ${periodLabel}.`);
       loadSlips(employeeId);
+      if (slipMonth === completionMonth) loadCompletionStatus(completionMonth);
     } catch (err) {
       console.error(err);
       toast.error("Something went wrong.");
@@ -492,13 +647,26 @@ export default function PayrollSalaryPage() {
   // Bulk Print -- a separate, print-only convenience: it never touches
   // hr_documents, never calls register_hr_document_atomic, and doesn't
   // change the individual Generate Slip flow above at all. It just lays
-  // each selected employee's slip (resolved the same as-of-that-month
-  // way handleGenerateSlip does) onto shared A4 sheets and triggers a
-  // direct download. Uses flat defaults (no per-employee Compute), same
-  // as before the role split.
+  // each selected employee's slip onto shared A4 sheets and triggers a
+  // direct download. Runs the SAME Compute (commission/condition-rule/
+  // attendance-deduction) per selected employee as the individual
+  // Generate Slip flow -- previously this used flat defaults (LOP=0, no
+  // commission), which meant an individually-generated slip and a bulk-
+  // printed slip for the same employee+month could show different
+  // numbers. Fixed 2026-09-28: both paths now always agree.
   async function handleBulkGenerate() {
     if (bulkEmployeeIds.size === 0) {
       toast.error("Select at least one employee.");
+      return;
+    }
+
+    const {
+      data: { user }
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data: me } = await supabase.from("employees").select("id").eq("auth_user_id", user.id).single();
+    if (!me) {
+      toast.error("Could not identify your employee record.");
       return;
     }
 
@@ -527,24 +695,40 @@ export default function PayrollSalaryPage() {
       const periodLabel = monthLabel(bulkMonth);
       const daysInMonth = daysInMonthOf(bulkMonth);
 
+      const eligibleEmployees = employees.filter((e) => bulkEmployeeIds.has(e.id));
       const slipsInput: SalarySlipInput[] = [];
       const skipped: string[] = [];
 
-      for (const emp of employees.filter((e) => bulkEmployeeIds.has(e.id))) {
+      // One Compute per selected employee, all in parallel -- same four
+      // functions handleComputeAdjustments uses for a single slip.
+      const computeResults = await Promise.all(
+        eligibleEmployees.map((emp) =>
+          Promise.all([
+            computeCommissionForMonth(emp.id, bulkMonth, me.id),
+            computeConditionRuleForMonth(emp.id, bulkMonth, me.id),
+            computeAttendanceDeductionForMonth(emp.id, bulkMonth, me.id),
+            computeReimbursementForMonth(emp.id, bulkMonth)
+          ])
+        )
+      );
+
+      eligibleEmployees.forEach((emp, idx) => {
         const asOfRow = (compRows || [])
           .filter((r) => r.employee_id === emp.id && r.effective_from <= periodEndDate)
           .sort((a, b) => (a.effective_from < b.effective_from ? 1 : -1))[0];
 
         if (!asOfRow) {
           skipped.push(`${emp.name} (no Basic Pay)`);
-          continue;
+          return;
         }
 
         const payroll = payrollMap.get(emp.id);
         if (!payroll?.employee_code || !payroll.employee_code.trim()) {
           skipped.push(`${emp.name} (no Employee Code)`);
-          continue;
+          return;
         }
+
+        const [commission, conditionRule, attendanceDeduction, reimbursement] = computeResults[idx];
 
         slipsInput.push({
           employeeName: emp.name,
@@ -567,15 +751,19 @@ export default function PayrollSalaryPage() {
           employmentType: payroll?.employment_type,
           employeeGrade: payroll?.employee_grade,
           paidDays: daysInMonth,
-          lopDays: 0,
+          lopDays: attendanceDeduction.skipped ? 0 : attendanceDeduction.totalLopDays,
           totalWorkingDays: daysInMonth,
           daysInMonth,
           payDate: null,
           companyCin: companySettings.company_cin,
           companyGstin: companySettings.company_gstin,
-          logoDataUrl
+          logoDataUrl,
+          commissionAmount: commission.skipped ? 0 : commission.commissionAmount,
+          performanceCutAmount: conditionRule.skipped ? 0 : conditionRule.baseCutAmount,
+          performanceRefundAmount: conditionRule.skipped ? 0 : conditionRule.refundAppliedAmount,
+          reimbursementAmount: reimbursement.skipped ? 0 : reimbursement.reimbursementAmount
         });
-      }
+      });
 
       if (slipsInput.length === 0) {
         toast.error("None of the selected employees are ready (need Basic Pay and a saved Employee Code).");
@@ -610,6 +798,32 @@ export default function PayrollSalaryPage() {
           Compute adjustments and issue salary slips. Basic Pay, Commission Plans, Condition Rules, and Attendance Deduction Rules are
           set by HR — shown here read-only.
         </p>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+            <ClipboardCheck size={15} className="text-indigo-600" /> Compute Completion — {monthLabel(completionMonth)}
+          </p>
+          <DateInput value={completionMonth} onChange={setCompletionMonth} mode="month" />
+        </div>
+        <p className="text-xs text-slate-500 -mt-2">
+          {computedEmployeeIds.size} of {employees.length} employees computed, {slipGeneratedEmployeeIds.size} slip(s) generated, for
+          this month.
+        </p>
+        <div className="max-h-56 overflow-y-auto space-y-1">
+          {employees.map((e) => (
+            <div key={e.id} className="flex items-center gap-3 text-xs">
+              <span className="flex-1 text-slate-700 font-semibold">{e.name}</span>
+              <span className={`w-32 shrink-0 font-bold ${computedEmployeeIds.has(e.id) ? "text-emerald-600" : "text-slate-400"}`}>
+                {computedEmployeeIds.has(e.id) ? "✓ Computed" : "— Not computed"}
+              </span>
+              <span className={`w-32 shrink-0 font-bold ${slipGeneratedEmployeeIds.has(e.id) ? "text-emerald-600" : "text-slate-400"}`}>
+                {slipGeneratedEmployeeIds.has(e.id) ? "✓ Slip generated" : "— No slip"}
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
@@ -704,6 +918,69 @@ export default function PayrollSalaryPage() {
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
+            <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+              <Briefcase size={15} className="text-emerald-600" /> Log Booking
+            </p>
+            <p className="text-xs text-slate-500 -mt-2">
+              Records the sale value behind one of this employee's booked leads — feeds Payroll's commission calculation. Only shows
+              leads already marked Converted / Booking.
+            </p>
+
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <label className="text-xs font-semibold text-slate-500">Booked Lead</label>
+                <select
+                  value={selectedLeadId}
+                  onChange={(e) => setSelectedLeadId(e.target.value)}
+                  className="mt-1 h-9 w-56 rounded-lg bg-slate-50 border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-300"
+                >
+                  <option value="">{employeeLeads.length === 0 ? "No booked leads" : "Select lead"}</option>
+                  {employeeLeads.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.name} ({l.mobile})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500">Sale Value (Rs.)</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={bookingSaleValue}
+                  onChange={(e) => setBookingSaleValue(e.target.value)}
+                  placeholder="e.g. 2500000"
+                  className="mt-1 h-9 w-40 rounded-lg bg-slate-50 border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-300"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-500">Booking Date</label>
+                <DateInput value={bookingDate} onChange={setBookingDate} />
+              </div>
+              <button
+                onClick={handleLogBooking}
+                disabled={savingBooking}
+                className="h-9 px-4 rounded-xl bg-emerald-600 text-white text-xs font-bold disabled:opacity-40 hover:bg-emerald-700 transition"
+              >
+                {savingBooking ? "Saving..." : "Log Booking"}
+              </button>
+            </div>
+
+            {employeeBookings.length > 0 && (
+              <div className="pt-2 border-t border-slate-100 space-y-1.5">
+                {employeeBookings.map((b) => (
+                  <div key={b.id} className="flex items-center justify-between text-xs">
+                    <span className="text-slate-600">
+                      {b.booked_at.slice(0, 10)} — {b.lead?.name || "—"}
+                    </span>
+                    <span className="font-bold text-emerald-600">Rs. {formatINR(b.sale_value)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <p className="text-sm font-bold text-slate-800">Compute Payroll Adjustments</p>
               <button
@@ -715,12 +992,12 @@ export default function PayrollSalaryPage() {
               </button>
             </div>
             <p className="text-xs text-slate-500 -mt-2">
-              Commission, condition-rule cut/refund, and attendance-deduction LOP days for the Salary Slip's month below. Safe to
-              re-run — recomputing replaces the previous result, not a duplicate.
+              Commission, condition-rule cut/refund, attendance-deduction LOP days, and paid reimbursements for the Salary Slip's month
+              below. Safe to re-run — recomputing replaces the previous result, not a duplicate.
             </p>
 
-            {(commissionResult || conditionRuleResult || attendanceDeductionResult) && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-slate-100">
+            {(commissionResult || conditionRuleResult || attendanceDeductionResult || reimbursementResult) && (
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-2 border-t border-slate-100">
                 <div className="text-xs">
                   <p className="font-bold text-slate-600">Commission</p>
                   {commissionResult?.skipped ? (
@@ -755,8 +1032,18 @@ export default function PayrollSalaryPage() {
                     <p className="text-slate-400">{attendanceDeductionResult.skipped}</p>
                   ) : (
                     <p className="text-slate-700">
-                      {attendanceDeductionResult?.totalLopDays} LOP day(s) (Late: {attendanceDeductionResult?.lateComingLopDays}, Sandwich:{" "}
-                      {attendanceDeductionResult?.sandwichLeaveLopDays})
+                      {attendanceDeductionResult?.totalLopDays} LOP day(s) (Absence: {attendanceDeductionResult?.absenceLopDays}, Late:{" "}
+                      {attendanceDeductionResult?.lateComingLopDays}, Sandwich: {attendanceDeductionResult?.sandwichLeaveLopDays})
+                    </p>
+                  )}
+                </div>
+                <div className="text-xs">
+                  <p className="font-bold text-slate-600">Reimbursements</p>
+                  {reimbursementResult?.skipped ? (
+                    <p className="text-slate-400">{reimbursementResult.skipped}</p>
+                  ) : (
+                    <p className="text-slate-700">
+                      Rs. {formatINR(reimbursementResult?.reimbursementAmount || 0)} ({reimbursementResult?.expenseCount || 0} expense(s))
                     </p>
                   )}
                 </div>

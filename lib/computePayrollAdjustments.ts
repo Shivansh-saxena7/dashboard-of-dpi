@@ -209,11 +209,27 @@ export async function computeConditionRuleForMonth(
 
 export interface AttendanceDeductionComputeResult {
   skipped: string | null;
+  absenceLopDays: number;
   lateComingLopDays: number;
   sandwichLeaveLopDays: number;
   totalLopDays: number;
 }
 
+// Plain-absence LOP (2026-09-28) -- runs for EVERY employee unconditionally,
+// no rule assignment needed: a working day (non-weekly-off) with no
+// attendance row at all is a full, unexplained absence, and this project
+// has no leave-balance/approved-leave concept to distinguish that from
+// anything else (see SalarySlipInput's own note on this) -- so "no
+// attendance = no pay for that day" is the simplest default the existing
+// data actually supports, not a new policy being invented. Explicit
+// judgment call, flagged rather than silently assumed: there is no
+// opt-out for this: HR's manual LOP Days override on the slip (never
+// silently forced) is the only escape hatch for a case that shouldn't
+// count (e.g. a flat-retainer contractor). Late Coming and Sandwich
+// Leave stay opt-in-only below, unchanged -- those convert a specific,
+// deliberate HR policy into LOP, not a universal absence fact, so they
+// don't belong in this default.
+//
 // Late Coming reuses calculateDailyHrmsStatus + applyMonthlyLateComingRule
 // verbatim -- the exact same functions and weekly-off exclusion the
 // Monthly Summary attendance view already uses (lib/calculateHrmsAttendanceStatus.ts),
@@ -238,7 +254,7 @@ export async function computeAttendanceDeductionForMonth(
   const assignments = (assignmentsRaw || []) as unknown as { rule_id: string | null; rule: { rule_type: string } | null }[];
 
   // Same conservative per-type resolution as currentAttRuleForType() in
-  // app/payroll/salary/page.tsx: latest row among {unassign rows} union
+  // app/hr/salary/page.tsx: latest row among {unassign rows} union
   // {rows of this type} -- fails toward "not active" rather than a
   // stale "active" if an unassign row's type is ambiguous.
   function isActive(type: string): boolean {
@@ -249,34 +265,34 @@ export async function computeAttendanceDeductionForMonth(
   const lateActive = isActive("LATE_COMING_THRESHOLD");
   const sandwichActive = isActive("SANDWICH_LEAVE");
 
-  if (!lateActive && !sandwichActive) {
-    return { skipped: "No attendance deduction rules assigned as of this month.", lateComingLopDays: 0, sandwichLeaveLopDays: 0, totalLopDays: 0 };
-  }
-
   const { data: settings } = await supabase.from("hrms_settings").select("first_half_ontime_cutoff, second_half_ontime_cutoff").eq("id", 1).single();
   const { data: les } = await supabase.from("lead_engine_settings").select("sla_weekly_off_day").eq("id", 1).single();
   const weeklyOffDay = les?.sla_weekly_off_day ?? 0;
 
+  const { data: monthAttendance } = await supabase
+    .from("attendance")
+    .select("date, shift_start_at, attendance_type")
+    .eq("employee_id", employeeId)
+    .gte("date", startDate)
+    .lte("date", endDate);
+
+  const workingDates: string[] = [];
+  for (let d = 1; d <= daysInMonth; d++) {
+    if (new Date(y, m - 1, d).getDay() === weeklyOffDay) continue;
+    workingDates.push(`${yyyyMm}-${String(d).padStart(2, "0")}`);
+  }
+
+  const daily: DailyHrmsStatus[] = settings
+    ? workingDates.map((date) => {
+        const row = (monthAttendance || []).find((a) => a.date === date) || null;
+        return calculateDailyHrmsStatus(row as any, settings as any);
+      })
+    : [];
+
+  const absenceLopDays = daily.filter((s) => s === "ABSENT").length;
+
   let lateComingLopDays = 0;
   if (lateActive && settings) {
-    const { data: monthAttendance } = await supabase
-      .from("attendance")
-      .select("date, shift_start_at, attendance_type")
-      .eq("employee_id", employeeId)
-      .gte("date", startDate)
-      .lte("date", endDate);
-
-    const workingDates: string[] = [];
-    for (let d = 1; d <= daysInMonth; d++) {
-      if (new Date(y, m - 1, d).getDay() === weeklyOffDay) continue;
-      workingDates.push(`${yyyyMm}-${String(d).padStart(2, "0")}`);
-    }
-
-    const daily: DailyHrmsStatus[] = workingDates.map((date) => {
-      const row = (monthAttendance || []).find((a) => a.date === date) || null;
-      return calculateDailyHrmsStatus(row as any, settings as any);
-    });
-
     const monthly = applyMonthlyLateComingRule(daily);
     lateComingLopDays = monthly.filter((s) => s === "HALF_DAY").length * 0.5;
   }
@@ -305,12 +321,13 @@ export async function computeAttendanceDeductionForMonth(
     }
   }
 
-  const totalLopDays = lateComingLopDays + sandwichLeaveLopDays;
+  const totalLopDays = absenceLopDays + lateComingLopDays + sandwichLeaveLopDays;
 
   await supabase.from("employee_monthly_attendance_deduction_results").upsert(
     {
       employee_id: employeeId,
       pay_period: payPeriod,
+      absence_lop_days: absenceLopDays,
       late_coming_lop_days: lateComingLopDays,
       sandwich_leave_lop_days: sandwichLeaveLopDays,
       total_lop_days: totalLopDays,
@@ -319,5 +336,39 @@ export async function computeAttendanceDeductionForMonth(
     { onConflict: "employee_id,pay_period" }
   );
 
-  return { skipped: null, lateComingLopDays, sandwichLeaveLopDays, totalLopDays };
+  return { skipped: null, absenceLopDays, lateComingLopDays, sandwichLeaveLopDays, totalLopDays };
+}
+
+export interface ReimbursementComputeResult {
+  skipped: string | null;
+  reimbursementAmount: number;
+  expenseCount: number;
+}
+
+// Reimbursements -- deliberately NOT a compute-and-persist function like
+// the three above: expenses.status='PAID' rows are already the final,
+// authoritative source of truth (Payroll itself sets that status when
+// marking an expense paid, on app/payroll/expenses/page.tsx), so there's
+// no calculation to freeze -- a fresh SUM every time is strictly correct
+// and avoids one more table to keep in sync. Filtered by paid_date (not
+// expense_date): a reimbursement belongs to the pay period it's actually
+// disbursed in, not the period the expense was originally incurred --
+// same reasoning as any other payroll reimbursement timing.
+export async function computeReimbursementForMonth(employeeId: string, yyyyMm: string): Promise<ReimbursementComputeResult> {
+  const { startDate, endDate } = monthBounds(yyyyMm);
+
+  const { data, error } = await supabase
+    .from("expenses")
+    .select("amount")
+    .eq("employee_id", employeeId)
+    .eq("status", "PAID")
+    .gte("paid_date", startDate)
+    .lte("paid_date", endDate);
+
+  if (error || !data || data.length === 0) {
+    return { skipped: "No paid reimbursements for this month.", reimbursementAmount: 0, expenseCount: 0 };
+  }
+
+  const reimbursementAmount = data.reduce((sum, row) => sum + Number(row.amount), 0);
+  return { skipped: null, reimbursementAmount, expenseCount: data.length };
 }

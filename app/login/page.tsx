@@ -47,6 +47,8 @@ export default function LoginPage() {
       router.replace("/coordinator");
     } else if (employee?.role === "hr") {
       router.replace("/hr/attendance");
+    } else if (employee?.role === "payroll") {
+      router.replace("/payroll/salary");
     } else {
       router.replace("/");
     }
@@ -93,6 +95,11 @@ export default function LoginPage() {
         toast.success("Welcome back!");
         setTimeout(() => {
           router.replace("/hr/attendance");
+        }, 600);
+      } else if (employee?.role === "payroll") {
+        toast.success("Welcome back!");
+        setTimeout(() => {
+          router.replace("/payroll/salary");
         }, 600);
       } else {
         toast.success("Login Successful!");

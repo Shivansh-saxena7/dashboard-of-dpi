@@ -247,6 +247,11 @@ export interface SalarySlipInput {
   commissionAmount?: number;
   performanceCutAmount?: number;
   performanceRefundAmount?: number;
+  // Sum of this employee's expenses.status='PAID' rows whose paid_date
+  // falls in this slip's month (see computeReimbursementForMonth) --
+  // closes the loop with the separate Expenses/app/payroll/expenses
+  // module instead of this row staying a permanent hardcoded 0.
+  reimbursementAmount?: number;
 }
 
 // Indian-style (lakh/crore) number-to-words for "Net Pay in Words" --
@@ -491,17 +496,16 @@ function drawOneSlip(doc: import("jspdf").jsPDF, autoTable: any, GState: any, in
   const tableStartY = infoRuleY + 6;
 
   // Earnings/Deductions -- real reference-template field list. Basic,
-  // Incentives (commission) and Performance Refund carry real figures
-  // when the caller computed them (lib/computePayrollAdjustments.ts,
-  // Payroll phase Step 3); every other row is still a hardcoded 0 (no
-  // PF/ESI/TDS calculation logic -- deferred, real-world-spec-needed
-  // work). Reimbursements and LWF get the exact same treatment as
-  // every other still-0 row -- a real amount needs a real policy/
-  // expense-tracking source this project doesn't have wired in here
-  // yet (see app/payroll/expenses/page.tsx, a separate system).
+  // Incentives (commission), Performance Refund, and Reimbursements
+  // carry real figures when the caller computed them
+  // (lib/computePayrollAdjustments.ts); every other row is still a
+  // hardcoded 0 (no PF/ESI/TDS calculation logic -- deferred, real-
+  // world-spec-needed work). LWF gets the exact same treatment as
+  // every other still-0 row.
   const commissionAmount = input.commissionAmount || 0;
   const performanceCutAmount = input.performanceCutAmount || 0;
   const performanceRefundAmount = input.performanceRefundAmount || 0;
+  const reimbursementAmount = input.reimbursementAmount || 0;
 
   const earnings: [string, string][] = [
     ["Basic", formatINR(input.basicPay)],
@@ -511,12 +515,12 @@ function drawOneSlip(doc: import("jspdf").jsPDF, autoTable: any, GState: any, in
     ["Incentives", formatINR(commissionAmount)],
     ["Bonus", formatINR(0)],
     ["Over Time Pay", formatINR(0)],
-    ["Reimbursements", formatINR(0)]
+    ["Reimbursements", formatINR(reimbursementAmount)]
   ];
   if (performanceRefundAmount > 0) {
     earnings.push(["Performance Refund", formatINR(performanceRefundAmount)]);
   }
-  const totalEarnings = input.basicPay + commissionAmount + performanceRefundAmount;
+  const totalEarnings = input.basicPay + commissionAmount + performanceRefundAmount + reimbursementAmount;
 
   const deductions: [string, string][] = [
     ["Provident Fund", formatINR(0)],
