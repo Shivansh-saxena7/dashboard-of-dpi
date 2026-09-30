@@ -46,9 +46,9 @@ export default function LoginPage() {
     } else if (employee?.role === "sales_coordinator") {
       router.replace("/coordinator");
     } else if (employee?.role === "hr") {
-      router.replace("/hr/attendance");
+      router.replace("/hr");
     } else if (employee?.role === "payroll") {
-      router.replace("/payroll/salary");
+      router.replace("/payroll");
     } else {
       router.replace("/");
     }
@@ -94,12 +94,12 @@ export default function LoginPage() {
       } else if (employee?.role === "hr") {
         toast.success("Welcome back!");
         setTimeout(() => {
-          router.replace("/hr/attendance");
+          router.replace("/hr");
         }, 600);
       } else if (employee?.role === "payroll") {
         toast.success("Welcome back!");
         setTimeout(() => {
-          router.replace("/payroll/salary");
+          router.replace("/payroll");
         }, 600);
       } else {
         toast.success("Login Successful!");

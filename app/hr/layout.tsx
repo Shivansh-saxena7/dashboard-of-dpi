@@ -21,6 +21,7 @@ import Footer from "@/components/Footer";
 // view of the same data at /payroll/salary plus the actual slip-
 // issuing controls (Compute, Generate Slip, Bulk Print).
 const menu = [
+  { name: "Home", href: "/hr", icon: "🏠" },
   { name: "Attendance", href: "/hr/attendance", icon: "🕒" },
   { name: "Candidates", href: "/hr/candidates", icon: "🧑‍🎓" },
   { name: "Documents", href: "/hr/documents", icon: "📄" },

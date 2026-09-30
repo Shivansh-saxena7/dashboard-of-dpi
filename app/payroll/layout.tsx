@@ -17,6 +17,7 @@ import Footer from "@/components/Footer";
 // discipline used for /hr -- e.g. the SIM/Email nav entry was only
 // added once that page actually existed).
 const menu = [
+  { name: "Home", href: "/payroll", icon: "🏠" },
   { name: "Salary", href: "/payroll/salary", icon: "💰" },
   { name: "Expenses", href: "/payroll/expenses", icon: "🧾" }
 ];
