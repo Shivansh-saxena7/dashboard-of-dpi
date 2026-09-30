@@ -144,11 +144,15 @@ export default function BasicPayOverview({ employeeId, onSavedForEmployee }: { e
             </button>
           </div>
 
-          <div className="max-h-72 overflow-y-auto space-y-1.5">
+          <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
             {rows.map((e) => (
-              <div key={e.id} className="flex items-center gap-3 text-xs">
-                <span className="flex-1 text-slate-700 font-semibold">{e.name}</span>
-                <span className={`w-24 shrink-0 text-right font-bold ${e.id in compensationMap ? "text-emerald-600" : "text-amber-600"}`}>
+              <div key={e.id} className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-2 sm:gap-3 sm:items-center py-2.5">
+                <span className="text-sm font-semibold text-slate-700">{e.name}</span>
+                <span
+                  className={`inline-flex items-center justify-center px-2 py-0.5 rounded-full text-[11px] font-bold w-fit sm:w-24 ${
+                    e.id in compensationMap ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
+                  }`}
+                >
                   {e.id in compensationMap ? `Rs. ${formatINR(compensationMap[e.id])}` : "Missing"}
                 </span>
                 <input
@@ -157,7 +161,7 @@ export default function BasicPayOverview({ employeeId, onSavedForEmployee }: { e
                   value={bulkPayAmounts[e.id] || ""}
                   onChange={(ev) => setBulkPayAmounts((prev) => ({ ...prev, [e.id]: ev.target.value }))}
                   placeholder="New amount"
-                  className="w-28 h-8 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-300"
+                  className="w-full sm:w-28 h-8 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-100 focus:border-emerald-300"
                 />
               </div>
             ))}

@@ -374,21 +374,25 @@ export default function HrSalaryPage() {
                 </button>
               </div>
 
-              <div className="max-h-72 overflow-y-auto space-y-1.5">
+              <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
                 {rows.map((e) => (
-                  <div key={e.id} className="flex items-center gap-3 text-xs">
-                    <span className="flex-1 text-slate-700 font-semibold">{e.name}</span>
-                    <span className={`w-24 shrink-0 text-right font-bold ${dobMap[e.id] ? "text-emerald-600" : "text-pink-600"}`}>
+                  <div key={e.id} className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-2 sm:gap-3 sm:items-center py-2.5">
+                    <span className="text-sm font-semibold text-slate-700">{e.name}</span>
+                    <span
+                      className={`inline-flex items-center justify-center px-2 py-0.5 rounded-full text-[11px] font-bold w-fit sm:w-24 ${
+                        dobMap[e.id] ? "bg-emerald-50 text-emerald-700" : "bg-pink-50 text-pink-700"
+                      }`}
+                    >
                       {dobMap[e.id] ? new Date(dobMap[e.id]!).toLocaleDateString("en-IN") : "Missing"}
                     </span>
                     {payrollDetailsExistsSet.has(e.id) ? (
                       <DateInput
                         value={bulkDobValues[e.id] || ""}
                         onChange={(v) => setBulkDobValues((prev) => ({ ...prev, [e.id]: v }))}
-                        className="w-40 h-8 rounded-lg bg-slate-50 border border-slate-200 pl-2 pr-7 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-pink-100 focus:border-pink-300"
+                        className="w-full sm:w-40 h-8 rounded-lg bg-slate-50 border border-slate-200 pl-2 pr-7 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-pink-100 focus:border-pink-300"
                       />
                     ) : (
-                      <span className="w-40 h-8 flex items-center justify-center text-slate-400 italic text-[11px]">Set Employee Code first</span>
+                      <span className="sm:w-40 h-8 flex items-center sm:justify-center text-slate-400 italic text-[11px]">Set Employee Code first</span>
                     )}
                   </div>
                 ))}
@@ -410,7 +414,7 @@ export default function HrSalaryPage() {
         {missingSaleValueLeads.length === 0 ? (
           <p className="text-xs text-slate-400">Every booked lead has a sale value logged.</p>
         ) : (
-          <div className="max-h-56 overflow-y-auto space-y-1.5">
+          <div className="max-h-56 overflow-y-auto divide-y divide-slate-100">
             {missingSaleValueLeads.map((l) => {
               const owner = employees.find((e) => e.id === l.current_owner_id);
               return (
@@ -421,13 +425,15 @@ export default function HrSalaryPage() {
                     setActiveTab("employee");
                   }}
                   disabled={!l.current_owner_id}
-                  className="flex items-center gap-3 text-xs w-full text-left rounded-lg px-2 py-1.5 hover:bg-amber-50 transition disabled:hover:bg-transparent disabled:cursor-default"
+                  className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-1 sm:gap-3 sm:items-center w-full text-left rounded-lg px-2 py-2.5 hover:bg-amber-50 transition disabled:hover:bg-transparent disabled:cursor-default"
                 >
-                  <span className="flex-1 text-slate-700 font-semibold truncate">
+                  <span className="text-sm font-semibold text-slate-700 truncate">
                     {l.name} <span className="text-slate-400 font-normal">({l.mobile})</span>
                   </span>
-                  <span className="text-slate-500">{owner?.name || "Unowned"}</span>
-                  <span className="text-slate-400 w-24 shrink-0 text-right">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold bg-slate-50 text-slate-600 w-fit">
+                    {owner?.name || "Unowned"}
+                  </span>
+                  <span className="text-slate-400 text-xs sm:w-24 sm:text-right">
                     {l.board_stage_changed_at ? new Date(l.board_stage_changed_at).toLocaleDateString("en-IN") : "—"}
                   </span>
                 </button>

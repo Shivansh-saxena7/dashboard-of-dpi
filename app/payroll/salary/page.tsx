@@ -873,15 +873,23 @@ export default function PayrollSalaryPage() {
           {computedEmployeeIds.size} of {employees.length} employees computed, {slipGeneratedEmployeeIds.size} slip(s) generated, for
           this month.
         </p>
-        <div className="max-h-56 overflow-y-auto space-y-1">
+        <div className="max-h-56 overflow-y-auto divide-y divide-slate-100">
           {employees.map((e) => (
-            <div key={e.id} className="flex items-center gap-3 text-xs">
-              <span className="flex-1 text-slate-700 font-semibold">{e.name}</span>
-              <span className={`w-32 shrink-0 font-bold ${computedEmployeeIds.has(e.id) ? "text-emerald-600" : "text-slate-400"}`}>
-                {computedEmployeeIds.has(e.id) ? "✓ Computed" : "— Not computed"}
+            <div key={e.id} className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-1.5 sm:gap-3 sm:items-center py-2">
+              <span className="text-sm font-semibold text-slate-700">{e.name}</span>
+              <span
+                className={`inline-flex items-center justify-center px-2 py-0.5 rounded-full text-[11px] font-bold w-fit sm:w-32 ${
+                  computedEmployeeIds.has(e.id) ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"
+                }`}
+              >
+                {computedEmployeeIds.has(e.id) ? "✓ Computed" : "Not computed"}
               </span>
-              <span className={`w-32 shrink-0 font-bold ${slipGeneratedEmployeeIds.has(e.id) ? "text-emerald-600" : "text-slate-400"}`}>
-                {slipGeneratedEmployeeIds.has(e.id) ? "✓ Slip generated" : "— No slip"}
+              <span
+                className={`inline-flex items-center justify-center px-2 py-0.5 rounded-full text-[11px] font-bold w-fit sm:w-32 ${
+                  slipGeneratedEmployeeIds.has(e.id) ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"
+                }`}
+              >
+                {slipGeneratedEmployeeIds.has(e.id) ? "✓ Slip generated" : "No slip"}
               </span>
             </div>
           ))}
