@@ -880,7 +880,25 @@ export default function LeadList({ employeeId }: LeadListProps) {
             pauseVerifiedByName: selectedLead.lead_history[0]?.pause_verified_by?.name ?? null,
             pauseVerifiedAt: selectedLead.lead_history[0]?.pause_verified_at ?? null
           }}
-          onClose={() => setSelectedLeadId(null)}
+          onClose={() => {
+            // Scroll-preserve on detail-close (2026-10-01) — same gap
+            // as the Call button's scroll-to-called-lead fix
+            // (lib/lastCalledLead.ts), different trigger: opening a
+            // lead's detail view and updating a log/note, then closing
+            // it, was landing back at the top of the list instead of
+            // staying on this card. No tab-reload/backgrounding is
+            // involved here (unlike the Call case, which needs
+            // sessionStorage specifically to survive that), so this
+            // reuses scrollToAndHighlightCard directly rather than
+            // round-tripping through sessionStorage for no reason --
+            // same restore mechanism, synchronous trigger instead of
+            // the `loading`-gated one-time consume. requestAnimationFrame
+            // waits one paint for the modal to actually unmount and the
+            // card to be back in the DOM before scrolling to it.
+            const id = selectedLead.id;
+            setSelectedLeadId(null);
+            requestAnimationFrame(() => scrollToAndHighlightCard(`lead-card-${id}`));
+          }}
           onUpdated={(updates) => handleLeadUpdated(selectedLead.id, updates)}
           onBoardStageChanged={(stage) => handleBoardStageChanged(selectedLead.id, stage)}
           onPauseChanged={(pause) => handlePauseChanged(selectedLead.id, pause)}
