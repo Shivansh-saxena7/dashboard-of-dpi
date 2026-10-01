@@ -20,7 +20,7 @@ interface ShareRow {
 interface AttendanceRow {
   date: string;
   shift_start_at: string;
-  attendance_type: "FULL_DAY" | "HALF_DAY_SECOND" | "HALF_DAY_FIRST" | null;
+  attendance_type: "FULL_DAY" | "HALF_DAY_SECOND" | "HALF_DAY_FIRST" | "LEAVE" | "HALF_DAY_MANUAL" | null;
 }
 
 // Own top-level route, mirrors app/documents/page.tsx exactly (same

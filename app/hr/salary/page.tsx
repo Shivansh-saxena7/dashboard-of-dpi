@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import toast from "react-hot-toast";
-import { IndianRupee, AlertTriangle, Briefcase, Cake, SlidersHorizontal, ClipboardList, User } from "lucide-react";
+import { IndianRupee, AlertTriangle, Briefcase, Cake, SlidersHorizontal, ClipboardList, User, CheckCircle2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import DateInput from "@/components/DateInput";
 import { formatINR } from "@/lib/exportTable";
@@ -86,6 +86,14 @@ export default function HrSalaryPage() {
   // PayrollDetailsForm reads/writes for the selected employee.
   const [payrollDetailsRefreshNonce, setPayrollDetailsRefreshNonce] = useState(0);
 
+  // Read-only mirror of Payroll's "Ready for HR Review" toggle
+  // (app/payroll/salary/page.tsx) -- same payroll_slip_batch_status
+  // row, HR never writes it here, only sees it. Defaults to the
+  // current month since this page has no other month context yet.
+  const now = new Date();
+  const [reviewMonth, setReviewMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
+  const [readyForReview, setReadyForReview] = useState<{ markedByName: string; markedAt: string } | null>(null);
+
   // Booking sale-value entry -- feeds Payroll's Compute step (commission
   // math and, indirectly, condition-rule booking counts, though that
   // metric reads leads directly, not this table -- see
@@ -130,6 +138,22 @@ export default function HrSalaryPage() {
     loadMissingSaleValueLeads();
     loadAllDob();
   }, []);
+
+  useEffect(() => {
+    loadReadyForReview(reviewMonth);
+  }, [reviewMonth]);
+
+  async function loadReadyForReview(month: string) {
+    const payPeriod = `${month}-01`;
+    const { data } = await supabase
+      .from("payroll_slip_batch_status")
+      .select("marked_ready_at, marked_ready_by:employees!payroll_slip_batch_status_marked_ready_by_employee_id_fkey(name)")
+      .eq("pay_period", payPeriod)
+      .maybeSingle();
+    setReadyForReview(
+      data ? { markedByName: (data.marked_ready_by as any)?.name || "—", markedAt: data.marked_ready_at } : null
+    );
+  }
 
   useEffect(() => {
     if (employeeId) {
@@ -330,6 +354,29 @@ export default function HrSalaryPage() {
       </SectionTabPanel>
 
       <SectionTabPanel id="overview" activeTab={activeTab}>
+        <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-2">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+              <CheckCircle2 size={15} className="text-emerald-600" /> Salary Batch Status
+            </p>
+            <div className="w-full sm:w-44">
+              <DateInput value={reviewMonth} onChange={setReviewMonth} mode="month" />
+            </div>
+          </div>
+          {readyForReview ? (
+            <div className="flex items-center gap-1.5">
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700">
+                <CheckCircle2 size={12} /> Ready for HR Review
+              </span>
+              <span className="text-xs text-slate-400">
+                by {readyForReview.markedByName} on {new Date(readyForReview.markedAt).toLocaleDateString()}
+              </span>
+            </div>
+          ) : (
+            <p className="text-xs text-slate-400">Payroll hasn't marked this month's slips ready for review yet.</p>
+          )}
+        </div>
+
         <BasicPayOverview employeeId={employeeId} onSavedForEmployee={() => setBasicPayRefreshNonce((n) => n + 1)} />
 
       <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">

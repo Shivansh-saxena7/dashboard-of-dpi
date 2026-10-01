@@ -7,8 +7,12 @@ import { toISTMinutesSinceMidnight, timeStringToMinutes } from "./istTime.ts";
 // system already writes, but applies a different, stricter cutoff
 // purely for HR reporting -- it never feeds back into lead assignment.
 
-export type DailyHrmsStatus = "ON_TIME" | "LATE_COMING" | "ABSENT";
-export type MonthlyHrmsStatus = "ON_TIME" | "LATE_COMING" | "HALF_DAY" | "ABSENT";
+// ON_LEAVE / HALF_DAY_MANUAL only ever come from a bulk-uploaded
+// attendance_type (LEAVE / HALF_DAY_MANUAL) -- the GPS start-shift flow
+// can never write either value, so this is purely additive: every
+// pre-existing row's classification is byte-for-byte unchanged.
+export type DailyHrmsStatus = "ON_TIME" | "LATE_COMING" | "ABSENT" | "ON_LEAVE" | "HALF_DAY_MANUAL";
+export type MonthlyHrmsStatus = "ON_TIME" | "LATE_COMING" | "HALF_DAY" | "ABSENT" | "ON_LEAVE" | "HALF_DAY_MANUAL";
 
 // Shared across BOTH halves -- a first-half late-coming and a
 // second-half late-coming count against the exact same monthly
@@ -23,7 +27,7 @@ interface AttendanceRowForHrms {
   // end-shift early-checkout correction -- see
   // calculateAttendanceType.ts) is still a first-half start, so it's
   // evaluated against the same cutoff as FULL_DAY.
-  attendance_type: "FULL_DAY" | "HALF_DAY_SECOND" | "HALF_DAY_FIRST" | null;
+  attendance_type: "FULL_DAY" | "HALF_DAY_SECOND" | "HALF_DAY_FIRST" | "LEAVE" | "HALF_DAY_MANUAL" | null;
   shift_start_at: string;
 }
 
@@ -45,6 +49,17 @@ export function calculateDailyHrmsStatus(
 
   if (!row) {
     return "ABSENT";
+  }
+
+  // Bulk-upload-only types -- never written by the GPS flow, so these
+  // branches can never fire for a real punch. Neutral for LOP (see
+  // computeAttendanceDeductionForMonth) and for the late-coming counter
+  // below (applyMonthlyLateComingRule only reacts to "LATE_COMING").
+  if (row.attendance_type === "LEAVE") {
+    return "ON_LEAVE";
+  }
+  if (row.attendance_type === "HALF_DAY_MANUAL") {
+    return "HALF_DAY_MANUAL";
   }
 
   const shiftStartMinutes = toISTMinutesSinceMidnight(new Date(row.shift_start_at));

@@ -8,14 +8,18 @@ export const STATUS_DISPLAY: Record<string, { label: string; className: string }
   ON_TIME: { label: "On Time", className: "bg-emerald-50 text-emerald-700" },
   LATE_COMING: { label: "Late Coming", className: "bg-amber-50 text-amber-700" },
   HALF_DAY: { label: "Half Day", className: "bg-orange-100 text-orange-700" },
-  ABSENT: { label: "Absent", className: "bg-red-50 text-red-700" }
+  ABSENT: { label: "Absent", className: "bg-red-50 text-red-700" },
+  ON_LEAVE: { label: "Leave", className: "bg-sky-50 text-sky-700" },
+  HALF_DAY_MANUAL: { label: "Half Day (Upload)", className: "bg-orange-100 text-orange-700" }
 };
 
 export const STATUS_DOT: Record<string, string> = {
   ON_TIME: "bg-emerald-500",
   LATE_COMING: "bg-amber-500",
   HALF_DAY: "bg-orange-500",
-  ABSENT: "bg-red-500"
+  ABSENT: "bg-red-500",
+  ON_LEAVE: "bg-sky-500",
+  HALF_DAY_MANUAL: "bg-orange-500"
 };
 
 export function dateRangeArray(from: string, to: string): string[] {

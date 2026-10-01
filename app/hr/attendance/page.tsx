@@ -32,7 +32,7 @@ interface AttendanceRow {
   employee_id: string;
   date: string;
   shift_start_at: string;
-  attendance_type: "FULL_DAY" | "HALF_DAY_SECOND" | "HALF_DAY_FIRST" | null;
+  attendance_type: "FULL_DAY" | "HALF_DAY_SECOND" | "HALF_DAY_FIRST" | "LEAVE" | "HALF_DAY_MANUAL" | null;
 }
 
 interface OverrideRow {
@@ -233,7 +233,7 @@ export default function HrAttendancePage() {
       });
 
       const monthly = applyMonthlyLateComingRule(daily);
-      const counts: Record<MonthlyHrmsStatus, number> = { ON_TIME: 0, LATE_COMING: 0, HALF_DAY: 0, ABSENT: 0 };
+      const counts: Record<MonthlyHrmsStatus, number> = { ON_TIME: 0, LATE_COMING: 0, HALF_DAY: 0, ABSENT: 0, ON_LEAVE: 0, HALF_DAY_MANUAL: 0 };
       monthly.forEach((s) => counts[s]++);
 
       return { employee: emp, counts };
@@ -245,7 +245,7 @@ export default function HrAttendancePage() {
   // screen right now" convention as the rest of this module's stat
   // strips (not a separate, independently-scoped query).
   const statusCounts = useMemo(() => {
-    const counts: Record<MonthlyHrmsStatus, number> = { ON_TIME: 0, LATE_COMING: 0, HALF_DAY: 0, ABSENT: 0 };
+    const counts: Record<MonthlyHrmsStatus, number> = { ON_TIME: 0, LATE_COMING: 0, HALF_DAY: 0, ABSENT: 0, ON_LEAVE: 0, HALF_DAY_MANUAL: 0 };
     if (viewMode === "DAILY") {
       rangeRows.forEach((r) => { counts[r.status]++; });
     } else {
@@ -254,6 +254,8 @@ export default function HrAttendancePage() {
         counts.LATE_COMING += r.counts.LATE_COMING;
         counts.HALF_DAY += r.counts.HALF_DAY;
         counts.ABSENT += r.counts.ABSENT;
+        counts.ON_LEAVE += r.counts.ON_LEAVE;
+        counts.HALF_DAY_MANUAL += r.counts.HALF_DAY_MANUAL;
       });
     }
     return counts;
@@ -387,6 +389,14 @@ export default function HrAttendancePage() {
             <span className="text-lg font-bold leading-none">{statusCounts.ABSENT}</span>
             <span className="text-[11px] text-white/70 font-semibold">Absent</span>
           </div>
+          <div className="flex items-baseline gap-1.5 bg-white/10 border border-white/15 rounded-xl px-3.5 py-2">
+            <span className="text-lg font-bold leading-none">{statusCounts.ON_LEAVE}</span>
+            <span className="text-[11px] text-white/70 font-semibold">Leave</span>
+          </div>
+          <div className="flex items-baseline gap-1.5 bg-white/10 border border-white/15 rounded-xl px-3.5 py-2">
+            <span className="text-lg font-bold leading-none">{statusCounts.HALF_DAY_MANUAL}</span>
+            <span className="text-[11px] text-white/70 font-semibold">Half Day (Upload)</span>
+          </div>
         </div>
       </motion.div>
 
@@ -509,9 +519,11 @@ export default function HrAttendancePage() {
                       )}
                     </td>
                     <td className="p-3.5 text-slate-500">
-                      {row
+                      {row && row.attendance_type !== "LEAVE" && row.attendance_type !== "HALF_DAY_MANUAL"
                         ? new Date(row.shift_start_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) +
                           (row.attendance_type === "HALF_DAY_SECOND" ? " (2nd half)" : "")
+                        : row
+                        ? "— (bulk upload)"
                         : "—"}
                     </td>
                     <td className="p-3.5 text-slate-500">
@@ -583,6 +595,8 @@ export default function HrAttendancePage() {
                 <th className="p-3.5">Late Coming (free)</th>
                 <th className="p-3.5">Half Day</th>
                 <th className="p-3.5">Absent</th>
+                <th className="p-3.5">Leave</th>
+                <th className="p-3.5">Half Day (Upload)</th>
               </tr>
             </thead>
             <tbody>
@@ -593,6 +607,8 @@ export default function HrAttendancePage() {
                   <td className="p-3.5 text-amber-700 font-semibold">{counts.LATE_COMING}</td>
                   <td className="p-3.5 text-orange-700 font-semibold">{counts.HALF_DAY}</td>
                   <td className="p-3.5 text-red-600 font-semibold">{counts.ABSENT}</td>
+                  <td className="p-3.5 text-sky-700 font-semibold">{counts.ON_LEAVE}</td>
+                  <td className="p-3.5 text-orange-700 font-semibold">{counts.HALF_DAY_MANUAL}</td>
                 </tr>
               ))}
             </tbody>
