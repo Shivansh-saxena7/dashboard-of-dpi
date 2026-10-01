@@ -212,6 +212,7 @@ export interface AttendanceDeductionComputeResult {
   absenceLopDays: number;
   lateComingLopDays: number;
   sandwichLeaveLopDays: number;
+  halfDayManualLopDays: number;
   totalLopDays: number;
 }
 
@@ -291,6 +292,13 @@ export async function computeAttendanceDeductionForMonth(
 
   const absenceLopDays = daily.filter((s) => s === "ABSENT").length;
 
+  // Bulk-upload-only: a day explicitly marked Half-Day in the uploaded
+  // register always costs 0.5 LOP, independent of the late-coming
+  // counter below (ON_LEAVE days cost nothing -- true neutral, per the
+  // same bulk-upload feature). Both statuses are impossible on a
+  // GPS-punch row, so this never fires for existing data.
+  const halfDayManualLopDays = daily.filter((s) => s === "HALF_DAY_MANUAL").length * 0.5;
+
   let lateComingLopDays = 0;
   if (lateActive && settings) {
     const monthly = applyMonthlyLateComingRule(daily);
@@ -321,7 +329,7 @@ export async function computeAttendanceDeductionForMonth(
     }
   }
 
-  const totalLopDays = absenceLopDays + lateComingLopDays + sandwichLeaveLopDays;
+  const totalLopDays = absenceLopDays + lateComingLopDays + sandwichLeaveLopDays + halfDayManualLopDays;
 
   await supabase.from("employee_monthly_attendance_deduction_results").upsert(
     {
@@ -330,13 +338,14 @@ export async function computeAttendanceDeductionForMonth(
       absence_lop_days: absenceLopDays,
       late_coming_lop_days: lateComingLopDays,
       sandwich_leave_lop_days: sandwichLeaveLopDays,
+      half_day_manual_lop_days: halfDayManualLopDays,
       total_lop_days: totalLopDays,
       computed_by_employee_id: computedByEmployeeId
     },
     { onConflict: "employee_id,pay_period" }
   );
 
-  return { skipped: null, absenceLopDays, lateComingLopDays, sandwichLeaveLopDays, totalLopDays };
+  return { skipped: null, absenceLopDays, lateComingLopDays, sandwichLeaveLopDays, halfDayManualLopDays, totalLopDays };
 }
 
 export interface ReimbursementComputeResult {

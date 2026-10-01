@@ -19,6 +19,7 @@ import {
   User,
   Landmark
 } from "lucide-react";
+import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import DateInput from "@/components/DateInput";
 import { buildSalarySlipBlob, buildBulkSalarySlipPdf, SalarySlipInput } from "@/lib/generateHrDocumentPdf";
@@ -255,6 +256,16 @@ export default function PayrollSalaryPage() {
   const [completionMonth, setCompletionMonth] = useState(todayStr.slice(0, 7));
   const [computedEmployeeIds, setComputedEmployeeIds] = useState<Set<string>>(new Set());
   const [slipGeneratedEmployeeIds, setSlipGeneratedEmployeeIds] = useState<Set<string>>(new Set());
+  const [computingAll, setComputingAll] = useState(false);
+  const [computeAllProgress, setComputeAllProgress] = useState<{ done: number; total: number } | null>(null);
+
+  // "Ready for HR Review" -- a row's existence in
+  // payroll_slip_batch_status for this pay period IS the status, same
+  // "presence = truth" convention as the Compute-completion signal
+  // above. Deliberately simple: one flag Payroll sets once done, no
+  // approval workflow.
+  const [readyForReview, setReadyForReview] = useState<{ markedByName: string; markedAt: string } | null>(null);
+  const [markingReady, setMarkingReady] = useState(false);
 
   useEffect(() => {
     loadEmployees();
@@ -263,7 +274,101 @@ export default function PayrollSalaryPage() {
 
   useEffect(() => {
     loadCompletionStatus(completionMonth);
+    loadReadyForReview(completionMonth);
   }, [completionMonth]);
+
+  async function loadReadyForReview(month: string) {
+    const payPeriod = `${month}-01`;
+    const { data } = await supabase
+      .from("payroll_slip_batch_status")
+      .select("marked_ready_at, marked_ready_by:employees!payroll_slip_batch_status_marked_ready_by_employee_id_fkey(name)")
+      .eq("pay_period", payPeriod)
+      .maybeSingle();
+    setReadyForReview(
+      data ? { markedByName: (data.marked_ready_by as any)?.name || "—", markedAt: data.marked_ready_at } : null
+    );
+  }
+
+  async function handleToggleReadyForReview() {
+    const payPeriod = `${completionMonth}-01`;
+    setMarkingReady(true);
+    try {
+      if (readyForReview) {
+        const { error } = await supabase.from("payroll_slip_batch_status").delete().eq("pay_period", payPeriod);
+        if (error) {
+          toast.error(error.message || "Could not clear status.");
+          return;
+        }
+        toast.success("Cleared Ready for HR Review.");
+      } else {
+        const {
+          data: { user }
+        } = await supabase.auth.getUser();
+        if (!user) return;
+        const { data: me } = await supabase.from("employees").select("id").eq("auth_user_id", user.id).single();
+        if (!me) {
+          toast.error("Could not identify your employee record.");
+          return;
+        }
+        const { error } = await supabase
+          .from("payroll_slip_batch_status")
+          .upsert({ pay_period: payPeriod, marked_ready_by_employee_id: me.id, marked_ready_at: new Date().toISOString() }, { onConflict: "pay_period" });
+        if (error) {
+          toast.error(error.message || "Could not mark ready.");
+          return;
+        }
+        toast.success("Marked Ready for HR Review.");
+      }
+      loadReadyForReview(completionMonth);
+    } finally {
+      setMarkingReady(false);
+    }
+  }
+
+  // Scoped to attendance-deduction Compute only -- the bulk-upload
+  // flow this button exists for only feeds that one path. Separate
+  // from handleBulkGenerate below, which already loops the FULL
+  // commission/condition-rule/attendance/reimbursement compute for
+  // slip printing -- not duplicated here, not replaced by it.
+  async function handleComputeAll() {
+    const {
+      data: { user }
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data: me } = await supabase.from("employees").select("id").eq("auth_user_id", user.id).single();
+    if (!me) {
+      toast.error("Could not identify your employee record.");
+      return;
+    }
+
+    const { data: payrollRows } = await supabase.from("employee_payroll_details").select("employee_id");
+    const codedIds = new Set((payrollRows || []).map((r) => r.employee_id));
+    const eligible = employees.filter((e) => codedIds.has(e.id));
+
+    if (eligible.length === 0) {
+      toast.error("No employees with an Employee Code set yet.");
+      return;
+    }
+
+    setComputingAll(true);
+    setComputeAllProgress({ done: 0, total: eligible.length });
+    try {
+      let done = 0;
+      for (const emp of eligible) {
+        await computeAttendanceDeductionForMonth(emp.id, completionMonth, me.id);
+        done++;
+        setComputeAllProgress({ done, total: eligible.length });
+      }
+      toast.success(`Computed attendance deduction for ${done} employee(s), ${monthLabel(completionMonth)}.`);
+      loadCompletionStatus(completionMonth);
+    } catch (err) {
+      console.error(err);
+      toast.error("Compute All stopped early — see console for details.");
+    } finally {
+      setComputingAll(false);
+      setComputeAllProgress(null);
+    }
+  }
 
   async function loadCompletionStatus(month: string) {
     const payPeriod = `${month}-01`;
@@ -873,6 +978,39 @@ export default function PayrollSalaryPage() {
           {computedEmployeeIds.size} of {employees.length} employees computed, {slipGeneratedEmployeeIds.size} slip(s) generated, for
           this month.
         </p>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/payroll/attendance-upload"
+            className="h-9 px-3.5 rounded-xl bg-slate-800 text-white text-xs font-bold hover:bg-slate-900 transition flex items-center gap-1.5"
+          >
+            <Upload size={13} /> Bulk Upload Attendance
+          </Link>
+          <button
+            onClick={handleComputeAll}
+            disabled={computingAll}
+            className="h-9 px-3.5 rounded-xl bg-indigo-600 text-white text-xs font-bold disabled:opacity-40 hover:bg-indigo-700 transition"
+          >
+            {computingAll
+              ? `Computing${computeAllProgress ? ` ${computeAllProgress.done}/${computeAllProgress.total}` : "..."}`
+              : "Compute All (Attendance)"}
+          </button>
+          <button
+            onClick={handleToggleReadyForReview}
+            disabled={markingReady}
+            className={`h-9 px-3.5 rounded-xl text-xs font-bold disabled:opacity-40 transition ${
+              readyForReview ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+            }`}
+          >
+            {readyForReview ? "✓ Ready for HR Review — Clear" : "Mark Ready for HR Review"}
+          </button>
+        </div>
+        {readyForReview && (
+          <p className="text-xs text-slate-400">
+            Marked ready by {readyForReview.markedByName} on {new Date(readyForReview.markedAt).toLocaleDateString()}
+          </p>
+        )}
+
         <div className="max-h-56 overflow-y-auto divide-y divide-slate-100">
           {employees.map((e) => (
             <div key={e.id} className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-1.5 sm:gap-3 sm:items-center py-2">

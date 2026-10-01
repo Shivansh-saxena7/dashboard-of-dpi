@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { IndianRupee, Receipt, ClipboardCheck, AlertTriangle, Briefcase, ArrowRight } from "lucide-react";
+import { IndianRupee, Receipt, ClipboardCheck, AlertTriangle, Briefcase, ArrowRight, Upload } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 
@@ -17,6 +17,7 @@ interface Stats {
 
 const QUICK_LINKS = [
   { name: "Salary", href: "/payroll/salary", icon: IndianRupee, color: "text-emerald-600 bg-emerald-50", description: "Compute, generate & issue slips" },
+  { name: "Attendance Upload", href: "/payroll/attendance-upload", icon: Upload, color: "text-indigo-600 bg-indigo-50", description: "Bulk-upload a month's attendance from the register" },
   { name: "Expenses", href: "/payroll/expenses", icon: Receipt, color: "text-amber-600 bg-amber-50", description: "Review & approve employee expenses" }
 ];
 
