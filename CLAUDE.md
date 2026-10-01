@@ -74,3 +74,34 @@ bug gets surfaced automatically instead of waiting to be noticed by luck.
 This is deliberately not a general error-tracking/APM replacement — it's
 fed only by checks the app's own code explicitly runs, not a catch-all for
 every exception.
+
+## Scoped "test data" deletes must enumerate table ownership before deleting
+
+On 2026-10-01, a request to wipe test data scoped to "HRMS, Payroll, and
+Expenses" resulted in `delete from attendance;` running against the live
+`attendance` table — deleting every real employee's real GPS shift-start
+records for the day, not just the test employee's rows. `attendance` reads
+as an HRMS/Payroll table (Payroll's Compute/LOP logic reads it), but it's
+actually a company-wide, cross-module table that predates HRMS entirely
+(it also gates live lead-assignment via the Shift-Start/geofence feature).
+Every real employee showed "Shift Not Started" afterward even though their
+shift-start had genuinely succeeded — not a display bug, a real-data loss
+bug, caused by treating a shared live table as if it belonged to the
+module being cleaned up.
+
+**Rule: before any delete framed as "wipe test data for module X" runs for
+real, produce an explicit table-by-table list, split into:**
+- **Test-only** — tables that exist solely to support X and contain
+  nothing else (safe to delete wholesale).
+- **Shared with live data** — tables X reads/writes but that are also
+  written by other features, especially anything that predates X or is
+  read by code outside X's own files (these need a scoped `WHERE`, e.g.
+  filtered to the specific test employee/record IDs, never an unscoped
+  `DELETE FROM table`).
+
+Show this split to the user before the real (non-rollback) apply step,
+same as the existing rollback-transaction-first discipline — don't infer
+"belongs to module X" from which feature happens to read the table most
+heavily. When in doubt whether a table is shared, check how far back its
+write-path goes in git history (`git log --oneline -- <file-that-writes-it>`)
+and whether anything outside the module being cleaned imports/reads it.
