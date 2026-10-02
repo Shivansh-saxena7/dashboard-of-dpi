@@ -26,7 +26,8 @@ const menu = [
   { name: "Candidates", href: "/hr/candidates", icon: "🧑‍🎓" },
   { name: "Documents", href: "/hr/documents", icon: "📄" },
   { name: "Salary", href: "/hr/salary", icon: "💰" },
-  { name: "SIM / Email", href: "/hr/sim-assignments", icon: "📱" }
+  { name: "SIM / Email", href: "/hr/sim-assignments", icon: "📱" },
+  { name: "Posts", href: "/hr/posts", icon: "📸" }
 ];
 
 // Sidebar is off-canvas on mobile and pinned on desktop (lg:) -- ported
@@ -65,7 +66,7 @@ export default function HrLayout({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    if (data.role !== "hr" && data.role !== "admin") {
+    if (data.role !== "hr" && data.role !== "admin" && data.role !== "super_admin") {
       router.replace("/");
       return;
     }

@@ -135,7 +135,7 @@ export default function CoordinatorLayout({
       return;
     }
 
-    if (data.role !== "admin" && data.role !== "sales_coordinator") {
+    if (data.role !== "admin" && data.role !== "super_admin" && data.role !== "sales_coordinator") {
       router.replace("/");
       return;
     }

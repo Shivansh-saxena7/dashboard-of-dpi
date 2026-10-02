@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Copy, Send } from "lucide-react";
+import { Copy, Send, Phone } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import toast from "react-hot-toast";
 import { buildWorkReportMessage } from "@/lib/buildWorkReportMessage";
@@ -17,6 +18,8 @@ interface StuckLeadEntry {
   mobile: string | null;
   callCount: number;
   daysSinceLastAttempt: number;
+  leadId: string;
+  leadHistoryId: string;
 }
 
 interface WorkReportData {
@@ -40,6 +43,8 @@ interface WorkReportData {
   bookingDetails: DetailEntry[];
   stuckLeads: number;
   stuckLeadsDetails: StuckLeadEntry[];
+  personalLeads: number;
+  personalLeadDetails: DetailEntry[];
 }
 
 interface WorkReportViewProps {
@@ -47,6 +52,14 @@ interface WorkReportViewProps {
   employeeName: string;
   date: string; // YYYY-MM-DD, IST calendar day
   whatsappGroupLabel?: string | null;
+  // Call-and-open-detail actions on Stuck Leads rows (2026-10-01) only
+  // make sense when the viewer IS this report's own employee -- Admin
+  // viewing someone else's report has no reason to dial on their
+  // behalf, and /leads?openLead=X would try to open a lead that isn't
+  // the Admin's own in the Admin's own /leads view anyway. Defaults
+  // false (Admin's work-reports page doesn't pass it); app/report/page.tsx
+  // (the employee's own report) passes true.
+  canTakeAction?: boolean;
 }
 
 type MetricKey =
@@ -58,7 +71,8 @@ type MetricKey =
   | "converted"
   | "followUps"
   | "visits"
-  | "bookings";
+  | "bookings"
+  | "personalLeads";
 
 // 2026-08-22 gap audit: Connected/Not Connected/Switched Off/Converted
 // were already being logged to lead_activity_log (Point 4's
@@ -82,7 +96,14 @@ const METRICS: {
   { key: "converted", detailKey: "convertedDetails", label: "Converted", emoji: "🤝" },
   { key: "followUps", detailKey: "followUpDetails", label: "Follow-up", emoji: "➡️" },
   { key: "visits", detailKey: "visitDetails", label: "Visits", emoji: "🏠" },
-  { key: "bookings", detailKey: "bookingDetails", label: "Bookings", emoji: "🎉" }
+  { key: "bookings", detailKey: "bookingDetails", label: "Bookings", emoji: "🎉" },
+  // Personal Numbers (2026-10-01) — leads this employee self-added via
+  // Quick Dial's "Add as Personal Lead?" flow (create_personal_lead_atomic),
+  // created within this report's day. Fits the exact same day-bound
+  // count+detail shape every metric above already has — no special
+  // rendering needed, unlike Stuck Leads below. Deliberately excluded
+  // from buildWorkReportMessage (on-screen only), same as Stuck Leads.
+  { key: "personalLeads", detailKey: "personalLeadDetails", label: "Personal Numbers", emoji: "📱" }
 ];
 
 // Single shared render for both the employee's own "My Report" tab
@@ -94,8 +115,9 @@ const METRICS: {
 // no "admin mode" branching of its own, so there is exactly one
 // rendering code path to ever get wrong or drift between the two
 // surfaces.
-export default function WorkReportView({ employeeId, employeeName, date, whatsappGroupLabel }: WorkReportViewProps) {
+export default function WorkReportView({ employeeId, employeeName, date, whatsappGroupLabel, canTakeAction = false }: WorkReportViewProps) {
 
+  const router = useRouter();
   const [report, setReport] = useState<WorkReportData | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<MetricKey | null>(null);
@@ -202,6 +224,24 @@ export default function WorkReportView({ employeeId, employeeName, date, whatsap
     const message = currentMessage();
     if (!message) return;
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`, "_blank");
+  }
+
+  // Stuck-lead Call action (2026-10-01) — same fire-and-forget
+  // log_call_click_atomic pattern every other Call button in the app
+  // uses (see LeadCard.tsx's own handleCallClick), keyed by this row's
+  // lead_history_id so it shows up correctly in future reports/Admin
+  // response-time stats. The tel: href fires the real call via its own
+  // default anchor behavior (not prevented here); router.push to
+  // /leads?openLead=<id> runs in the same click, reusing the auto-open-
+  // modal effect LeadList.tsx already has (built for the Personal Lead
+  // creation flow) rather than duplicating LeadDetailModal here.
+  function handleStuckLeadCallClick(entry: StuckLeadEntry) {
+    supabase
+      .rpc("log_call_click_atomic", { p_lead_history_id: entry.leadHistoryId })
+      .then(({ error }) => {
+        if (error) console.error("log_call_click_atomic failed:", error.message);
+      });
+    router.push(`/leads?openLead=${entry.leadId}`);
   }
 
   if (loading) {
@@ -311,15 +351,28 @@ export default function WorkReportView({ employeeId, employeeName, date, whatsap
               {report.stuckLeadsDetails.map((entry, i) => (
                 <div
                   key={i}
-                  className="flex items-center justify-between text-sm border-b border-slate-50 last:border-0 pb-2 last:pb-0"
+                  className="flex items-center justify-between text-sm border-b border-slate-50 last:border-0 pb-2 last:pb-0 gap-2"
                 >
                   <div className="min-w-0">
                     <p className="text-slate-700 font-medium truncate">{entry.leadName}</p>
                     {entry.mobile && <p className="text-xs text-slate-400">{entry.mobile}</p>}
                   </div>
-                  <span className="text-red-600 text-xs font-semibold shrink-0 ml-2">
-                    {entry.daysSinceLastAttempt}d ago
-                  </span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-red-600 text-xs font-semibold">
+                      {entry.daysSinceLastAttempt}d ago
+                    </span>
+                    {canTakeAction && entry.mobile && (
+                      <motion.a
+                        href={`tel:${entry.mobile}`}
+                        onClick={() => handleStuckLeadCallClick(entry)}
+                        whileTap={{ scale: 0.95 }}
+                        className="flex items-center gap-1 h-8 px-2.5 rounded-lg bg-gradient-to-r from-yellow-400 to-amber-500 text-slate-900 text-xs font-bold"
+                      >
+                        <Phone size={12} />
+                        Call
+                      </motion.a>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

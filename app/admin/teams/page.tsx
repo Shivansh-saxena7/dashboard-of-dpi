@@ -227,10 +227,15 @@ export default function AdminTeamsPage() {
       // The leader is also a member of their own team — this is
       // exactly what current_employee_team_id() relies on for their
       // own RLS-scoped view access.
-      await supabase
+      const { error: leaderRoleError } = await supabase
         .from("employees")
         .update({ role: "team_leader", team_id: selectedTeam.id })
         .eq("id", newLeaderId);
+
+      if (leaderRoleError) {
+        toast.error(leaderRoleError.message || "Could not update the new leader's role.");
+        return;
+      }
 
       // Step down the previous leader — but only if they aren't
       // still leading a different team. Their team membership
@@ -243,7 +248,15 @@ export default function AdminTeamsPage() {
           .eq("team_leader_id", oldLeaderId);
 
         if (!count) {
-          await supabase.from("employees").update({ role: "employee" }).eq("id", oldLeaderId);
+          const { error: stepDownError } = await supabase
+            .from("employees")
+            .update({ role: "employee" })
+            .eq("id", oldLeaderId);
+
+          if (stepDownError) {
+            toast.error(stepDownError.message || "Could not step down the previous leader.");
+            return;
+          }
         }
       }
 
@@ -325,10 +338,15 @@ export default function AdminTeamsPage() {
           .neq("id", selectedTeam.id);
 
         if (!count) {
-          await supabase
+          const { error: stepDownError } = await supabase
             .from("employees")
             .update({ role: "employee" })
             .eq("id", selectedTeam.team_leader_id);
+
+          if (stepDownError) {
+            toast.error(stepDownError.message || "Could not step down the team leader.");
+            return;
+          }
         }
       }
 

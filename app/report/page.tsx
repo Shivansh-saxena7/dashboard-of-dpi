@@ -105,6 +105,7 @@ export default function MyReportPage() {
             employeeName={employee.name}
             date={todayKey()}
             whatsappGroupLabel={whatsappGroupLabel}
+            canTakeAction
           />
         </div>
       )}

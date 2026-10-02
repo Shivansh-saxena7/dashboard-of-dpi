@@ -49,7 +49,11 @@ export default function SessionGuard({ children }: { children: React.ReactNode }
           async (payload) => {
             const updated = payload.new as any;
 
-            if (updated.role !== "admin" && employee.role === "admin") {
+            if (
+              updated.role !== "admin" &&
+              updated.role !== "super_admin" &&
+              (employee.role === "admin" || employee.role === "super_admin")
+            ) {
               toast.error("Your admin access has been removed.");
               await supabase.auth.signOut();
               router.replace("/login");

@@ -19,7 +19,8 @@ import Footer from "@/components/Footer";
 const menu = [
   { name: "Home", href: "/payroll", icon: "🏠" },
   { name: "Salary", href: "/payroll/salary", icon: "💰" },
-  { name: "Expenses", href: "/payroll/expenses", icon: "🧾" }
+  { name: "Expenses", href: "/payroll/expenses", icon: "🧾" },
+  { name: "Posts", href: "/payroll/posts", icon: "📸" }
 ];
 
 // Sidebar is off-canvas on mobile and pinned on desktop (lg:) -- ported
@@ -56,7 +57,7 @@ export default function PayrollLayout({ children }: { children: React.ReactNode 
       return;
     }
 
-    if (data.role !== "payroll" && data.role !== "admin") {
+    if (data.role !== "payroll" && data.role !== "admin" && data.role !== "super_admin") {
       router.replace("/");
       return;
     }

@@ -41,7 +41,7 @@ export default function LoginPage() {
       return;
     }
 
-    if (employee?.role === "admin") {
+    if (employee?.role === "admin" || employee?.role === "super_admin") {
       router.replace("/admin");
     } else if (employee?.role === "sales_coordinator") {
       router.replace("/coordinator");
@@ -81,7 +81,7 @@ export default function LoginPage() {
         return;
       }
 
-      if (employee?.role === "admin") {
+      if (employee?.role === "admin" || employee?.role === "super_admin") {
         toast.success("Welcome back, Admin!");
         setTimeout(() => {
           router.replace("/admin");

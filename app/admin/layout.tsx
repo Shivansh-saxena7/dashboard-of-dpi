@@ -58,7 +58,7 @@ if(!data.is_active){
   return;
 }
 
-if(data.role !== "admin"){
+if(data.role !== "admin" && data.role !== "super_admin"){
   router.replace("/");
   return;
 }

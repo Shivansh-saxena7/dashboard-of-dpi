@@ -6,10 +6,9 @@ import { supabase } from "@/lib/supabase";
 import Footer from "@/components/Footer";
 
 import Header from "@/components/Header";
-import StatsCard from "@/components/StatsCard";
-import EmployeePanel from "@/components/EmployeePanel";
 import StartShiftCard from "@/components/StartShiftCard";
 import EmployeeTabBar from "@/components/EmployeeTabBar";
+import PostsTrackingView from "@/components/PostsTrackingView";
 
 export default function Page() {
 
@@ -17,18 +16,6 @@ const router = useRouter();
 
 const [employee,setEmployee]=useState<any>(null);
 const [authChecked,setAuthChecked]=useState(false);
-
-const [selectedEmployee,setSelectedEmployee]=
-useState<string>("");
-
-const [data,setData]=useState<any[]>([]);
-
-const [allData,setAllData]=useState<any[]>([]);
-
-
-// ✅ DATE FILTER
-const [selectedDate,setSelectedDate]=
-useState<string>("");
 
 
 // ✅ AUTH CHECK
@@ -73,7 +60,7 @@ if (!data.is_active) {
 
 }
 
-if (data.role === "admin") {
+if (data.role === "admin" || data.role === "super_admin") {
 
   router.replace("/admin");
 
@@ -107,7 +94,6 @@ if (data.role === "payroll") {
 
 setEmployee(data);
 
-setSelectedEmployee(data.id);
 setAuthChecked(true);
 
 }
@@ -116,266 +102,6 @@ getLoggedInEmployee();
 
 },[]);
 
-
-
-// ✅ LOAD DATA
-async function loadData(date:string){
-
-try{
-
-const employeeId=
-
-employee?.role==="employee"
-
-?
-
-employee.id
-
-:
-
-selectedEmployee;
-
-
-const query = new URLSearchParams({
-
-date:date || "",
-
-employeeId:employeeId || "",
-
-});
-
-
-const res=await fetch(
-
-`/api/data?${query}`,
-
-{
-cache:"no-store"
-}
-
-);
-
-
-if(!res.ok){
-
-setData([]);
-return;
-
-}
-
-
-const json=await res.json();
-
-const records=
-
-Array.isArray(json)
-
-?
-
-json
-
-:
-
-json.data || [];
-
-
-setData(records);
-//console.log("===== API DATA =====");
-//console.table(records);
-
-
-// ✅ ALL DATA
-const allRes=await fetch(
-
-`/api/data?date=${date}`,
-
-{
-cache:"no-store"
-}
-
-);
-
-const allJson=await allRes.json();
-
-setAllData(
-
-Array.isArray(allJson)
-
-?
-
-allJson
-
-:
-
-[]
-
-);
-
-
-}catch(err){
-
-console.log(err);
-
-setData([]);
-
-}
-
-}
-
-
-
-// ✅ DEFAULT TODAY
-useEffect(()=>{
-
-const today=
-
-new Date()
-
-.toISOString()
-
-.split("T")[0];
-
-setSelectedDate(today);
-
-},[]);
-
-
-
-// ✅ AUTO LOAD
-useEffect(()=>{
-
-if(!employee?.id) return;
-
-loadData(selectedDate);
-
-const interval=setInterval(()=>{
-
-loadData(selectedDate);
-
-},5000);
-
-return ()=>clearInterval(interval);
-
-},[
-employee,
-selectedEmployee,
-selectedDate
-]);
-
-
-
-// ✅ FILTERED DATA
-const filteredData=
-
-selectedDate
-
-?
-
-data.filter((d:any)=>{
-
-const date = new Date(d.Date);
-
-const formatted =
-
-date.getFullYear()
-
-+"-"
-
-+String(date.getMonth()+1)
-.padStart(2,"0")
-
-+"-"
-
-+String(date.getDate())
-.padStart(2,"0");
-
-
-return formatted===selectedDate;
-
-})
-
-:
-
-data;
-
-
-
-// ✅ STATS
-const stats={
-
-ig:
-
-filteredData.filter(
-(d)=>
-d["IG Like"]==="YES"
-).length,
-
-
-fb:
-
-filteredData.filter(
-(d)=>
-d["FB Like"]==="YES"
-).length,
-
-
-posts:
-
-new Set(
-filteredData.map(
-(d)=>d["Post ID"]
-)
-).size,
-
-
-employees:
-
-new Set(
-filteredData.map(
-(d)=>d.Employee
-)
-).size,
-
-
-engagement:
-
-filteredData.length>0
-
-?
-
-Math.round(
-
-(
-
-(
-
-filteredData.filter(
-(d)=>d["IG Like"]==="YES"
-).length
-
-+
-
-filteredData.filter(
-(d)=>d["FB Like"]==="YES"
-).length
-
-)
-
-/
-
-(filteredData.length*2)
-
-)
-
-*100
-
-)
-
-:
-
-0,
-
-};
 
 if(!authChecked){
   return (
@@ -397,156 +123,17 @@ to-blue-100
 
 <EmployeeTabBar role={employee?.role} department={employee?.department} />
 
-{employee?.id && <StartShiftCard employeeId={employee.id} />}
+{/* GPS shift-start is a Sales/field concern -- same isNonSales rule
+    EmployeeTabBar already uses (department set and not "sales"), so
+    pre-existing employees with no department value set keep seeing
+    Start Shift exactly as before, and it's hidden for every non-Sales
+    department (Marketing, Other, Accounts, HR) consistently. */}
+{employee?.id && !(employee?.department && employee.department !== "sales") && (
+  <StartShiftCard employeeId={employee.id} />
+)}
 
+<PostsTrackingView employeeId={employee?.id} employeeName={employee?.name} />
 
-{/* ✅ DATE FILTER */}
-
-<div className="
-px-4
-mt-4
-space-y-3
-">
-
-<input
-type="date"
-value={selectedDate}
-onChange={(e)=>
-setSelectedDate(e.target.value)
-}
-className="
-w-full
-max-w-full
-box-border
-border
-px-3
-py-2
-rounded-md
-text-[16px]
-text-gray-800
-bg-white
-shadow
-appearance-none
-"
-style={{ minWidth: 0, WebkitAppearance: "none" }}
-/>
-<button
-onClick={()=>{
-
-const today=
-
-new Date()
-
-.toISOString()
-
-.split("T")[0];
-
-setSelectedDate(today);
-
-}}
-className="
-w-full
-text-xs
-text-gray-700
-font-medium
-py-2
-bg-gray-100
-rounded-md
-hover:bg-gray-200
-appearance-none
-"
-style={{ WebkitAppearance: "none" }}
->
-
-Today Data
-
-</button>
-
-</div>
-
-
-
-{/* ✅ STATS */}
-
-<StatsCard
-
-stats={stats}
-
-employeeName={
-employee?.name || "Employee"
-}
-
-/>
-
-
-
-{/* ✅ EMPTY */}
-
-{filteredData.length===0
-
-?
-
-(
-
-<div className="
-flex
-flex-col
-items-center
-justify-center
-mt-16
-text-center
-px-4
-">
-
-<div className="
-text-5xl
-mb-3
-">
-
-📭
-
-</div>
-
-<h2 className="
-text-lg
-font-semibold
-text-gray-700
-">
-
-No Data Available
-
-</h2>
-
-<p className="
-text-sm
-text-gray-500
-mt-1
-">
-
-No records found for selected date
-
-</p>
-
-</div>
-
-)
-
-:
-
-(
-
-<EmployeePanel
-  data={filteredData}
-  allData={allData}
-  employee={employee}
-  selectedEmployee={selectedEmployee}
-  setSelectedEmployee={setSelectedEmployee}
-  selectedDate={selectedDate}
-/>
-
-)
-
-}
 <Footer />
 </main>
 

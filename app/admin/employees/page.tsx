@@ -2,6 +2,7 @@
 
 import { useEffect,useState } from "react";
 import { Pencil } from "lucide-react";
+import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
 import AddEmployeeModal from "../components/AddEmployeeesModal";
 import DeleteModal from "../components/DeleteModal";
@@ -204,9 +205,12 @@ const toggleSalesCoordinator = async (
     .update({ role: newRole })
     .eq("id", id);
 
-  if (!error) {
-    fetchEmployees();
+  if (error) {
+    toast.error(error.message);
+    return;
   }
+
+  fetchEmployees();
 
 };
 
@@ -240,9 +244,12 @@ const toggleHrRole = async (
     })
     .eq("id", id);
 
-  if (!error) {
-    fetchEmployees();
+  if (error) {
+    toast.error(error.message);
+    return;
   }
+
+  fetchEmployees();
 
 };
 
@@ -267,9 +274,12 @@ const togglePayrollRole = async (
     .update({ role: newRole })
     .eq("id", id);
 
-  if (!error) {
-    fetchEmployees();
+  if (error) {
+    toast.error(error.message);
+    return;
   }
+
+  fetchEmployees();
 
 };
 
@@ -280,9 +290,12 @@ const updateDepartment = async (id: string, newDepartment: string) => {
     .update({ department: newDepartment })
     .eq("id", id);
 
-  if (!error) {
-    fetchEmployees();
+  if (error) {
+    toast.error(error.message);
+    return;
   }
+
+  fetchEmployees();
 
 };
 
