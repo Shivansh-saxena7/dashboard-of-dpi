@@ -196,6 +196,15 @@ serve(async (req) => {
       await client.send({
         from: `Divya Padma Infosystem LLP <${SMTP_USERNAME}>`,
         to: candidate.email.trim(),
+        // BCC the sending mailbox itself (2026-10-02) -- plain SMTP
+        // sending never writes a copy into Hostinger's own Sent
+        // folder (that's an IMAP-client behavior, not something SMTP
+        // does), so without this HR has no way to see a sent copy
+        // from inside Hostinger webmail even though delivery to the
+        // candidate genuinely succeeds. Lands in the Inbox, not
+        // literally "Sent" -- a real IMAP append would be needed for
+        // that, not worth the extra engineering for this.
+        bcc: SMTP_USERNAME,
         subject: `Your ${letterLabel} — Divya Padma Infosystem LLP`,
         content: body,
         attachments: [
