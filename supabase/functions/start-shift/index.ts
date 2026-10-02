@@ -70,39 +70,28 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    const auth = await resolveCallingEmployeeId(req, supabase, corsHeaders);
+    // Perf (2026-10-01): auth resolution (JWT verify + employees
+    // lookup, 2 round trips internally) and the settings fetch don't
+    // depend on each other -- settings is keyed on id=1, not on who's
+    // calling -- so they run concurrently instead of back-to-back.
+    // is_field_employee now comes back from resolveCallingEmployeeId
+    // itself (see _shared/auth.ts), removing what used to be a THIRD,
+    // separate employees lookup for the exact same row. Net: 3 serial
+    // round trips collapsed to effectively 2 before the existing-
+    // attendance check.
+    const [auth, settingsResult] = await Promise.all([
+      resolveCallingEmployeeId(req, supabase, corsHeaders),
+      supabase.from("lead_engine_settings").select("*").eq("id", 1).single()
+    ]);
 
     if (auth.errorResponse) {
       return auth.errorResponse;
     }
 
     const employee_id = auth.employeeId;
+    const isFieldEmployee = auth.isFieldEmployee;
 
-    // Field-Employee geofence exemption (2026-09-16) — self-contained
-    // to this function rather than added to resolveCallingEmployeeId
-    // (shared by other Edge Functions too, e.g. end-shift) to keep the
-    // blast radius of this change to exactly where it's needed. Admin-
-    // set only (employees.is_field_employee) — for staff who work
-    // directly from client sites and never come to the office, so the
-    // office-radius requirement never blocks them.
-    const { data: employeeRow, error: employeeError } = await supabase
-      .from("employees")
-      .select("is_field_employee")
-      .eq("id", employee_id)
-      .single();
-
-    if (employeeError || !employeeRow) {
-      return respond(
-        { success: false, step: "FETCH_EMPLOYEE", error: employeeError?.message || "employee not found" },
-        500
-      );
-    }
-
-    const { data: settings, error: settingsError } = await supabase
-      .from("lead_engine_settings")
-      .select("*")
-      .eq("id", 1)
-      .single();
+    const { data: settings, error: settingsError } = settingsResult;
 
     if (settingsError || !settings) {
       return respond(
@@ -178,7 +167,7 @@ serve(async (req) => {
     // before. Not just "always pass" — genuinely never evaluated, so
     // no distance/accuracy computation happens for this employee at
     // all.
-    if (!employeeRow.is_field_employee) {
+    if (!isFieldEmployee) {
       const geofence = calculateGeofenceStatus(
         lat,
         lng,
@@ -222,7 +211,7 @@ serve(async (req) => {
         // misrepresent "the check ran and passed" when it never ran
         // at all; null keeps that genuinely distinguishable in
         // reporting from a real, evaluated pass.
-        geofence_pass: employeeRow.is_field_employee ? null : true,
+        geofence_pass: isFieldEmployee ? null : true,
         attendance_type: attendanceType
       })
       .select()

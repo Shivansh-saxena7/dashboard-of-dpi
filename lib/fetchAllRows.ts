@@ -55,6 +55,20 @@ export interface FetchAllRowsOptions {
   };
 }
 
+// 2026-10-01: a concurrent-pages version of this loop was tried and
+// reverted the same day -- it made a live production page (Coordinator
+// Dashboard) fail MORE reliably (a real Postgres statement-timeout
+// cancellation, not hypothetical) than the plain sequential loop did,
+// almost certainly connection-pool contention from firing several
+// heavy PostgREST+RLS requests at once rather than genuine query cost
+// (isolated single-page timing was only 1-4.5s, nowhere near the 2min
+// statement_timeout that was still getting hit). Reverted to this
+// known-correct sequential loop rather than keep experimenting against
+// live production; the real fix for the Coordinator page's slowness
+// needs to reduce what that page asks for, not change this shared
+// loop's concurrency. Do not re-attempt parallelizing this without
+// first confirming Supabase's pooler-level connection/timeout
+// behavior, not just raw Postgres's statement_timeout.
 export async function fetchAllRows(
   queryBuilder: () => any,
   options: FetchAllRowsOptions = {}

@@ -67,7 +67,7 @@ export async function resolveCallingEmployeeId(
 
   const { data: employee, error: employeeError } = await serviceRoleClient
     .from("employees")
-    .select("id")
+    .select("id, is_field_employee")
     .eq("auth_user_id", user.id)
     .single();
 
@@ -86,6 +86,9 @@ export async function resolveCallingEmployeeId(
     };
   }
 
-  return { employeeId: employee.id };
+  // is_field_employee riding along here (2026-10-01 perf fix) saves
+  // start-shift its own separate employees lookup for the exact same
+  // row -- callers that don't need it just ignore the field.
+  return { employeeId: employee.id, isFieldEmployee: employee.is_field_employee };
 
 }

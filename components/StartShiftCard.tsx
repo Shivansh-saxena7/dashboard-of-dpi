@@ -254,7 +254,11 @@ export default function StartShiftCard({ employeeId, compact = false }: StartShi
         setGeoStatus(result.withinGeofence ? "within" : "outside");
       },
       () => setGeoStatus("unavailable"),
-      { enableHighAccuracy: true, timeout: 15000 }
+      // maximumAge (2026-10-01 perf/reliability fix, see startShift()'s
+      // own comment for the full root-cause writeup) — lets the browser
+      // hand back this same fix to the Start Shift click a few seconds
+      // later instead of forcing a second from-scratch GPS acquisition.
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 20000 }
     );
   }, [config, shiftStartAt, shiftEndAt, isFieldEmployee]);
 
@@ -273,6 +277,35 @@ export default function StartShiftCard({ employeeId, compact = false }: StartShi
     return session.access_token;
   }
 
+  function getPosition(options: PositionOptions): Promise<GeolocationPosition> {
+    return new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, options);
+    });
+  }
+
+  // Root cause of "errors on the first click, works on the second"
+  // (2026-10-01 investigation): a high-accuracy GPS fix can genuinely
+  // take longer than this function's own 15s timeout indoors/multi-
+  // story buildings (already a known issue here — see the 100m
+  // geofence-radius commit). The old code surfaced that timeout
+  // straight to the user as an error. By the time they clicked again,
+  // the device's GPS chip had kept acquiring in the background and/or
+  // the browser had a fresh cached fix, so the second click "just
+  // worked" — same cause the background geofence-check effect above
+  // now also benefits from via maximumAge. This function closes the
+  // gap on the FIRST click: if the high-accuracy attempt times out, it
+  // falls back once to a network/WiFi-based fix (much faster, lower
+  // precision) before ever bothering the user — acceptable because the
+  // server's authoritative geofence radius (100m) already tolerates
+  // that lower precision tier.
+  async function getPositionWithFallback(): Promise<GeolocationPosition> {
+    try {
+      return await getPosition({ enableHighAccuracy: true, timeout: 15000, maximumAge: 20000 });
+    } catch {
+      return await getPosition({ enableHighAccuracy: false, timeout: 8000, maximumAge: 20000 });
+    }
+  }
+
   function startShift() {
     if (!navigator.geolocation) {
       toast.error("Location isn't available on this device/browser.");
@@ -281,8 +314,8 @@ export default function StartShiftCard({ employeeId, compact = false }: StartShi
 
     setStarting(true);
 
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
+    getPositionWithFallback()
+      .then(async (position) => {
         try {
 
           const accessToken = await getAccessTokenOrWarn();
@@ -334,14 +367,12 @@ export default function StartShiftCard({ employeeId, compact = false }: StartShi
         } finally {
           setStarting(false);
         }
-      },
-      (geoError) => {
+      })
+      .catch((geoError) => {
         console.log(geoError);
         toast.error("Couldn't get your location. Please allow location access and try again.");
         setStarting(false);
-      },
-      { enableHighAccuracy: true, timeout: 15000 }
-    );
+      });
   }
 
   async function endShift() {

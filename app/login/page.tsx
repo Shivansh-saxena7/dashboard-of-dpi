@@ -17,6 +17,18 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  // Auth-hydration-race fix (2026-10-01) — this page used to render the
+  // full login form immediately on mount, with checkSession() running
+  // afterward as a side effect that only redirected once it resolved.
+  // On a PWA reopen that's a real, visible flash: login form renders
+  // first, session-restore finishes a moment later, then it jumps to
+  // the dashboard. checkingSession gates the whole return instead; the
+  // neutral loading screen below stays up through any redirect path
+  // (checkingSession is only ever set false on the no-redirect paths),
+  // so there's no window where the form is visible if a valid session
+  // already exists — same authChecked-gate pattern app/team/page.tsx
+  // already uses.
+  const [checkingSession, setCheckingSession] = useState(true);
   const router = useRouter();
 
   useEffect(() => {
@@ -24,33 +36,47 @@ export default function LoginPage() {
   }, []);
 
   const checkSession = async () => {
-    const {
-      data: { session }
-    } = await supabase.auth.getSession();
+    try {
+      const {
+        data: { session }
+      } = await supabase.auth.getSession();
 
-    if (!session) return;
+      if (!session) {
+        setCheckingSession(false);
+        return;
+      }
 
-    const { data: employee } = await supabase
-      .from("employees")
-      .select("*")
-      .eq("auth_user_id", session.user.id)
-      .single();
+      const { data: employee } = await supabase
+        .from("employees")
+        .select("*")
+        .eq("auth_user_id", session.user.id)
+        .single();
 
-    if (!employee?.is_active) {
-      await supabase.auth.signOut();
-      return;
-    }
+      if (!employee?.is_active) {
+        await supabase.auth.signOut();
+        setCheckingSession(false);
+        return;
+      }
 
-    if (employee?.role === "admin") {
-      router.replace("/admin");
-    } else if (employee?.role === "sales_coordinator") {
-      router.replace("/coordinator");
-    } else if (employee?.role === "hr") {
-      router.replace("/hr");
-    } else if (employee?.role === "payroll") {
-      router.replace("/payroll");
-    } else {
-      router.replace("/");
+      if (employee?.role === "admin") {
+        router.replace("/admin");
+      } else if (employee?.role === "sales_coordinator") {
+        router.replace("/coordinator");
+      } else if (employee?.role === "hr") {
+        router.replace("/hr");
+      } else if (employee?.role === "payroll") {
+        router.replace("/payroll");
+      } else {
+        router.replace("/");
+      }
+      // Deliberately no setCheckingSession(false) here — stays on the
+      // neutral loading screen until the redirect above actually
+      // navigates this page away.
+    } catch (err) {
+      console.log(err);
+      // Fail safe: never leave the user stuck on a blank screen if the
+      // session check itself errors — fall through to the real form.
+      setCheckingSession(false);
     }
   };
 
@@ -116,6 +142,10 @@ export default function LoginPage() {
       setLoading(false);
     }
   };
+
+  if (checkingSession) {
+    return <div className="h-screen bg-[#080808]" />;
+  }
 
   return (
     <div className="h-screen relative overflow-hidden bg-[#080808] flex items-center justify-center px-4 sm:px-6 py-4">
