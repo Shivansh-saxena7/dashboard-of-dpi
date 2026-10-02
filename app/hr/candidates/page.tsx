@@ -402,17 +402,9 @@ export default function HrCandidatesPage() {
   const [emailDraft, setEmailDraft] = useState("");
   const [savingEmail, setSavingEmail] = useState(false);
 
-  const [convertOpenFor, setConvertOpenFor] = useState<string | null>(null);
-  const [convertEmail, setConvertEmail] = useState("");
-  const [convertPassword, setConvertPassword] = useState("");
-  const [convertRole, setConvertRole] = useState("employee");
-  const [convertDepartment, setConvertDepartment] = useState("sales");
-  const [converting, setConverting] = useState(false);
-
-  // New Super-Admin-approval request flow -- separate state from the
-  // legacy direct-conversion form above (convertOpenFor etc.), which
-  // stays untouched and reachable as a fallback until the new path is
-  // confirmed working.
+  // Super-Admin-approval request flow -- replaced the old direct-
+  // conversion form (confirmed working end-to-end on both a disposable
+  // test candidate and a real one, legacy path removed).
   const [requestOpenFor, setRequestOpenFor] = useState<string | null>(null);
   const [requestEmail, setRequestEmail] = useState("");
   const [requestRole, setRequestRole] = useState("employee");
@@ -892,46 +884,6 @@ export default function HrCandidatesPage() {
       toast.error("Could not send email.");
     } finally {
       setSendingEmailFor(null);
-    }
-  }
-
-  async function handleConvert(candidate: CandidateRow) {
-    if (!convertEmail.trim() || !convertPassword.trim()) {
-      toast.error("Email and password are required.");
-      return;
-    }
-
-    setConverting(true);
-    try {
-      const res = await fetch("/api/convert-candidate-to-employee", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          candidateId: candidate.id,
-          email: convertEmail.trim(),
-          password: convertPassword,
-          role: convertRole,
-          department: convertDepartment
-        })
-      });
-      const result = await res.json();
-
-      if (!result.success) {
-        toast.error(result.message || "Could not convert candidate.");
-        return;
-      }
-
-      toast.success("Candidate converted to employee.");
-      setConvertOpenFor(null);
-      setConvertEmail("");
-      setConvertPassword("");
-      setConvertRole("employee");
-      setConvertDepartment("sales");
-      loadAll();
-    } catch (err: any) {
-      toast.error(err.message || "Could not convert candidate.");
-    } finally {
-      setConverting(false);
     }
   }
 
@@ -1512,45 +1464,6 @@ export default function HrCandidatesPage() {
                                 className="h-10 px-4 rounded-xl font-bold text-white bg-gradient-to-r from-violet-600 to-purple-500 text-xs flex items-center gap-2 shadow-sm hover:opacity-90 transition"
                               >
                                 <UserCheck size={14} /> Request Employee Account
-                              </button>
-                            )}
-
-                            {/* Legacy direct-conversion fallback -- kept reachable
-                                while the approval flow above is being tested on
-                                live production, removed once confirmed working. */}
-                            {convertOpenFor === candidate.id ? (
-                              <div className="space-y-2 p-3.5 rounded-xl bg-slate-50 border border-slate-200">
-                                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Create Directly (legacy, no approval)</p>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                  <input value={convertEmail} onChange={(e) => setConvertEmail(e.target.value)} placeholder="Login email" className="h-9 rounded-lg bg-white border border-slate-200 px-2 text-xs outline-none" />
-                                  <input type="password" value={convertPassword} onChange={(e) => setConvertPassword(e.target.value)} placeholder="Temporary password" className="h-9 rounded-lg bg-white border border-slate-200 px-2 text-xs outline-none" />
-                                  <select value={convertRole} onChange={(e) => setConvertRole(e.target.value)} className="h-9 rounded-lg bg-white border border-slate-200 px-2 text-xs outline-none">
-                                    <option value="employee">Employee</option>
-                                    <option value="team_leader">Team Leader</option>
-                                    <option value="hr">HR</option>
-                                    <option value="sales_coordinator">Sales Coordinator</option>
-                                  </select>
-                                  <select value={convertDepartment} onChange={(e) => setConvertDepartment(e.target.value)} className="h-9 rounded-lg bg-white border border-slate-200 px-2 text-xs outline-none">
-                                    <option value="sales">Sales</option>
-                                    <option value="hr">HR</option>
-                                  </select>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <button onClick={() => handleConvert(candidate)} disabled={converting} className="h-8 px-3 rounded-lg bg-slate-600 text-white text-xs font-bold disabled:opacity-50">
-                                    {converting ? "Converting..." : "Confirm Conversion"}
-                                  </button>
-                                  <button onClick={() => setConvertOpenFor(null)} className="h-8 px-2 text-xs text-slate-400">Cancel</button>
-                                </div>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => {
-                                  setConvertOpenFor(candidate.id);
-                                  setConvertEmail(candidate.email || "");
-                                }}
-                                className="text-[11px] text-slate-400 underline hover:text-slate-600"
-                              >
-                                or create directly without approval (legacy)
                               </button>
                             )}
                           </div>

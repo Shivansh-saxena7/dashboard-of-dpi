@@ -1,13 +1,12 @@
 import { createClient } from "@supabase/supabase-js";
 
 // Single owner for "actually create the employee account from a
-// candidate" -- used by both the legacy direct-conversion route
-// (app/api/convert-candidate-to-employee) and the new Super-Admin
-// approval route (app/api/review-employee-creation-request). Keeping
-// this in one place means the legacy route's behavior stays exactly
-// unchanged (still a thin wrapper around this), while the new approval
-// path reuses the identical, already-proven creation logic instead of
-// a second copy that could drift.
+// candidate", called by the Super-Admin approval route
+// (app/api/review-employee-creation-request) once a request is
+// approved. Used to also back a direct-conversion route with no
+// approval step; that route was removed once the approval flow was
+// confirmed working end-to-end on live production with a real
+// candidate.
 export async function performCandidateConversion({
   candidateId,
   email,
