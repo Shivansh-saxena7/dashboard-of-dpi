@@ -11,6 +11,7 @@ import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
 import { consumeRecentlyCalledCardId, scrollToAndHighlightCard } from "@/lib/lastCalledLead";
 import { normalizeMobile } from "@/lib/normalizeMobile";
+import { istDateStringToRangeStartUTC, istDateStringToRangeEndUTC } from "@/lib/istTime";
 
 interface DataListProps {
   employeeId: string;
@@ -217,8 +218,10 @@ export default function DataList({ employeeId }: DataListProps) {
         }
 
         if (dateRangeFilter === "CUSTOM" && customStart && customEnd) {
-          const startMs = new Date(customStart).getTime();
-          const endMs = new Date(customEnd).getTime() + 24 * 60 * 60 * 1000 - 1;
+          // IST-aware boundaries (2026-10-01 fix) -- see istTime.ts's
+          // own comment for why plain `new Date(customStart)` was wrong.
+          const startMs = istDateStringToRangeStartUTC(customStart).getTime();
+          const endMs = istDateStringToRangeEndUTC(customEnd).getTime();
           return assignedMs >= startMs && assignedMs <= endMs;
         }
 

@@ -42,3 +42,24 @@ export function formatTimeStringAsClock(time: string): string {
 
   return `${hours12}:${String(minutes).padStart(2, "0")} ${period}`;
 }
+
+// Date-range-filter boundary helpers (2026-10-01). A "YYYY-MM-DD"
+// string from an <input type="date"> always means an IST calendar day
+// here (DPI operates in India) -- but `new Date("YYYY-MM-DD")` is
+// specified to parse a bare date-only string as UTC midnight, not
+// local/IST midnight. Every custom-date-range filter in this app
+// (admin leads, Coordinator dashboard) was building its boundaries
+// with plain `new Date(dateStr)`, silently shifting both ends of the
+// window 5.5 hours later than intended -- invisible on a day with no
+// lead activity in the 00:00-05:29 IST gap, but a real, confirmed
+// latent bug on any day that does. These two helpers are the correct
+// replacement; both are "YYYY-MM-DDT..+05:30" ISO strings with an
+// explicit offset, which every JS engine parses correctly regardless
+// of which timezone the runtime itself defaults to.
+export function istDateStringToRangeStartUTC(dateStr: string): Date {
+  return new Date(`${dateStr}T00:00:00.000+05:30`);
+}
+
+export function istDateStringToRangeEndUTC(dateStr: string): Date {
+  return new Date(`${dateStr}T23:59:59.999+05:30`);
+}

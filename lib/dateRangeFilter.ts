@@ -1,3 +1,5 @@
+import { istDateStringToRangeStartUTC, istDateStringToRangeEndUTC } from "./istTime.ts";
+
 export type DateRangeOption = "ALL" | "THIS_WEEK" | "THIS_MONTH" | "CUSTOM";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -22,8 +24,10 @@ export function isWithinDateRange(
   if (option === "THIS_MONTH") return nowMs - ms <= MONTH_MS;
 
   if (option === "CUSTOM" && customStart && customEnd) {
-    const startMs = new Date(customStart).getTime();
-    const endMs = new Date(customEnd).getTime() + 24 * 60 * 60 * 1000 - 1;
+    // IST-aware boundaries (2026-10-01 fix) -- see istTime.ts's own
+    // comment for why plain `new Date(customStart)` was wrong here.
+    const startMs = istDateStringToRangeStartUTC(customStart).getTime();
+    const endMs = istDateStringToRangeEndUTC(customEnd).getTime();
     return ms >= startMs && ms <= endMs;
   }
 
