@@ -199,7 +199,9 @@ export default function WorkReportView({ employeeId, employeeName, date, whatsap
       converted: report.converted,
       followUps: report.followUps,
       visits: report.visits,
-      bookings: report.bookings
+      bookings: report.bookings,
+      personalLeads: report.personalLeads,
+      stuckLeads: report.stuckLeads
     });
   }
 
@@ -302,12 +304,13 @@ export default function WorkReportView({ employeeId, employeeName, date, whatsap
             is), not a day-bound event count like every other tile, and
             its detail shape (callCount/daysSinceLastAttempt) doesn't
             match DetailEntry's (leadName/time) — genuinely different
-            data, not worth forcing into the shared shape. Deliberately
-            excluded from currentMessage()/buildWorkReportMessage — see
-            that function's own note on why this never goes into the
-            shareable WhatsApp text. Red/amber tone (not the neutral
-            grid styling) when count > 0 — this tile is specifically an
-            attention-needed signal, not a neutral daily stat. */}
+            data, not worth forcing into the shared shape. Its count
+            DOES go into currentMessage()/buildWorkReportMessage
+            (2026-10-02) — only the detail list stays screen-only, same
+            as every other metric's detail breakdown. Red/amber tone
+            (not the neutral grid styling) when count > 0 — this tile is
+            specifically an attention-needed signal, not a neutral
+            daily stat. */}
         <motion.button
           whileTap={{ scale: 0.97 }}
           onClick={() => setStuckExpanded((v) => !v)}

@@ -19,6 +19,8 @@ export interface WorkReportSummary {
   followUps: number;
   visits: number;
   bookings: number;
+  personalLeads: number;
+  stuckLeads: number;
 }
 
 export function buildWorkReportMessage(report: WorkReportSummary): string {
@@ -38,6 +40,8 @@ export function buildWorkReportMessage(report: WorkReportSummary): string {
     `🤝 Converted: ${report.converted}`,
     `➡️ Moved to Follow-up: ${report.followUps}`,
     `🏠 Visits: ${report.visits}`,
-    `🎉 Bookings: ${report.bookings}`
+    `🎉 Bookings: ${report.bookings}`,
+    `📱 Personal Numbers: ${report.personalLeads}`,
+    `⚠️ Not Connected, No Follow-up: ${report.stuckLeads}`
   ].join("\n");
 }
