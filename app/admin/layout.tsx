@@ -117,6 +117,12 @@ icon:"🗂️"
 },
 
 {
+name:"Meta Datasets",
+href:"/admin/meta-datasets",
+icon:"📶"
+},
+
+{
 name:"Teams",
 href:"/admin/teams",
 icon:"🧑‍🤝‍🧑"

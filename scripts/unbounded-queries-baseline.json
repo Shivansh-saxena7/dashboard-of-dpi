@@ -1,5 +1,5 @@
 [
-  { "file": "app/admin/leads/import/page.tsx", "line": 241, "reason": "Scoped to one csv_import_batch_id — bounded to a single import batch's own rows." },
+  { "file": "app/admin/leads/import/page.tsx", "line": 242, "reason": "Scoped to one csv_import_batch_id — bounded to a single import batch's own rows. (Line shifted: 241 -> 242 after the 2026-10-02 meta_lead_id CSV-mapping addition.)" },
   { "file": "app/admin/leave/page.tsx", "line": 98, "reason": "Scoped to employees currently on an active leave period (typically a handful of people), not all active employees." },
   { "file": "app/admin/teams/page.tsx", "line": 127, "reason": "Scoped to one team's own memberIds via .in() — bounded by team size." },
   { "file": "app/api/data/route.ts", "line": 16, "reason": "WATCH (from 2026-09-21 audit): unbounded only if called with no employeeId/date filter; not currently called that way anywhere in the app, but the route itself allows it." },
