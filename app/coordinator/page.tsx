@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import toast from "react-hot-toast";
 import { Search, ChevronDown, CheckCircle2, XCircle, Clock, FileSpreadsheet, FileText, Table2 } from "lucide-react";
@@ -205,6 +205,22 @@ export default function CoordinatorDashboard() {
   const [customEnd, setCustomEnd] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("NEWEST");
 
+  // Client-side card pagination (2026-10-01 perf fix) — with every
+  // filter defaulting to empty/"ALL", visibleLeads/cardLeads is the
+  // FULL leads set (2500+ and growing) on first load, and this tab was
+  // mounting every single one as an AdminLeadCard with no bound at
+  // all -- confirmed the dominant cost of this page feeling slow to
+  // open, well above the network fetch itself. The underlying data
+  // (visibleLeads, cardLeads) stays fully loaded and unfiltered-by-
+  // this exactly as before -- Export/Report Table/counts/search all
+  // keep operating over the complete filtered set; only what actually
+  // mounts into the DOM as cards is bounded.
+  const CARD_PAGE_SIZE = 60;
+  const [cardPage, setCardPage] = useState(0);
+
+  // See loadLeads()'s own comment for why this exists.
+  const loadingLeadsRef = useRef(false);
+
   // --- Visit Verification tab filters ---
   const [visitEmployeeFilter, setVisitEmployeeFilter] = useState("");
   const [visitTeamFilter, setVisitTeamFilter] = useState("");
@@ -353,12 +369,27 @@ export default function CoordinatorDashboard() {
   // required so paging is deterministic across pages when several
   // leads share the same created_at.
   async function loadLeads() {
-    const { data, error } = await fetchAllRows(
-      () =>
-        supabase
-          .from("leads")
-          .select(
-            `
+    // In-flight guard (2026-10-01 perf/reliability fix) — this is a
+    // heavy multi-page fetchAllRows call (3000+ leads, deep joins), and
+    // the realtime subscription below calls loadLeads() again on every
+    // live leads/lead_history/site_visits change, which on an actively-
+    // worked production board can genuinely fire WHILE the initial load
+    // is still running. Two overlapping full paginated fetches from the
+    // same client was observed live hitting a real Postgres statement-
+    // timeout (self-contention, not a slow query — the same query in
+    // isolation ran in 1-4.5s/page). Skipping a re-trigger while one is
+    // already in flight is strictly safe: the in-flight call will pick
+    // up the freshest data anyway once it finishes.
+    if (loadingLeadsRef.current) return;
+    loadingLeadsRef.current = true;
+
+    try {
+      const { data, error } = await fetchAllRows(
+        () =>
+          supabase
+            .from("leads")
+            .select(
+              `
         id, name, mobile, project, source, catcher_name, status, priority, board_stage, board_stage_changed_at,
         sla_deadline, recycle_count, created_at, current_owner_id, lead_type, is_personal_lead,
         employees ( name ),
@@ -368,19 +399,22 @@ export default function CoordinatorDashboard() {
           assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)
         )
         `,
-            { count: "exact" }
-          )
-          .eq("lead_history.is_active", true)
-          .order("created_at", { ascending: false })
-          .order("id"),
-      { anomalyContext: { supabase, source: "coordinator:loadLeads" } }
-    );
+              { count: "exact" }
+            )
+            .eq("lead_history.is_active", true)
+            .order("created_at", { ascending: false })
+            .order("id"),
+        { anomalyContext: { supabase, source: "coordinator:loadLeads" } }
+      );
 
-    if (error) {
-      console.error("coordinator: loadLeads failed:", error.message);
-      return;
+      if (error) {
+        console.error("coordinator: loadLeads failed:", error.message);
+        return;
+      }
+      if (data) setLeads(data);
+    } finally {
+      loadingLeadsRef.current = false;
     }
-    if (data) setLeads(data);
   }
 
   async function loadEmployees() {
@@ -644,6 +678,20 @@ export default function CoordinatorDashboard() {
       })),
     [visibleLeads]
   );
+
+  // Reset to page 1 whenever the filtered set changes shape (a new
+  // search/filter could otherwise leave the view on a now-out-of-range
+  // page showing nothing).
+  useEffect(() => {
+    setCardPage(0);
+  }, [cardLeads]);
+
+  const pagedCardLeads = useMemo(
+    () => cardLeads.slice(cardPage * CARD_PAGE_SIZE, (cardPage + 1) * CARD_PAGE_SIZE),
+    [cardLeads, cardPage]
+  );
+
+  const totalCardPages = Math.max(1, Math.ceil(cardLeads.length / CARD_PAGE_SIZE));
 
   const leadsReportMeta = useMemo(() => {
     const employeeLabel = employeeFilter
@@ -1337,19 +1385,43 @@ export default function CoordinatorDashboard() {
           {visibleLeads.length === 0 ? (
             <EmptyState emoji="🎯" text="No leads match these filters." />
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {cardLeads.map((cardLead, index) => (
-                <AdminLeadCard
-                  key={cardLead.id}
-                  index={index}
-                  teams={[]}
-                  onReserveTeam={noopReserveTeam}
-                  readOnly
-                  isOwnerOnLeave={cardLead.currentOwnerId ? onLeaveEmployeeIds.has(cardLead.currentOwnerId) : false}
-                  lead={cardLead}
-                />
-              ))}
-            </div>
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {pagedCardLeads.map((cardLead, index) => (
+                  <AdminLeadCard
+                    key={cardLead.id}
+                    index={index}
+                    teams={[]}
+                    onReserveTeam={noopReserveTeam}
+                    readOnly
+                    isOwnerOnLeave={cardLead.currentOwnerId ? onLeaveEmployeeIds.has(cardLead.currentOwnerId) : false}
+                    lead={cardLead}
+                  />
+                ))}
+              </div>
+
+              {totalCardPages > 1 && (
+                <div className="flex items-center justify-center gap-3 pt-2">
+                  <button
+                    onClick={() => setCardPage((p) => Math.max(0, p - 1))}
+                    disabled={cardPage === 0}
+                    className="h-9 px-4 rounded-lg bg-white border border-slate-200 text-xs font-bold text-slate-600 disabled:opacity-40 hover:bg-slate-50 transition"
+                  >
+                    Previous
+                  </button>
+                  <span className="text-xs font-semibold text-slate-500">
+                    Page {cardPage + 1} of {totalCardPages} — {cardLeads.length} lead{cardLeads.length === 1 ? "" : "s"}
+                  </span>
+                  <button
+                    onClick={() => setCardPage((p) => Math.min(totalCardPages - 1, p + 1))}
+                    disabled={cardPage >= totalCardPages - 1}
+                    className="h-9 px-4 rounded-lg bg-white border border-slate-200 text-xs font-bold text-slate-600 disabled:opacity-40 hover:bg-slate-50 transition"
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
