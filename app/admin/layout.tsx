@@ -181,6 +181,11 @@ href:"/payroll/expenses",
 icon:"💰"
 },
 {
+name:"Employee Requests",
+href:"/admin/employee-requests",
+icon:"🧾"
+},
+{
 name:"Settings",
 href:"/admin/settings",
 icon:"⚙️"

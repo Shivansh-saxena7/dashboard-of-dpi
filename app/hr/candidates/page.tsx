@@ -258,6 +258,14 @@ interface CandidateDocumentRow {
   emailed_at: string | null;
 }
 
+interface EmployeeCreationRequestRow {
+  id: string;
+  candidate_id: string;
+  status: "PENDING" | "APPROVED" | "REJECTED";
+  rejection_reason: string | null;
+  requested_at: string;
+}
+
 interface EmployeeOption {
   id: string;
   name: string;
@@ -401,6 +409,17 @@ export default function HrCandidatesPage() {
   const [convertDepartment, setConvertDepartment] = useState("sales");
   const [converting, setConverting] = useState(false);
 
+  // New Super-Admin-approval request flow -- separate state from the
+  // legacy direct-conversion form above (convertOpenFor etc.), which
+  // stays untouched and reachable as a fallback until the new path is
+  // confirmed working.
+  const [requestOpenFor, setRequestOpenFor] = useState<string | null>(null);
+  const [requestEmail, setRequestEmail] = useState("");
+  const [requestRole, setRequestRole] = useState("employee");
+  const [requestDepartment, setRequestDepartment] = useState("sales");
+  const [requesting, setRequesting] = useState(false);
+  const [requests, setRequests] = useState<EmployeeCreationRequestRow[]>([]);
+
   const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
@@ -423,7 +442,7 @@ export default function HrCandidatesPage() {
   async function loadAll() {
     setLoading(true);
 
-    const [{ data: candidatesData }, { data: interviewsData }, { data: templatesData }, { data: documentsData }, { data: employeesData }] =
+    const [{ data: candidatesData }, { data: interviewsData }, { data: templatesData }, { data: documentsData }, { data: employeesData }, { data: requestsData }] =
       await Promise.all([
         supabase.from("candidates").select("*").order("created_at", { ascending: false }),
         supabase
@@ -432,7 +451,11 @@ export default function HrCandidatesPage() {
           .order("interview_date", { ascending: false }),
         supabase.from("hr_document_templates").select("id, title, body, letterhead_storage_path").in("title", ["Offer Letter", "Appointment Letter"]),
         supabase.from("hr_documents").select("id, candidate_id, document_type, label, storage_path, is_generated, created_at, emailed_at").not("candidate_id", "is", null).order("created_at", { ascending: false }),
-        supabase.from("employees").select("id, name").eq("is_active", true).order("name")
+        supabase.from("employees").select("id, name").eq("is_active", true).order("name"),
+        supabase
+          .from("employee_creation_requests")
+          .select("id, candidate_id, status, rejection_reason, requested_at")
+          .order("requested_at", { ascending: false })
       ]);
 
     setCandidates((candidatesData || []) as CandidateRow[]);
@@ -440,7 +463,51 @@ export default function HrCandidatesPage() {
     setTemplates((templatesData || []) as TemplateRow[]);
     setDocuments((documentsData || []) as CandidateDocumentRow[]);
     setEmployees((employeesData || []) as EmployeeOption[]);
+    setRequests((requestsData || []) as EmployeeCreationRequestRow[]);
     setLoading(false);
+  }
+
+  // Most recent request per candidate -- requestsData is already
+  // ordered newest-first, so the first match per candidate_id wins.
+  const latestRequestByCandidate = useMemo(() => {
+    const map = new Map<string, EmployeeCreationRequestRow>();
+    requests.forEach((r) => {
+      if (!map.has(r.candidate_id)) map.set(r.candidate_id, r);
+    });
+    return map;
+  }, [requests]);
+
+  async function handleRequestApproval(candidate: CandidateRow) {
+    if (!requestEmail.trim()) {
+      toast.error("Login email is required.");
+      return;
+    }
+    if (!myEmployeeId) {
+      toast.error("Could not identify your employee record.");
+      return;
+    }
+
+    setRequesting(true);
+    const { error } = await supabase.from("employee_creation_requests").insert({
+      candidate_id: candidate.id,
+      requested_by: myEmployeeId,
+      email: requestEmail.trim(),
+      role: requestRole,
+      department: requestDepartment
+    });
+    setRequesting(false);
+
+    if (error) {
+      toast.error(error.message || "Could not submit request.");
+      return;
+    }
+
+    toast.success("Submitted for Super Admin approval.");
+    setRequestOpenFor(null);
+    setRequestEmail("");
+    setRequestRole("employee");
+    setRequestDepartment("sales");
+    loadAll();
   }
 
   const interviewsByCandidate = useMemo(() => {
@@ -1383,47 +1450,112 @@ export default function HrCandidatesPage() {
 
                     {/* Convert to Employee */}
                     <div>
-                      {candidate.status === "CONVERTED" ? (
-                        <div className="px-3.5 py-3 rounded-xl bg-blue-50 border border-blue-100 text-blue-700 text-xs font-bold flex items-center gap-2">
-                          <UserCheck size={15} /> Converted to employee
-                        </div>
-                      ) : hasAppointmentLetter ? (
-                        convertOpenFor === candidate.id ? (
-                          <div className="space-y-2 p-3.5 rounded-xl bg-violet-50/50 border border-violet-100">
-                            <p className="text-[10px] font-bold text-violet-700 uppercase tracking-wide">Create Employee Account</p>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                              <input value={convertEmail} onChange={(e) => setConvertEmail(e.target.value)} placeholder="Login email" className="h-9 rounded-lg bg-white border border-slate-200 px-2 text-xs outline-none" />
-                              <input type="password" value={convertPassword} onChange={(e) => setConvertPassword(e.target.value)} placeholder="Temporary password" className="h-9 rounded-lg bg-white border border-slate-200 px-2 text-xs outline-none" />
-                              <select value={convertRole} onChange={(e) => setConvertRole(e.target.value)} className="h-9 rounded-lg bg-white border border-slate-200 px-2 text-xs outline-none">
-                                <option value="employee">Employee</option>
-                                <option value="team_leader">Team Leader</option>
-                                <option value="hr">HR</option>
-                                <option value="sales_coordinator">Sales Coordinator</option>
-                              </select>
-                              <select value={convertDepartment} onChange={(e) => setConvertDepartment(e.target.value)} className="h-9 rounded-lg bg-white border border-slate-200 px-2 text-xs outline-none">
-                                <option value="sales">Sales</option>
-                                <option value="hr">HR</option>
-                              </select>
+                      {(() => {
+                        const latestRequest = latestRequestByCandidate.get(candidate.id);
+
+                        if (candidate.status === "CONVERTED") {
+                          return (
+                            <div className="px-3.5 py-3 rounded-xl bg-blue-50 border border-blue-100 text-blue-700 text-xs font-bold flex items-center gap-2">
+                              <UserCheck size={15} /> Converted to employee
                             </div>
-                            <div className="flex items-center gap-2">
-                              <button onClick={() => handleConvert(candidate)} disabled={converting} className="h-8 px-3 rounded-lg bg-violet-600 text-white text-xs font-bold disabled:opacity-50">
-                                {converting ? "Converting..." : "Confirm Conversion"}
+                          );
+                        }
+
+                        if (!hasAppointmentLetter) return null;
+
+                        if (latestRequest?.status === "PENDING") {
+                          return (
+                            <div className="px-3.5 py-3 rounded-xl bg-amber-50 border border-amber-100 text-amber-700 text-xs font-bold flex items-center gap-2">
+                              ⏳ Pending Super Admin approval
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div className="space-y-2">
+                            {latestRequest?.status === "REJECTED" && (
+                              <div className="px-3 py-2 rounded-lg bg-red-50 border border-red-100 text-red-700 text-[11px]">
+                                Previous request rejected{latestRequest.rejection_reason ? `: ${latestRequest.rejection_reason}` : "."} You can submit again below.
+                              </div>
+                            )}
+
+                            {requestOpenFor === candidate.id ? (
+                              <div className="space-y-2 p-3.5 rounded-xl bg-violet-50/50 border border-violet-100">
+                                <p className="text-[10px] font-bold text-violet-700 uppercase tracking-wide">Request Employee Account</p>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  <input value={requestEmail} onChange={(e) => setRequestEmail(e.target.value)} placeholder="Login email" className="h-9 rounded-lg bg-white border border-slate-200 px-2 text-xs outline-none sm:col-span-2" />
+                                  <select value={requestRole} onChange={(e) => setRequestRole(e.target.value)} className="h-9 rounded-lg bg-white border border-slate-200 px-2 text-xs outline-none">
+                                    <option value="employee">Employee</option>
+                                    <option value="team_leader">Team Leader</option>
+                                    <option value="hr">HR</option>
+                                    <option value="sales_coordinator">Sales Coordinator</option>
+                                  </select>
+                                  <select value={requestDepartment} onChange={(e) => setRequestDepartment(e.target.value)} className="h-9 rounded-lg bg-white border border-slate-200 px-2 text-xs outline-none">
+                                    <option value="sales">Sales</option>
+                                    <option value="hr">HR</option>
+                                  </select>
+                                </div>
+                                <p className="text-[10px] text-slate-400">No password here — Super Admin sets the temporary password when they approve.</p>
+                                <div className="flex items-center gap-2">
+                                  <button onClick={() => handleRequestApproval(candidate)} disabled={requesting} className="h-8 px-3 rounded-lg bg-violet-600 text-white text-xs font-bold disabled:opacity-50">
+                                    {requesting ? "Submitting..." : "Submit for Approval"}
+                                  </button>
+                                  <button onClick={() => setRequestOpenFor(null)} className="h-8 px-2 text-xs text-slate-400">Cancel</button>
+                                </div>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  setRequestOpenFor(candidate.id);
+                                  setRequestEmail(candidate.email || "");
+                                }}
+                                className="h-10 px-4 rounded-xl font-bold text-white bg-gradient-to-r from-violet-600 to-purple-500 text-xs flex items-center gap-2 shadow-sm hover:opacity-90 transition"
+                              >
+                                <UserCheck size={14} /> Request Employee Account
                               </button>
-                              <button onClick={() => setConvertOpenFor(null)} className="h-8 px-2 text-xs text-slate-400">Cancel</button>
-                            </div>
+                            )}
+
+                            {/* Legacy direct-conversion fallback -- kept reachable
+                                while the approval flow above is being tested on
+                                live production, removed once confirmed working. */}
+                            {convertOpenFor === candidate.id ? (
+                              <div className="space-y-2 p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+                                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Create Directly (legacy, no approval)</p>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  <input value={convertEmail} onChange={(e) => setConvertEmail(e.target.value)} placeholder="Login email" className="h-9 rounded-lg bg-white border border-slate-200 px-2 text-xs outline-none" />
+                                  <input type="password" value={convertPassword} onChange={(e) => setConvertPassword(e.target.value)} placeholder="Temporary password" className="h-9 rounded-lg bg-white border border-slate-200 px-2 text-xs outline-none" />
+                                  <select value={convertRole} onChange={(e) => setConvertRole(e.target.value)} className="h-9 rounded-lg bg-white border border-slate-200 px-2 text-xs outline-none">
+                                    <option value="employee">Employee</option>
+                                    <option value="team_leader">Team Leader</option>
+                                    <option value="hr">HR</option>
+                                    <option value="sales_coordinator">Sales Coordinator</option>
+                                  </select>
+                                  <select value={convertDepartment} onChange={(e) => setConvertDepartment(e.target.value)} className="h-9 rounded-lg bg-white border border-slate-200 px-2 text-xs outline-none">
+                                    <option value="sales">Sales</option>
+                                    <option value="hr">HR</option>
+                                  </select>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <button onClick={() => handleConvert(candidate)} disabled={converting} className="h-8 px-3 rounded-lg bg-slate-600 text-white text-xs font-bold disabled:opacity-50">
+                                    {converting ? "Converting..." : "Confirm Conversion"}
+                                  </button>
+                                  <button onClick={() => setConvertOpenFor(null)} className="h-8 px-2 text-xs text-slate-400">Cancel</button>
+                                </div>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  setConvertOpenFor(candidate.id);
+                                  setConvertEmail(candidate.email || "");
+                                }}
+                                className="text-[11px] text-slate-400 underline hover:text-slate-600"
+                              >
+                                or create directly without approval (legacy)
+                              </button>
+                            )}
                           </div>
-                        ) : (
-                          <button
-                            onClick={() => {
-                              setConvertOpenFor(candidate.id);
-                              setConvertEmail(candidate.email || "");
-                            }}
-                            className="h-10 px-4 rounded-xl font-bold text-white bg-gradient-to-r from-violet-600 to-purple-500 text-xs flex items-center gap-2 shadow-sm hover:opacity-90 transition"
-                          >
-                            <UserCheck size={14} /> Convert to Employee
-                          </button>
-                        )
-                      ) : null}
+                        );
+                      })()}
                     </div>
 
                     {candidate.status !== "CONVERTED" && candidate.status !== "REJECTED" && (
