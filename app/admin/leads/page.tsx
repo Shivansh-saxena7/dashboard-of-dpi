@@ -14,6 +14,7 @@ import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES } from "@/lib/leadBoardStageDisplay";
 import { exportLeadsToExcel, exportLeadsToPDF } from "@/lib/exportLeadsReport";
 import { DateRangeOption, dateRangeFilterLabel } from "@/lib/dateRangeFilter";
+import { istDateStringToRangeStartUTC, istDateStringToRangeEndUTC } from "@/lib/istTime";
 import { getRecycleCutoff } from "@/lib/calculateSLAStatus";
 import { isLeadTerminal } from "@/lib/isLeadTerminal";
 
@@ -369,9 +370,12 @@ export default function AdminLeadsPage() {
     } else if (dateRangeFilter === "THIS_MONTH") {
       q = q.gte("lead_history.assigned_at", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
     } else if (dateRangeFilter === "CUSTOM" && customStart && customEnd) {
+      // IST-aware boundaries (2026-10-01 fix) -- plain `new Date(customStart)`
+      // parses a bare "YYYY-MM-DD" as UTC midnight, not IST midnight,
+      // shifting both ends of the window 5.5 hours later than intended.
       q = q
-        .gte("lead_history.assigned_at", new Date(customStart).toISOString())
-        .lte("lead_history.assigned_at", new Date(new Date(customEnd).getTime() + 24 * 60 * 60 * 1000 - 1).toISOString());
+        .gte("lead_history.assigned_at", istDateStringToRangeStartUTC(customStart).toISOString())
+        .lte("lead_history.assigned_at", istDateStringToRangeEndUTC(customEnd).toISOString());
     }
 
     return q;
@@ -426,8 +430,23 @@ export default function AdminLeadsPage() {
     return all;
   }
 
+  // See loadLeads()'s own comment for why this exists.
+  const loadLeadsRequestIdRef = useRef(0);
+
   async function loadLeads() {
     setLoading(true);
+
+    // Out-of-order-response guard (2026-10-01) -- selecting an
+    // employee and then setting both date-range fields fires a
+    // separate loadLeads() call after EACH change (filtersSignature
+    // changes three times, not once), and nothing previously stopped
+    // an earlier, broader (e.g. employee-only) request from resolving
+    // AFTER a later, narrower (employee+date) one and overwriting the
+    // screen with its stale, wrong-looking result -- live-reported as
+    // "today filters show a mixed set." loadLeadsRequestId increments
+    // per call; a response only gets applied if it's still the most
+    // recent one fired.
+    const requestId = ++loadLeadsRequestIdRef.current;
 
     let query = supabase.from("leads").select(LEADS_SELECT, { count: "exact" });
     query = applyLeadFilters(query);
@@ -435,6 +454,10 @@ export default function AdminLeadsPage() {
     query = query.range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
 
     const { data, error, count } = await query;
+
+    if (requestId !== loadLeadsRequestIdRef.current) {
+      return;
+    }
 
     if (!error && data) {
       setLeads(data);

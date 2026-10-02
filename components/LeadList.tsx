@@ -17,6 +17,7 @@ import { normalizeMobile } from "@/lib/normalizeMobile";
 import { consumeRecentlyCalledCardId, scrollToAndHighlightCard, consumeQuickDialNumber } from "@/lib/lastCalledLead";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
+import { istDateStringToRangeStartUTC, istDateStringToRangeEndUTC } from "@/lib/istTime";
 
 interface LeadListProps {
   employeeId: string;
@@ -559,8 +560,10 @@ export default function LeadList({ employeeId }: LeadListProps) {
         }
 
         if (dateRangeFilter === "CUSTOM" && customStart && customEnd) {
-          const startMs = new Date(customStart).getTime();
-          const endMs = new Date(customEnd).getTime() + 24 * 60 * 60 * 1000 - 1;
+          // IST-aware boundaries (2026-10-01 fix) -- see istTime.ts's
+          // own comment for why plain `new Date(customStart)` was wrong.
+          const startMs = istDateStringToRangeStartUTC(customStart).getTime();
+          const endMs = istDateStringToRangeEndUTC(customEnd).getTime();
           return assignedMs >= startMs && assignedMs <= endMs;
         }
 
