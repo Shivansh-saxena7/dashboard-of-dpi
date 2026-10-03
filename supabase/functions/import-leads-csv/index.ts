@@ -22,13 +22,11 @@ import { fetchDistributionInputs, distributeLeadsBatch, distributeDataLeadsManua
 // in one call is a meaningfully bigger blast radius than a single-
 // lead assignment, so "any authenticated employee" isn't enough here.
 //
-// Duplicate detection uses normalizeMobile (shared with the frontend
-// preview step) rather than an exact string match or a DB .in()
-// filter — existing leads.mobile values are fetched broadly and
-// compared in JS on both sides, since Postgres has no normalized
-// index to filter through directly. Fine at this business's lead
-// volume; would need a different approach (a normalized column +
-// index) at much larger scale.
+// Duplicate detection: Leads go through find_lead_conflicts (DB-side,
+// indexed leads.mobile_normalized + canonical project — see the dedup
+// block below). Data still uses normalizeMobile (shared with the
+// frontend preview step), fetching existing leads.mobile values for
+// the target employees and comparing in JS.
 
 function respond(body: any, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -163,33 +161,59 @@ serve(async (req) => {
     // updates current_owner_id off them, so they're correctly no
     // longer blocked from receiving that number again. Leads keep the
     // original global check, completely unaffected.
-    const { data: existingLeads, error: existingLeadsError } = await fetchAllRows(() => {
-      let q = supabase.from("leads").select("mobile").order("id");
+    //
+    // Leads (2026-10-03): the global check is now (mobile, canonical
+    // project) instead of mobile-only — the same client under a
+    // different project is a separate legitimate lead. That rule
+    // (including in-batch duplicates) is owned solely by
+    // find_lead_conflicts/lead_conflicts_core in the DB, shared with
+    // Catcher add and personal add, so it's not reimplemented here.
+    // It returns one jsonb value, so no PostgREST row cap applies.
+    let existingNormalized = new Set();
+    let leadConflictIndexes = new Set();
 
-      if (leadType === "DATA") {
-        q = q.eq("lead_type", "DATA").in("current_owner_id", manualEmployeeIds);
+    if (leadType === "DATA") {
+      const { data: existingLeads, error: existingLeadsError } = await fetchAllRows(() =>
+        supabase
+          .from("leads")
+          .select("mobile")
+          .eq("lead_type", "DATA")
+          .in("current_owner_id", manualEmployeeIds)
+          .order("id")
+      );
+
+      if (existingLeadsError) {
+        return respond(
+          { success: false, step: "FETCH_EXISTING_LEADS", error: existingLeadsError.message },
+          500
+        );
       }
 
-      return q;
-    });
-
-    if (existingLeadsError) {
-      return respond(
-        { success: false, step: "FETCH_EXISTING_LEADS", error: existingLeadsError.message },
-        500
+      existingNormalized = new Set(
+        (existingLeads || []).map((l) => normalizeMobile(l.mobile))
       );
-    }
+    } else {
+      const { data: conflicts, error: conflictsError } = await supabase.rpc("find_lead_conflicts", {
+        p_candidates: rows.map((row) => ({ mobile: row.mobile || "", project: row.project || null }))
+      });
 
-    const existingNormalized = new Set(
-      (existingLeads || []).map((l) => normalizeMobile(l.mobile))
-    );
+      if (conflictsError) {
+        return respond(
+          { success: false, step: "FIND_LEAD_CONFLICTS", error: conflictsError.message },
+          500
+        );
+      }
+
+      leadConflictIndexes = new Set((conflicts || []).map((c) => c.index));
+    }
 
     const seenInBatch = new Set();
     const toInsert = [];
     let duplicateCount = 0;
 
-    for (const row of rows) {
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
 
+      const row = rows[rowIndex];
       const normalized = normalizeMobile(row.mobile);
 
       // Mobile is the only genuinely required field — it's what
@@ -203,7 +227,11 @@ serve(async (req) => {
         continue;
       }
 
-      if (existingNormalized.has(normalized) || seenInBatch.has(normalized)) {
+      const isDuplicate = leadType === "DATA"
+        ? existingNormalized.has(normalized) || seenInBatch.has(normalized)
+        : leadConflictIndexes.has(rowIndex);
+
+      if (isDuplicate) {
         duplicateCount++;
         continue;
       }

@@ -18,6 +18,7 @@ import { consumeRecentlyCalledCardId, scrollToAndHighlightCard, consumeQuickDial
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
 import { istDateStringToRangeStartUTC, istDateStringToRangeEndUTC } from "@/lib/istTime";
+import { useLeadSiblings } from "@/lib/useLeadSiblings";
 
 interface LeadListProps {
   employeeId: string;
@@ -602,6 +603,11 @@ export default function LeadList({ employeeId }: LeadListProps) {
   // reaches LeadCard as its own prop (the countdown genuinely needs to
   // tick), this only stops that tick from ALSO rebuilding data that
   // hasn't changed.
+  // "Existing client" badge data for every loaded lead — refetched only
+  // when the loaded set changes, not on filter/tab changes.
+  const loadedLeadIds = useMemo(() => leads.map((lead) => lead.id), [leads]);
+  const siblingsByLeadId = useLeadSiblings(loadedLeadIds);
+
   const cardLeads = useMemo(
     () =>
       visibleLeads.map((lead: any) => ({
@@ -626,9 +632,10 @@ export default function LeadList({ employeeId }: LeadListProps) {
         last_activity_at: lead.lead_history[0]?.last_activity_at ?? null,
         paused_until: lead.lead_history[0]?.paused_until ?? null,
         pause_reason: lead.lead_history[0]?.pause_reason ?? null,
-        is_personal_lead: lead.is_personal_lead ?? false
+        is_personal_lead: lead.is_personal_lead ?? false,
+        siblings: siblingsByLeadId[lead.id]
       })),
-    [visibleLeads]
+    [visibleLeads, siblingsByLeadId]
   );
 
   if (loading) {

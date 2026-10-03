@@ -521,31 +521,56 @@ export default function ImportLeadsPage() {
     // an unbounded .select() here still silently undercounted
     // duplicates in the preview once `leads` crossed 1000 rows,
     // showing "will import" for numbers already in the system.
-    const { data: existing } = await fetchAllRows(
-      () => {
-        let q = supabase.from("leads").select("mobile", { count: "exact" }).order("id");
+    //
+    // Leads (2026-10-03): same find_lead_conflicts call the backend
+    // makes — (mobile, canonical project), in-batch included — so the
+    // preview can't drift from what the import actually does. Only
+    // valid rows are sent; conflict indexes map back via validIndexes.
+    let finalRows: MappedRow[];
 
-        if (leadType === "DATA") {
-          q = q.eq("lead_type", "DATA").in("current_owner_id", manualEmployeeIds);
-        }
+    if (leadType === "DATA") {
+      const { data: existing } = await fetchAllRows(
+        () =>
+          supabase
+            .from("leads")
+            .select("mobile", { count: "exact" })
+            .eq("lead_type", "DATA")
+            .in("current_owner_id", manualEmployeeIds)
+            .order("id"),
+        { anomalyContext: { supabase, source: "admin/leads/import:duplicatePreview" } }
+      );
+      const existingNormalized = new Set((existing || []).map((l) => normalizeMobile(l.mobile)));
 
-        return q;
-      },
-      { anomalyContext: { supabase, source: "admin/leads/import:duplicatePreview" } }
-    );
-    const existingNormalized = new Set((existing || []).map((l) => normalizeMobile(l.mobile)));
+      const seen = new Set<string>();
 
-    const seen = new Set<string>();
+      finalRows = built.map((row) => {
+        if (!row.isValid) return { ...row, isDuplicate: false };
 
-    const finalRows: MappedRow[] = built.map((row) => {
-      if (!row.isValid) return { ...row, isDuplicate: false };
+        const norm = normalizeMobile(row.mobile);
+        const isDuplicate = existingNormalized.has(norm) || seen.has(norm);
+        seen.add(norm);
 
-      const norm = normalizeMobile(row.mobile);
-      const isDuplicate = existingNormalized.has(norm) || seen.has(norm);
-      seen.add(norm);
+        return { ...row, isDuplicate };
+      });
+    } else {
+      const validIndexes = built.flatMap((row, i) => (row.isValid ? [i] : []));
 
-      return { ...row, isDuplicate };
-    });
+      const { data: conflicts, error: conflictsError } = await supabase.rpc("find_lead_conflicts", {
+        p_candidates: validIndexes.map((i) => ({ mobile: built[i].mobile, project: built[i].project }))
+      });
+
+      if (conflictsError) {
+        toast.error(conflictsError.message || "Could not check for duplicates.");
+        setBuildingPreview(false);
+        return;
+      }
+
+      const duplicateRowIndexes = new Set<number>(
+        (conflicts || []).map((c: { index: number }) => validIndexes[c.index])
+      );
+
+      finalRows = built.map((row, i) => ({ ...row, isDuplicate: row.isValid && duplicateRowIndexes.has(i) }));
+    }
 
     setMappedRows(finalRows);
 

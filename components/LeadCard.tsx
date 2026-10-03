@@ -11,6 +11,8 @@ import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { AssignedBySource } from "@/lib/assignedByDisplay";
 import { buildWhatsAppLink } from "@/lib/buildWhatsAppLink";
 import { rememberCalledCard } from "@/lib/lastCalledLead";
+import type { LeadSibling } from "@/lib/useLeadSiblings";
+import ExistingClientBadge from "./ExistingClientBadge";
 
 interface LeadCardLead {
   id: string;
@@ -35,6 +37,7 @@ interface LeadCardLead {
   paused_until?: string | null;
   pause_reason?: string | null;
   is_personal_lead?: boolean;
+  siblings?: LeadSibling[];
 }
 
 interface LeadCardProps {
@@ -261,6 +264,7 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
               {lead.project && (
                 <p className="text-xs text-slate-500 truncate">{lead.project}</p>
               )}
+              <ExistingClientBadge siblings={lead.siblings} />
             </div>
 
             <div className="shrink-0 flex flex-col items-end gap-1">

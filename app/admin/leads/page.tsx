@@ -17,6 +17,7 @@ import { DateRangeOption, dateRangeFilterLabel } from "@/lib/dateRangeFilter";
 import { istDateStringToRangeStartUTC, istDateStringToRangeEndUTC } from "@/lib/istTime";
 import { getRecycleCutoff } from "@/lib/calculateSLAStatus";
 import { isLeadTerminal } from "@/lib/isLeadTerminal";
+import { useLeadSiblings } from "@/lib/useLeadSiblings";
 
 type SortOption = "NEWEST" | "OLDEST" | "SLA_URGENCY";
 
@@ -698,6 +699,11 @@ export default function AdminLeadsPage() {
   // Same perf-motivated hoist as before (2026-09-18) — only now
   // rebuilt when the current PAGE's data changes, not a client-side
   // filtered view of the whole table.
+  // "Existing client" badge data for the current page's leads only
+  // (server-side paginated, so this stays one small call per page).
+  const pageLeadIds = useMemo(() => recyclingFilteredLeads.map((lead) => lead.id), [recyclingFilteredLeads]);
+  const siblingsByLeadId = useLeadSiblings(pageLeadIds);
+
   const cardLeads = useMemo(
     () =>
       recyclingFilteredLeads.map((lead: any) => ({
@@ -722,9 +728,10 @@ export default function AdminLeadsPage() {
         pauseReason: lead.lead_history?.[0]?.pause_reason ?? null,
         lastActivityAt: lead.lead_history?.[0]?.last_activity_at ?? null,
         outcomeAt: lead.lead_history?.[0]?.outcome_at ?? null,
-        isPersonalLead: lead.is_personal_lead ?? false
+        isPersonalLead: lead.is_personal_lead ?? false,
+        siblings: siblingsByLeadId[lead.id]
       })),
-    [recyclingFilteredLeads]
+    [recyclingFilteredLeads, siblingsByLeadId]
   );
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
@@ -947,6 +954,7 @@ export default function AdminLeadsPage() {
           employees={employees}
           onClose={() => setManualEntryOpen(false)}
           onCreated={loadLeads}
+          canOverrideDuplicates
         />
       )}
 

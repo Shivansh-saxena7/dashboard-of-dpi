@@ -10,6 +10,8 @@ import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
 import { FOLLOWUP_INACTIVITY_WARNING_DAYS, FOLLOWUP_INACTIVITY_RECYCLE_DAYS, getRecycleCutoff, RecycleCutoffReason } from "@/lib/calculateSLAStatus";
 import { isLeadTerminal } from "@/lib/isLeadTerminal";
 import AdminLeadHistoryModal from "./AdminLeadHistoryModal";
+import ExistingClientBadge from "./ExistingClientBadge";
+import type { LeadSibling } from "@/lib/useLeadSiblings";
 
 const RECYCLE_REASON_LABEL: Record<RecycleCutoffReason, string> = {
   FOLLOWUP_INACTIVITY: "Follow-up inactivity",
@@ -54,6 +56,9 @@ interface AdminLeadCardLead {
   // Personal (self-sourced) lead (2026-09-23) — optional, undefined
   // behaves exactly like false (every pre-existing caller unaffected).
   isPersonalLead?: boolean;
+  // Other leads for the same client (same mobile) — optional, so the
+  // Coordinator page's cards simply don't show the badge.
+  siblings?: LeadSibling[];
 }
 
 interface AdminLeadCardProps {
@@ -318,6 +323,7 @@ function AdminLeadCard({
               {lead.project && (
                 <p className="text-xs text-slate-500 truncate">{lead.project}</p>
               )}
+              <ExistingClientBadge siblings={lead.siblings} />
             </div>
 
             <div className="shrink-0 flex flex-col items-end gap-1">

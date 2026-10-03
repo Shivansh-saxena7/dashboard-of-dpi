@@ -12,6 +12,18 @@ interface ManualLeadEntryModalProps {
   employees: { id: string; name: string; is_active: boolean }[];
   onClose: () => void;
   onCreated: () => void;
+  // Admin only — may create a lead that conflicts with an existing one
+  // (same client + same project, or no project) by giving a reason.
+  // create_manual_lead_atomic enforces this server-side regardless.
+  canOverrideDuplicates?: boolean;
+}
+
+interface ExistingConflictLead {
+  lead_id: string;
+  project: string | null;
+  status: string;
+  owner_name: string | null;
+  reason: "SAME_PROJECT" | "NO_PROJECT";
 }
 
 // Shared by /admin/leads and /coordinator (LEADS tab) — one modal,
@@ -29,7 +41,14 @@ interface ManualLeadEntryModalProps {
 // than what's been asked for). The lead this creates is a completely
 // normal lead_type='LEAD' lead afterwards (full SLA/recycling), just
 // tagged source='Catcher' for reporting.
-export default function ManualLeadEntryModal({ employees, onClose, onCreated }: ManualLeadEntryModalProps) {
+//
+// Duplicate handling (2026-10-03): the same client under a DIFFERENT
+// project is a legitimate separate lead and goes straight through. A
+// conflict (same project, or no project on either side) is shown
+// before creating — existing owner(s) listed — and Admin can create
+// anyway with a reason; Coordinators can't. The rule itself lives only
+// in lead_conflicts_core (via find_lead_conflicts), never here.
+export default function ManualLeadEntryModal({ employees, onClose, onCreated, canOverrideDuplicates = false }: ManualLeadEntryModalProps) {
 
   const [name, setName] = useState("");
   const [mobile, setMobile] = useState("");
@@ -40,6 +59,17 @@ export default function ManualLeadEntryModal({ employees, onClose, onCreated }: 
   const [employeeId, setEmployeeId] = useState("");
   const [pastCatcherNames, setPastCatcherNames] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  // Non-null once a submit found conflicts — the form then shows them
+  // and (for Admin) asks for an override reason before re-submitting.
+  const [conflicts, setConflicts] = useState<ExistingConflictLead[] | null>(null);
+  const [overrideReason, setOverrideReason] = useState("");
+
+  // Any edit to the fields the duplicate rule depends on invalidates
+  // the conflicts shown, so they're re-checked on the next submit.
+  function resetConflicts() {
+    setConflicts(null);
+    setOverrideReason("");
+  }
 
   useEffect(() => {
     loadPastCatcherNames();
@@ -64,9 +94,38 @@ export default function ManualLeadEntryModal({ employees, onClose, onCreated }: 
       return;
     }
 
+    if (conflicts && conflicts.length > 0 && (!canOverrideDuplicates || !overrideReason.trim())) {
+      toast.error(
+        canOverrideDuplicates
+          ? "Enter a reason to create this lead anyway."
+          : "This client already has a lead for this project. Ask an Admin to add it."
+      );
+      return;
+    }
+
     setSubmitting(true);
 
     try {
+      if (!conflicts) {
+        const { data: found, error: conflictError } = await supabase.rpc("find_lead_conflicts", {
+          p_candidates: [{ mobile: mobile.trim(), project: project.trim() || null }]
+        });
+
+        if (conflictError) {
+          toast.error(conflictError.message || "Could not check for existing leads.");
+          return;
+        }
+
+        const existing: ExistingConflictLead[] = found?.[0]?.existing || [];
+        setConflicts(existing);
+
+        if (existing.length > 0) {
+          // Stop here so the existing owner(s) are seen before anything
+          // is created — the next submit (with a reason) goes through.
+          return;
+        }
+      }
+
       const { error } = await supabase.rpc("create_manual_lead_atomic", {
         p_name: name.trim(),
         p_mobile: mobile.trim(),
@@ -74,7 +133,8 @@ export default function ManualLeadEntryModal({ employees, onClose, onCreated }: 
         p_project: project.trim() || null,
         p_priority: priority,
         p_catcher_name: catcherName.trim(),
-        p_employee_id: employeeId
+        p_employee_id: employeeId,
+        p_override_reason: conflicts && conflicts.length > 0 ? overrideReason.trim() : null
       });
 
       if (error) {
@@ -122,7 +182,10 @@ export default function ManualLeadEntryModal({ employees, onClose, onCreated }: 
             type="tel"
             placeholder="Mobile *"
             value={mobile}
-            onChange={(e) => setMobile(e.target.value)}
+            onChange={(e) => {
+              setMobile(e.target.value);
+              resetConflicts();
+            }}
             className="w-full h-11 rounded-xl bg-slate-50 border border-slate-200 px-3.5 text-sm outline-none focus:ring-2 focus:ring-blue-200"
           />
 
@@ -138,7 +201,10 @@ export default function ManualLeadEntryModal({ employees, onClose, onCreated }: 
             type="text"
             placeholder="Project (optional)"
             value={project}
-            onChange={(e) => setProject(e.target.value)}
+            onChange={(e) => {
+              setProject(e.target.value);
+              resetConflicts();
+            }}
             className="w-full h-11 rounded-xl bg-slate-50 border border-slate-200 px-3.5 text-sm outline-none focus:ring-2 focus:ring-blue-200"
           />
 
@@ -181,12 +247,44 @@ export default function ManualLeadEntryModal({ employees, onClose, onCreated }: 
               ))}
           </select>
 
+          {conflicts && conflicts.length > 0 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2">
+              <p className="text-xs font-bold text-amber-800">
+                {conflicts[0].reason === "NO_PROJECT"
+                  ? "This client already exists, and there's no project to tell the leads apart:"
+                  : "This client already has a lead for this project:"}
+              </p>
+              <ul className="space-y-1">
+                {conflicts.map((c) => (
+                  <li key={c.lead_id} className="text-xs text-amber-900">
+                    {c.project || "No project"} · {c.owner_name || "Unassigned"} · {c.status}
+                  </li>
+                ))}
+              </ul>
+              {canOverrideDuplicates ? (
+                <textarea
+                  placeholder="Reason to create anyway *"
+                  value={overrideReason}
+                  onChange={(e) => setOverrideReason(e.target.value)}
+                  rows={2}
+                  className="w-full rounded-xl bg-white border border-amber-200 px-3.5 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-200"
+                />
+              ) : (
+                <p className="text-xs text-amber-800">Only an Admin can create a duplicate lead.</p>
+              )}
+            </div>
+          )}
+
           <button
             onClick={handleSubmit}
-            disabled={submitting}
+            disabled={submitting || (conflicts !== null && conflicts.length > 0 && !canOverrideDuplicates)}
             className="w-full h-11 rounded-xl font-semibold text-white bg-gradient-to-r from-blue-600 to-cyan-500 disabled:opacity-60"
           >
-            {submitting ? "Creating..." : "Create & Assign Lead"}
+            {submitting
+              ? "Creating..."
+              : conflicts && conflicts.length > 0
+                ? "Create Anyway"
+                : "Create & Assign Lead"}
           </button>
         </div>
       </motion.div>
