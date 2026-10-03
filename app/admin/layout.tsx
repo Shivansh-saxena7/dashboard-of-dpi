@@ -8,6 +8,7 @@ import { Menu,X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import SessionGuard from "@/components/SessionGuard";
 import Footer from "@/components/Footer";
+import AdminAnomalyAlerts from "@/components/AdminAnomalyAlerts";
 
 export default function AdminLayout({
 children,
@@ -499,6 +500,7 @@ lg:p-5
 >
 
 {children}
+<AdminAnomalyAlerts />
 <Footer />
 
 </div>

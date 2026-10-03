@@ -17,6 +17,9 @@ interface Anomaly {
   reviewed: boolean;
   reviewed_at: string | null;
   reviewed_by_employee: { name: string } | null;
+  layer: string | null;
+  occurrence_count: number;
+  last_seen_at: string;
 }
 
 // Built 2026-09-21, directly from the 1000-row-cap bug hiding real
@@ -58,7 +61,7 @@ export default function SystemHealthPage() {
         supabase
           .from("system_anomaly_log")
           .select(
-            "id, detected_at, source, severity, message, context, reviewed, reviewed_at, reviewed_by_employee:employees!system_anomaly_log_reviewed_by_fkey(name)",
+            "id, detected_at, source, severity, message, context, reviewed, layer, occurrence_count, last_seen_at, reviewed_at, reviewed_by_employee:employees!system_anomaly_log_reviewed_by_fkey(name)",
             { count: "exact" }
           )
           .order("detected_at", { ascending: false })
@@ -191,7 +194,15 @@ export default function SystemHealthPage() {
                       {isError ? <AlertOctagon size={12} /> : <AlertTriangle size={12} />}
                       {isError ? "Error" : "Warning"}
                     </span>
+                    {a.layer && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{a.layer}</span>
+                    )}
                     <span className="text-xs font-semibold text-slate-500">{a.source}</span>
+                    {a.occurrence_count > 1 && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-50 text-red-700">
+                        x{a.occurrence_count} · last {new Date(a.last_seen_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    )}
                     <span className="text-xs text-slate-400">
                       {new Date(a.detected_at).toLocaleString([], {
                         month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"

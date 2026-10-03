@@ -1,6 +1,7 @@
 // @ts-nocheck
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createMonitoredClient, withMonitoring } from "../_shared/monitoring.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 
 // Free-tier disaster-recovery backup — Supabase's free plan has no
@@ -260,12 +261,9 @@ function formatDate(iso: string | null): string {
   });
 }
 
-serve(async () => {
+serve(withMonitoring("backup-to-google-sheets", async () => {
   try {
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const supabase = createMonitoredClient("backup-to-google-sheets");
 
     const serviceAccountKey = JSON.parse(Deno.env.get("GOOGLE_SERVICE_ACCOUNT_KEY")!);
     const sheetId = Deno.env.get("GOOGLE_SHEET_ID")!;
@@ -574,10 +572,7 @@ serve(async () => {
     // notify-on-failure, and as Meta CAPI's nested try/catch blocks
     // elsewhere in this codebase).
     try {
-      const supabaseLog = createClient(
-        Deno.env.get("SUPABASE_URL")!,
-        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-      );
+      const supabaseLog = createMonitoredClient("backup-to-google-sheets");
 
       await supabaseLog.from("backup_run_log").insert({
         status: runStatus,
@@ -635,10 +630,7 @@ serve(async () => {
     // have been the thing that failed above), and never lets a
     // notification-insert error mask the real one being reported back.
     try {
-      const supabase = createClient(
-        Deno.env.get("SUPABASE_URL")!,
-        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-      );
+      const supabase = createMonitoredClient("backup-to-google-sheets");
 
       await supabase.from("backup_run_log").insert({
         status: "FAILED",
@@ -670,4 +662,4 @@ serve(async () => {
       status: 500
     });
   }
-});
+}, { heartbeat: true }));

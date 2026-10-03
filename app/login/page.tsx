@@ -8,7 +8,8 @@ import toast from "react-hot-toast";
 import { Building2, ShieldCheck, Mail, Lock, Eye, EyeOff, ArrowRight } from "lucide-react";
 import { Playfair_Display } from "next/font/google";
 
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
+import { reportClientError } from "@/lib/reportClientError";
 
 const playfair = Playfair_Display({ subsets: ["latin"], weight: ["600", "700"] });
 
@@ -74,6 +75,7 @@ export default function LoginPage() {
       // navigates this page away.
     } catch (err) {
       console.log(err);
+reportClientError("session check", err);
       // Fail safe: never leave the user stuck on a blank screen if the
       // session check itself errors — fall through to the real form.
       setCheckingSession(false);

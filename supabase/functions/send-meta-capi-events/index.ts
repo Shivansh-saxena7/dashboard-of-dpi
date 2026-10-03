@@ -1,6 +1,7 @@
 // @ts-nocheck
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createMonitoredClient, withMonitoring } from "../_shared/monitoring.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 
 // Meta Conversions API sender (feature/meta-capi-integration,
@@ -76,12 +77,9 @@ async function notifyAdminsOfFailure(supabase: any, leadId: string, tier: string
   }
 }
 
-serve(async () => {
+serve(withMonitoring("send-meta-capi-events", async () => {
   try {
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const supabase = createMonitoredClient("send-meta-capi-events");
 
     const { data: pendingEvents, error: fetchError } = await supabase
       .from("meta_capi_events_log")
@@ -262,4 +260,4 @@ serve(async () => {
     console.error("send-meta-capi-events failed:", error.message);
     return respond({ success: false, message: error.message }, 500);
   }
-});
+}, { heartbeat: true }));

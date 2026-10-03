@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { createReportingFetch } from "@/lib/reportingFetch";
 
 // Deliberately NOT the same shape as this codebase's other app/api/*
 // routes (create-employee, delete-employee, data) -- checked all three
@@ -49,7 +50,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: rpcError?.message || "Not authorized" }, { status: 403 });
     }
 
-    const serviceClient = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+    const serviceClient = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+  global: { fetch: createReportingFetch({ layer: "API", source: () => "api:hr-documents/view-url" }) }
+});
 
     // 60s -- long enough to load into the canvas viewer, short enough
     // that the URL is useless to anyone by the time it could be shared.

@@ -1,6 +1,7 @@
 // @ts-nocheck
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createMonitoredClient, withMonitoring } from "../_shared/monitoring.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 import { calculateAttendanceType } from "../../../lib/calculateAttendanceType.ts";
 import { calculateEndShiftWindow } from "../../../lib/calculateEndShiftWindow.ts";
@@ -48,7 +49,7 @@ function respond(body: any, status = 200) {
   });
 }
 
-serve(async (req) => {
+serve(withMonitoring("end-shift", async (req) => {
 
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -56,10 +57,7 @@ serve(async (req) => {
 
   try {
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const supabase = createMonitoredClient("end-shift");
 
     const auth = await resolveCallingEmployeeId(req, supabase, corsHeaders);
 
@@ -190,4 +188,4 @@ serve(async (req) => {
     );
 
   }
-});
+}));

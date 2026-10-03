@@ -1,6 +1,7 @@
 // @ts-nocheck
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createMonitoredClient, withMonitoring } from "../_shared/monitoring.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 import { calculateGeofenceStatus } from "../../../lib/calculateGeofenceStatus.ts";
 import { calculateStartShiftWindow } from "../../../lib/calculateStartShiftWindow.ts";
@@ -38,7 +39,7 @@ function respond(body: any, status = 200) {
   });
 }
 
-serve(async (req) => {
+serve(withMonitoring("start-shift", async (req) => {
 
   // Preflight — must be answered before anything else, and before
   // touching req.json() (an OPTIONS request has no body).
@@ -65,10 +66,7 @@ serve(async (req) => {
       );
     }
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const supabase = createMonitoredClient("start-shift");
 
     // Perf (2026-10-01): auth resolution (JWT verify + employees
     // lookup, 2 round trips internally) and the settings fetch don't
@@ -258,4 +256,4 @@ serve(async (req) => {
     );
 
   }
-});
+}));

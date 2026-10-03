@@ -1,8 +1,10 @@
 // @ts-nocheck
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createMonitoredClient, withMonitoring } from "../_shared/monitoring.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 import { calculateLeadAssignment } from "../../../lib/calculateLeadAssignment.ts";
+import { logAnomaly } from "../../../lib/logAnomaly.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 
 // Assigns ONE new lead — Project Rules override, else Round Robin.
@@ -32,7 +34,7 @@ function respond(body: any, status = 200) {
   });
 }
 
-serve(async (req) => {
+serve(withMonitoring("assign-lead", async (req) => {
 
   // Preflight — must be answered before anything else, and before
   // touching req.json() (an OPTIONS request has no body).
@@ -54,10 +56,7 @@ serve(async (req) => {
       );
     }
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const supabase = createMonitoredClient("assign-lead");
 
     const { data: lead, error: leadError } = await supabase
       .from("leads")
@@ -243,6 +242,15 @@ serve(async (req) => {
       // Nothing eligible right now — leave the lead untouched rather
       // than writing a partial/incorrect assignment. Admin needs to
       // handle this manually (e.g. no one is rr_eligible yet today).
+      // Logged as a warning (2026-10-03) so that need actually reaches
+      // Admin — notified once it repeats 5x within an hour.
+      await logAnomaly(supabase, {
+        source: "assign-lead:no-eligible-employee",
+        severity: "warning",
+        layer: "EDGE",
+        message: `Lead left unassigned: ${result.reason}`,
+        context: { leadId: lead_id, reason: result.reason }
+      });
       return respond({
         success: false,
         reason: result.reason,
@@ -330,4 +338,4 @@ serve(async (req) => {
     );
 
   }
-});
+}));

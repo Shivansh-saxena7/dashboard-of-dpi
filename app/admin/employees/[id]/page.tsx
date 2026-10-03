@@ -5,7 +5,8 @@ import {useParams} from "next/navigation";
 import Charts from "@/components/Charts";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
-import { calculateStatus } from "@/components/calculateStatus";
+import { calculateStatus } from "@/components/calculateStatus";
+import { reportClientError } from "@/lib/reportClientError";
 export default function EmployeeDetailsPage(){
 
 const params=useParams();
@@ -75,6 +76,7 @@ latest.Date
 }catch(err){
 
 console.log(err);
+reportClientError("load employee data", err);
 
 }
 

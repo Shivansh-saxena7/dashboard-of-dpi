@@ -1,6 +1,7 @@
 // @ts-nocheck
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createMonitoredClient, withMonitoring } from "../_shared/monitoring.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 
 // Scheduled sweep (pg_cron, once daily, ~8:00 AM IST) -- finds every
@@ -19,13 +20,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 // time-of-day helpers (those solve a different problem: a precise
 // clock instant, not a stored calendar date).
 
-serve(async () => {
+serve(withMonitoring("send-birthday-celebrations", async () => {
   try {
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const supabase = createMonitoredClient("send-birthday-celebrations");
 
     const nowIst = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
     const todayMonth = nowIst.getUTCMonth() + 1;
@@ -84,4 +82,4 @@ serve(async () => {
     );
 
   }
-});
+}, { heartbeat: true }));

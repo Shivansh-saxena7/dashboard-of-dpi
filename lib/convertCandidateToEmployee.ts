@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { createReportingFetch } from "@/lib/reportingFetch";
 
 // Single owner for "actually create the employee account from a
 // candidate", called by the Super-Admin approval route
@@ -20,10 +21,9 @@ export async function performCandidateConversion({
   role?: string;
   department?: string;
 }): Promise<{ success: boolean; message: string; employeeId?: string }> {
-  const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
+  const supabaseAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+  global: { fetch: createReportingFetch({ layer: "API", source: () => "api:convertCandidateToEmployee" }) }
+});
 
   const { data: userData, error: authError } = await supabaseAdmin.auth.admin.createUser({
     email,

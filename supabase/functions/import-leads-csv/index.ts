@@ -1,6 +1,7 @@
 // @ts-nocheck
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createMonitoredClient, withMonitoring } from "../_shared/monitoring.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 import { normalizeMobile } from "../../../lib/normalizeMobile.ts";
 import { normalizeLeadPriority } from "../../../lib/normalizeLeadPriority.ts";
@@ -67,7 +68,7 @@ async function fetchAllRows(queryBuilder: () => any, pageSize = 1000): Promise<{
   return { data: all, error: null };
 }
 
-serve(async (req) => {
+serve(withMonitoring("import-leads-csv", async (req) => {
 
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -75,10 +76,7 @@ serve(async (req) => {
 
   try {
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const supabase = createMonitoredClient("import-leads-csv");
 
     const auth = await resolveCallingEmployeeId(req, supabase, corsHeaders);
     if (auth.errorResponse) return auth.errorResponse;
@@ -520,4 +518,4 @@ serve(async (req) => {
     return respond({ success: false, error: err.message }, 500);
 
   }
-});
+}));

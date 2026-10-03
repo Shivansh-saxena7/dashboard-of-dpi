@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { createReportingFetch } from "@/lib/reportingFetch";
 import { NextResponse } from "next/server";
 
 export async function GET(request: Request) {
@@ -7,10 +8,9 @@ export async function GET(request: Request) {
 
   const employeeId = searchParams.get("employeeId");
   const date = searchParams.get("date");
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
+  const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+  global: { fetch: createReportingFetch({ layer: "API", source: () => "api:data" }) }
+});
 
   let query = supabase
   .from("tracking")

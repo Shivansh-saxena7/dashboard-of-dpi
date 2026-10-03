@@ -23,6 +23,10 @@ export interface AnomalyLogInput {
   severity?: "warning" | "error";
   message: string;
   context?: Record<string, unknown>;
+  // Where it broke. Optional: the DB trigger infers it (service role ->
+  // EDGE, logged-in user -> FRONTEND) when omitted; API routes, which
+  // also use the service role, pass "API" explicitly.
+  layer?: "DB" | "EDGE" | "API" | "FRONTEND";
 }
 
 export async function logAnomaly(supabase: any, input: AnomalyLogInput): Promise<void> {
@@ -31,7 +35,8 @@ export async function logAnomaly(supabase: any, input: AnomalyLogInput): Promise
       source: input.source,
       severity: input.severity || "warning",
       message: input.message,
-      context: input.context ?? null
+      context: input.context ?? null,
+      layer: input.layer ?? null
     });
 
     if (error) {

@@ -1,13 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { createReportingFetch } from "@/lib/reportingFetch";
 
-const supabaseAdmin=createClient(
-
-process.env.NEXT_PUBLIC_SUPABASE_URL!,
-
-process.env.SUPABASE_SERVICE_ROLE_KEY!
-
-);
+const supabaseAdmin=createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+  global: { fetch: createReportingFetch({ layer: "API", source: () => "api:create-employee" }) }
+});
 
 export async function POST(req:Request){
 

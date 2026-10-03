@@ -5,7 +5,8 @@ import TopPerformers from "@/components/TopPerformers";
 import LowPerformer from "@/components/LowPerformer";
 import Charts from "@/components/Charts";
 import { calculateStats } from "@/lib/calculateStats";
-import { getUniquePosts } from "@/lib/getUniquePosts";
+import { getUniquePosts } from "@/lib/getUniquePosts";
+import { reportClientError } from "@/lib/reportClientError";
 export default function AdminDashboard() {
 
 const [allData,setAllData]=useState<any[]>([]);
@@ -79,6 +80,7 @@ setAllData(records);
 }catch(err){
 
 console.log(err);
+reportClientError("load dashboard data", err);
 
 }
 

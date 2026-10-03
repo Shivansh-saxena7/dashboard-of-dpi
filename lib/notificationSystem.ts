@@ -47,6 +47,8 @@ const NOTIFICATION_TYPE_LABELS: Record<string, string> = {
   VISIT_VERIFICATION_OVERDUE: "Visit Verification Overdue",
   BOOKING_CELEBRATION: "Booking! 🎉",
   TICKET_RAISED: "New Ticket",
+  SYSTEM_ANOMALY_ERROR: "System Error",
+  SYSTEM_ANOMALY_WARNING: "System Warning",
   TICKET_RESOLVED: "Ticket Resolved"
 };
 

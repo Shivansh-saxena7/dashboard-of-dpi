@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { createReportingFetch } from "@/lib/reportingFetch";
 import { performCandidateConversion } from "@/lib/convertCandidateToEmployee";
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+const supabaseAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+  global: { fetch: createReportingFetch({ layer: "API", source: () => "api:review-employee-creation-request" }) }
+});
 
 // Approve or reject a pending employee_creation_requests row. Unlike
 // most /api/admin/* routes in this project, this one DOES check the

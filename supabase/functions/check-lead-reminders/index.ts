@@ -1,6 +1,7 @@
 // @ts-nocheck
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createMonitoredClient, withMonitoring } from "../_shared/monitoring.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 
 // Scheduled sweep (pg_cron, once daily) — reminders now carry
@@ -18,13 +19,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 // true) — a reminder for a lead that's since been recycled/
 // reassigned away would be a stale, confusing notification to send.
 
-serve(async () => {
+serve(withMonitoring("check-lead-reminders", async () => {
   try {
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const supabase = createMonitoredClient("check-lead-reminders");
 
     const { data: dueNotes, error: dueNotesError } = await supabase
       .from("lead_notes")
@@ -109,4 +107,4 @@ serve(async () => {
     );
 
   }
-});
+}, { heartbeat: true }));

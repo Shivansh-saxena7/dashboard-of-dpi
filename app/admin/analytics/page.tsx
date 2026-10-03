@@ -5,7 +5,8 @@ import Charts from "@/components/Charts";
 import TopPerformers from "@/components/TopPerformers";
 import LowPerformer from "@/components/LowPerformer";
 import {calculateStats} from "@/lib/calculateStats";
-import {getUniquePosts} from "@/lib/getUniquePosts";
+import {getUniquePosts} from "@/lib/getUniquePosts";
+import { reportClientError } from "@/lib/reportClientError";
 
 export default function AnalyticsPage(){
 
@@ -94,6 +95,7 @@ setAllData(records);
 }catch(err){
 
 console.log(err);
+reportClientError("load analytics data", err);
 
 }
 

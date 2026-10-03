@@ -1,6 +1,7 @@
 // @ts-nocheck
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createMonitoredClient, withMonitoring } from "../_shared/monitoring.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 import { encode as encodeBase64 } from "https://deno.land/std@0.168.0/encoding/base64.ts";
@@ -61,7 +62,7 @@ function buildSignature(senderName: string) {
   ].join("\n");
 }
 
-serve(async (req) => {
+serve(withMonitoring("send-hr-email", async (req) => {
 
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -69,10 +70,7 @@ serve(async (req) => {
 
   try {
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const supabase = createMonitoredClient("send-hr-email");
 
     const auth = await resolveCallingEmployeeId(req, supabase, corsHeaders);
     if (auth.errorResponse) return auth.errorResponse;
@@ -259,4 +257,4 @@ serve(async (req) => {
     return respond({ success: false, message: err.message }, 500);
 
   }
-});
+}));

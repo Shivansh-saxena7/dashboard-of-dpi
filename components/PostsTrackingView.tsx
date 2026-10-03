@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import StatsCard from "./StatsCard";
-import EmployeePanel from "./EmployeePanel";
+import EmployeePanel from "./EmployeePanel";
+import { reportClientError } from "@/lib/reportClientError";
 
 // Employee-facing social-media post tracking (open link -> Mark Done)
 // factored out of app/page.tsx so HR/Payroll/Other-department views can
@@ -52,6 +53,7 @@ export default function PostsTrackingView({
       setAllData(Array.isArray(allJson) ? allJson : []);
     } catch (err) {
       console.log(err);
+reportClientError("load posts tracking", err);
       setData([]);
     }
   }

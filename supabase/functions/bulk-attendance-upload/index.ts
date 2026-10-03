@@ -1,6 +1,7 @@
 // @ts-nocheck
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createMonitoredClient, withMonitoring } from "../_shared/monitoring.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 import { corsHeaders } from "../_shared/cors.ts";
 import { resolveCallingEmployeeId } from "../_shared/auth.ts";
@@ -44,7 +45,7 @@ function daysInMonth(yyyyMm: string): number {
   return new Date(y, m, 0).getDate();
 }
 
-serve(async (req) => {
+serve(withMonitoring("bulk-attendance-upload", async (req) => {
 
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -52,10 +53,7 @@ serve(async (req) => {
 
   try {
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const supabase = createMonitoredClient("bulk-attendance-upload");
 
     const auth = await resolveCallingEmployeeId(req, supabase, corsHeaders);
     if (auth.errorResponse) return auth.errorResponse;
@@ -251,4 +249,4 @@ serve(async (req) => {
     return respond({ success: false, error: err.message }, 500);
 
   }
-});
+}));

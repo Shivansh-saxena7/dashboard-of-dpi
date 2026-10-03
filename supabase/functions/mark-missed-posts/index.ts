@@ -1,14 +1,12 @@
 // @ts-nocheck
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createMonitoredClient, withMonitoring } from "../_shared/monitoring.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 
-serve(async () => {
+serve(withMonitoring("mark-missed-posts", async () => {
   try {
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const supabase = createMonitoredClient("mark-missed-posts");
 
     const now = new Date();
 
@@ -117,4 +115,4 @@ serve(async () => {
       }
     );
   }
-});
+}, { heartbeat: true }));

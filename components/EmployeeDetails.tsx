@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getUniquePosts } from "@/lib/getUniquePosts";
+import { getUniquePosts } from "@/lib/getUniquePosts";
+import { reportClientError } from "@/lib/reportClientError";
 
 
 export default function EmployeeDetails({
@@ -359,6 +360,7 @@ const posts = getUniquePosts(allData);
                             setOpen(null);
                           } catch (err) {
                             console.log(err);
+reportClientError("load employee details", err);
                           }
                         }}
                            className={`w-full py-2 text-[11px] rounded-lg font-semibold transition ${

@@ -1,6 +1,7 @@
 // @ts-nocheck
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createMonitoredClient, withMonitoring } from "../_shared/monitoring.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 import { calculateSLAStatus, FOLLOWUP_INACTIVITY_WARNING_DAYS } from "../../../lib/calculateSLAStatus.ts";
 import { calculateLeadAssignment } from "../../../lib/calculateLeadAssignment.ts";
@@ -55,13 +56,10 @@ const CAPPED_RECYCLE_STATUSES = new Set(["FOLLOWUP_INACTIVITY_RECYCLE_READY", "D
 // debugging session showed "succeeded" cron status is not enough to
 // tell whether anything meaningful happened.
 
-serve(async () => {
+serve(withMonitoring("recycle-stale-leads", async () => {
   try {
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    const supabase = createMonitoredClient("recycle-stale-leads");
 
     const { data: settings, error: settingsError } = await supabase
       .from("lead_engine_settings")
@@ -1140,4 +1138,4 @@ serve(async () => {
     );
 
   }
-});
+}, { heartbeat: true }));

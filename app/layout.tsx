@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "react-hot-toast";
 import UpdateAvailableBanner from "@/components/UpdateAvailableBanner";
+import GlobalErrorReporter from "@/components/GlobalErrorReporter";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -85,6 +86,8 @@ export default function RootLayout({
       {children}
 
       <UpdateAvailableBanner />
+
+      <GlobalErrorReporter />
 
       <Toaster
         position="top-right"
