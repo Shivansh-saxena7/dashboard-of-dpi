@@ -91,7 +91,7 @@ serve(withMonitoring("import-leads-csv", async (req) => {
       return respond({ success: false, message: "Employee record not found" }, 404);
     }
 
-    if (callerEmployee.role !== "admin") {
+    if (callerEmployee.role !== "admin" && callerEmployee.role !== "super_admin") {
       return respond({ success: false, message: "Only Admin can import leads" }, 403);
     }
 
