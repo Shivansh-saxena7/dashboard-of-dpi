@@ -16,7 +16,9 @@ const ANOMALY_TYPES = ["SYSTEM_ANOMALY_ERROR", "SYSTEM_ANOMALY_WARNING"];
 // (notify_admins_of_anomaly — errors immediately, warnings on their
 // 5th repeat within an hour); this component only displays them:
 // errors as a persistent red toast, warnings as a normal toast, plus a
-// pill with the unread count that opens System Health.
+// pill with the unread count that opens System Health. Rendered
+// inline in the admin top bar (not fixed-positioned), so it can never
+// cover page content or the avatar.
 export default function AdminAnomalyAlerts() {
   const router = useRouter();
   const [employeeId, setEmployeeId] = useState<string | null>(null);
@@ -95,9 +97,11 @@ export default function AdminAnomalyAlerts() {
   return (
     <button
       onClick={openSystemHealth}
-      className="fixed top-4 right-4 z-[90] rounded-full bg-red-600 text-white text-sm font-semibold px-4 py-2 shadow-lg hover:bg-red-700 transition"
+      aria-label={`${unreadIds.length} unread system alerts — open System Health`}
+      className="shrink-0 h-9 rounded-full bg-red-600 text-white text-sm font-semibold px-3 shadow-md hover:bg-red-700 transition"
     >
-      ⚠ {unreadIds.length} system alert{unreadIds.length === 1 ? "" : "s"}
+      ⚠ {unreadIds.length}
+      <span className="hidden sm:inline"> system alert{unreadIds.length === 1 ? "" : "s"}</span>
     </button>
   );
 }

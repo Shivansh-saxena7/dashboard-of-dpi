@@ -1,13 +1,13 @@
 "use client";
 
-import Link from "next/link";
 import Image from "next/image";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Menu, X } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import SessionGuard from "@/components/SessionGuard";
 import Footer from "@/components/Footer";
+import SidebarNavLink, { isNavItemActive } from "@/components/SidebarNavLink";
 
 // Own top-level route section, completely separate from /hr -- Payroll
 // and HR are deliberately distinct roles with zero shared UI/navigation.
@@ -34,6 +34,7 @@ export default function PayrollLayout({ children }: { children: React.ReactNode 
   const [payrollName, setPayrollName] = useState("Payroll");
   const [menuOpen, setMenuOpen] = useState(false);
   const router = useRouter();
+  const pathname = usePathname();
 
   async function loadPayroll() {
     const {
@@ -103,15 +104,14 @@ export default function PayrollLayout({ children }: { children: React.ReactNode 
 
           <nav className="flex-1 px-3 space-y-1">
             {menu.map((item) => (
-              <Link
+              <SidebarNavLink
                 key={item.href}
                 href={item.href}
-                onClick={() => setMenuOpen(false)}
-                className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-50 transition"
-              >
-                <span>{item.icon}</span>
-                {item.name}
-              </Link>
+                icon={item.icon}
+                name={item.name}
+                active={isNavItemActive(pathname, item.href, "/payroll")}
+                onNavigate={() => setMenuOpen(false)}
+              />
             ))}
           </nav>
 
