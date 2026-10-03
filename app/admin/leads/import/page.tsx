@@ -760,7 +760,8 @@ export default function ImportLeadsPage() {
             >
               {i + 1}
             </div>
-            <p className={`text-xs font-semibold ${i <= currentStepIndex ? "text-slate-700" : "text-slate-400"}`}>
+            {/* Phones show only the current step label — all four didn't fit and "Done" was clipped. */}
+            <p className={`text-xs font-semibold whitespace-nowrap ${i === currentStepIndex ? "" : "hidden sm:block"} ${i <= currentStepIndex ? "text-slate-700" : "text-slate-400"}`}>
               {s.label}
             </p>
             {i < STEPS.length - 1 && <div className="flex-1 h-px bg-slate-200" />}

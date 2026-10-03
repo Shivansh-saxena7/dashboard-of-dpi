@@ -582,7 +582,7 @@ export default function ProjectRulesPage() {
             ))}
           </select>
 
-          <div className="flex-1 flex flex-wrap gap-1.5 p-2 rounded-xl bg-slate-50 border border-slate-200 min-h-[44px]">
+          <div className="flex-1 flex flex-wrap gap-1.5 p-2 rounded-xl bg-slate-50 border border-slate-200 min-h-[44px] max-h-64 overflow-y-auto">
             {projectOptions.length === 0 ? (
               <span className="text-xs text-slate-400 px-1">No projects yet.</span>
             ) : (
@@ -656,7 +656,7 @@ export default function ProjectRulesPage() {
 
                 {addAllowlistProjectFor === employeeId ? (
                   <div className="mt-3 space-y-2">
-                    <div className="flex flex-wrap gap-1.5 p-2 rounded-xl bg-slate-50 border border-slate-200">
+                    <div className="flex flex-wrap gap-1.5 p-2 rounded-xl bg-slate-50 border border-slate-200 max-h-64 overflow-y-auto">
                       {projectOptions.filter((p) => !allowedProjects.has(p)).map((p) => (
                         <label
                           key={p}

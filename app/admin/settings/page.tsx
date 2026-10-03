@@ -724,7 +724,7 @@ disabled:opacity-60
             {locating ? "Locating..." : "📍 Use My Current Location"}
           </button>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <input
               type="number"
               step="any"
@@ -852,7 +852,7 @@ outline-none
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3 items-end">
             <div>
               <label className="text-xs font-semibold text-slate-500 mb-1 block">Office Start</label>
               <input
@@ -964,7 +964,7 @@ mb-5
         </p>
 
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3 items-end">
             <div>
               <label className="text-xs font-semibold text-slate-500 mb-1 block">First-Half Start</label>
               <input
@@ -1004,7 +1004,7 @@ outline-none
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3 items-end">
             <div>
               <label className="text-xs font-semibold text-slate-500 mb-1 block">Half-Day Boundary</label>
               <input
@@ -1044,7 +1044,7 @@ outline-none
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3 items-end">
             <div>
               <label className="text-xs font-semibold text-slate-500 mb-1 block">First-Half Min. End Time</label>
               <input

@@ -18,7 +18,9 @@
 //              DUPLICATE_LEAD) and 23505 unique violations; Admin is
 //              only notified if one repeats 5x/hour (DB trigger)
 //   error    — everything else: constraint violations, "function does
-//              not exist", permission denied, 5xx, network failures
+//              not exist", permission denied, 5xx
+//   network  — fetch itself rejected: skipped when aborted or the page is
+//              unloading, otherwise a warning (connectivity, not an app bug)
 
 type FetchLike = typeof fetch;
 
@@ -33,6 +35,16 @@ export interface ReportingFetchOptions {
 const ANOMALY_PATH = "/rest/v1/system_anomaly_log";
 const THROTTLE_MS = 10 * 60 * 1000;
 const recentlyReported = new Map<string, number>();
+
+// Requests cut off because the page itself is going away (reload, hard
+// navigation, closing the tab) reject with a generic network error that
+// is indistinguishable from a real outage — they are not failures.
+let pageUnloading = false;
+if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+  window.addEventListener("pagehide", () => { pageUnloading = true; });
+  window.addEventListener("beforeunload", () => { pageUnloading = true; });
+  window.addEventListener("pageshow", () => { pageUnloading = false; });
+}
 
 function headerValue(init: RequestInit | undefined, input: RequestInfo | URL, name: string): string | null {
   const fromInit = init?.headers ? new Headers(init.headers).get(name) : null;
@@ -55,7 +67,12 @@ export function createReportingFetch(options: ReportingFetchOptions, baseFetch: 
     try {
       response = await baseFetch(input, init);
     } catch (networkError) {
-      void report(options, baseFetch, url, init, input, "error", "network", {
+      // Aborted on purpose, or killed by the page unloading: not a failure.
+      // A genuine network failure (flaky mobile data, offline) is logged as
+      // a warning, so Admin is only notified if it keeps happening.
+      const aborted = networkError instanceof Error && networkError.name === "AbortError";
+      if (aborted || pageUnloading) throw networkError;
+      void report(options, baseFetch, url, init, input, "warning", "network", {
         message: networkError instanceof Error ? networkError.message : String(networkError)
       });
       throw networkError;

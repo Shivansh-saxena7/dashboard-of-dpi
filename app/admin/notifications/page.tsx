@@ -13,65 +13,64 @@ import {
 import PageHeader from "@/components/PageHeader";
 export default function NotificationsPage() {
 
+  // Server-side (2026-10-03): this used to load the whole notification
+  // table into the browser, which PostgREST silently capped at 1000 rows,
+  // so the page showed "Total 1000" (real: 8,000+) and an incomplete list
+  // and unread count. Counts are now exact head counts; the list is the
+  // newest PAGE_SIZE matching rows, searched in the DB, with "Load more".
+  const PAGE_SIZE = 100;
   const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [limit, setLimit] = useState(PAGE_SIZE);
+  const [matchingCount, setMatchingCount] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [unread, setUnread] = useState(0);
 
   useEffect(() => {
-    loadNotifications();
+    loadCounts();
   }, []);
 
-  async function loadNotifications() {
+  useEffect(() => {
+    const timer = setTimeout(() => loadNotifications(search, limit), 300);
+    return () => clearTimeout(timer);
+  }, [search, limit]);
 
+  async function loadCounts() {
+    const [{ count: totalCount }, { count: unreadCount }] = await Promise.all([
+      supabase.from("notification").select("id", { count: "exact", head: true }),
+      supabase.from("notification").select("id", { count: "exact", head: true }).eq("is_read", false)
+    ]);
+    setTotal(totalCount ?? 0);
+    setUnread(unreadCount ?? 0);
+  }
+
+  async function loadNotifications(searchText: string, rowLimit: number) {
     setLoading(true);
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("notification")
-      .select("*")
-      .order("created_at", {
-        ascending: false,
-      });
+      .select("*", { count: "exact" })
+      .order("created_at", { ascending: false })
+      .range(0, rowLimit - 1);
+
+    // Commas and parentheses would break the PostgREST or() filter syntax.
+    const q = searchText.trim().replace(/[,()]/g, " ");
+    if (q) {
+      query = query.or(`employee_name.ilike.%${q}%,title.ilike.%${q}%,message.ilike.%${q}%`);
+    }
+
+    const { data, error, count } = await query;
 
     if (!error) {
       setNotifications(data || []);
+      setMatchingCount(count ?? 0);
     }
 
     setLoading(false);
-
   }
 
-  const filteredNotifications =
-    notifications.filter((item) =>
-
-      item.employee_name
-        ?.toLowerCase()
-        .includes(search.toLowerCase())
-
-      ||
-
-      item.title
-        ?.toLowerCase()
-        .includes(search.toLowerCase())
-
-      ||
-
-      item.message
-        ?.toLowerCase()
-        .includes(search.toLowerCase())
-
-    );
-
-  const total = notifications.length;
-
-  const read =
-    notifications.filter(
-      (n) => n.is_read
-    ).length;
-
-  const unread =
-    notifications.filter(
-      (n) => !n.is_read
-    ).length;
+  const filteredNotifications = notifications;
 
   return (
 
@@ -85,11 +84,11 @@ export default function NotificationsPage() {
       />
       {/* SEARCH + STATS */}
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-5">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5">
 
         <div
           className="
-          lg:col-span-2
+          col-span-2
           bg-white
           rounded-[24px]
           border
@@ -229,18 +228,18 @@ export default function NotificationsPage() {
               border
               border-slate-100
               shadow-md
-              p-6
+              p-4 sm:p-6
               "
             >
 
-              <div className="flex justify-between items-start gap-5">
+              <div className="flex flex-col sm:flex-row sm:justify-between items-start gap-3 sm:gap-5">
 
-                <div className="flex gap-4 flex-1">
+                <div className="flex gap-3 sm:gap-4 flex-1 min-w-0 w-full">
 
                   <div
                     className="
-                    h-14
-                    w-14
+                    shrink-0 h-11 w-11 sm:h-14 sm:w-14
+                    
                     rounded-2xl
                     bg-gradient-to-br
                     from-cyan-500
@@ -256,9 +255,9 @@ export default function NotificationsPage() {
 
                   </div>
 
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
 
-                    <h2 className="font-bold text-lg">
+                    <h2 className="font-bold text-base sm:text-lg break-words">
 
                       {item.title}
 
@@ -270,7 +269,7 @@ export default function NotificationsPage() {
 
                     </p>
 
-                    <p className="mt-3 leading-7 text-slate-700">
+                    <p className="mt-3 leading-7 text-slate-700 break-words">
 
                       {item.message}
 
@@ -279,7 +278,7 @@ export default function NotificationsPage() {
                   </div>
 
                 </div>
-                <div className="flex flex-col items-end gap-3">
+                <div className="flex sm:flex-col items-center sm:items-end gap-3 shrink-0">
 
                   {item.is_read ? (
 
@@ -378,6 +377,17 @@ export default function NotificationsPage() {
             </motion.div>
 
           ))}
+
+          {notifications.length < matchingCount && (
+            <div className="flex justify-center pt-2">
+              <button
+                onClick={() => setLimit((l) => l + PAGE_SIZE)}
+                className="h-10 px-5 rounded-xl bg-white border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition"
+              >
+                Load more ({notifications.length} of {matchingCount})
+              </button>
+            </div>
+          )}
 
         </div>
 
