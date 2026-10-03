@@ -470,6 +470,32 @@ serve(withMonitoring("recycle-stale-leads", async () => {
     let restrictedPoolPointerEmployeeId = settings.restricted_pool_pointer_employee_id;
     const diagnostics: any[] = [];
 
+    // Every NOT_INTERESTED outcome, fetched once per sweep (~1k rows)
+    // instead of one HEAD count request per lead inside the loop.
+    const { data: notInterestedRows, error: notInterestedError } = await fetchAllRows(
+      () =>
+        supabase
+          .from("lead_history")
+          .select("lead_id, assigned_at", { count: "exact" })
+          .eq("outcome", "NOT_INTERESTED")
+          .order("id"),
+      { anomalyContext: { supabase, source: "recycle-stale-leads:notInterested" } }
+    );
+
+    if (notInterestedError) {
+      return new Response(
+        JSON.stringify({ success: false, step: "FETCH_NOT_INTERESTED", error: notInterestedError.message }),
+        { headers: { "Content-Type": "application/json" }, status: 500 }
+      );
+    }
+
+    const notInterestedAssignedAtByLead = new Map<string, number[]>();
+    for (const row of notInterestedRows || []) {
+      const list = notInterestedAssignedAtByLead.get(row.lead_id) || [];
+      list.push(new Date(row.assigned_at).getTime());
+      notInterestedAssignedAtByLead.set(row.lead_id, list);
+    }
+
     let cappedRecycleAttempts = 0;
 
     // Oldest-activity first, so the capped backlog drains longest-
@@ -659,17 +685,16 @@ serve(withMonitoring("recycle-stale-leads", async () => {
       // defeating the whole recovery feature. Nothing in lead_history
       // itself is altered or deleted — the full audit trail (including
       // pre-recovery NOT_INTERESTED outcomes) stays exactly as it was.
-      let notInterestedQuery = supabase
-        .from("lead_history")
-        .select("*", { count: "exact", head: true })
-        .eq("lead_id", lead.id)
-        .eq("outcome", "NOT_INTERESTED");
-
-      if (lead.last_unjunked_at) {
-        notInterestedQuery = notInterestedQuery.gt("assigned_at", lead.last_unjunked_at);
-      }
-
-      const { count: notInterestedCount } = await notInterestedQuery;
+      //
+      // Counted in memory from notInterestedAssignedAtByLead (fetched
+      // once per sweep, above the loop) — same rows, same
+      // assigned_at > last_unjunked_at bound as the per-lead HEAD
+      // count this replaced (2026-10-03), which fired ~4,000 requests
+      // per sweep and coincided with live 503s for other callers.
+      const unjunkedAtMs = lead.last_unjunked_at ? new Date(lead.last_unjunked_at).getTime() : null;
+      const notInterestedCount = (notInterestedAssignedAtByLead.get(lead.id) || []).filter(
+        (assignedAtMs) => unjunkedAtMs === null || assignedAtMs > unjunkedAtMs
+      ).length;
 
       const slaStatus = calculateSLAStatus(
         {
