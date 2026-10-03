@@ -6,6 +6,22 @@ import { calculateSLAStatus, FOLLOWUP_INACTIVITY_WARNING_DAYS } from "../../../l
 import { calculateLeadAssignment } from "../../../lib/calculateLeadAssignment.ts";
 import { isLeadTerminal } from "../../../lib/isLeadTerminal.ts";
 import { fetchAllRows } from "../../../lib/fetchAllRows.ts";
+import { logAnomaly } from "../../../lib/logAnomaly.ts";
+
+// Backlog-recycle cap (2026-10-03). Follow-up-inactivity / Data-max-
+// attempts recycles were silently failing on every sweep since
+// 2026-08-06 (lead_history_ended_reason_check didn't allow those
+// reasons), building a ~1,281-lead backlog. Once that constraint is
+// fixed, recycling the whole backlog in one sweep would dump 100+ old
+// leads on each shift-active employee at once — so at most this many
+// of THESE recycle attempts happen per sweep (oldest last_activity_at
+// first, see the sort below), round-robin spreading them as usual.
+// Flat total, not per-employee. Fresh-lead recycles (SLA_BREACHED /
+// RECYCLE_READY) are deliberately NOT capped — new leads never wait
+// behind the backlog. Counts attempts, not successes, so a failing
+// RPC can't turn into an uncapped retry storm.
+const BACKLOG_RECYCLE_CAP_PER_SWEEP = 10;
+const CAPPED_RECYCLE_STATUSES = new Set(["FOLLOWUP_INACTIVITY_RECYCLE_READY", "DATA_MAX_ATTEMPTS_REACHED"]);
 
 // Scheduled sweep (pg_cron, every 15 min — modeled on
 // mark-missed-posts). No CORS, no caller-identity resolution: this
@@ -456,7 +472,18 @@ serve(async () => {
     let restrictedPoolPointerEmployeeId = settings.restricted_pool_pointer_employee_id;
     const diagnostics: any[] = [];
 
-    for (const lead of leads || []) {
+    let cappedRecycleAttempts = 0;
+
+    // Oldest-activity first, so the capped backlog drains longest-
+    // stuck leads first (null last_activity_at last). Only changes the
+    // order leads are visited in — no lead's own decision depends on it.
+    const activityTime = (lead) => {
+      const at = lead.lead_history[0]?.last_activity_at;
+      return at ? new Date(at).getTime() : Number.POSITIVE_INFINITY;
+    };
+    const sweepOrder = [...(leads || [])].sort((a, b) => activityTime(a) - activityTime(b));
+
+    for (const lead of sweepOrder) {
 
       const activeHistory = lead.lead_history[0];
 
@@ -908,6 +935,14 @@ serve(async () => {
         const nextIndex = lastIndex === -1 ? 0 : (lastIndex + 1) % groupPoolEmployees.length;
         const nextEmployeeId = groupPoolEmployees[nextIndex];
 
+        if (CAPPED_RECYCLE_STATUSES.has(slaStatus)) {
+          if (cappedRecycleAttempts >= BACKLOG_RECYCLE_CAP_PER_SWEEP) {
+            diagnostics.push({ leadId: lead.id, action: "SKIPPED", reason: "BACKLOG_RECYCLE_CAP_REACHED", slaStatus });
+            continue;
+          }
+          cappedRecycleAttempts++;
+        }
+
         const { error: projectRecycleError } = await supabase.rpc("recycle_lead_atomic", {
           p_lead_id: lead.id,
           p_old_lead_history_id: activeHistory.id,
@@ -1015,6 +1050,14 @@ serve(async () => {
         continue;
       }
 
+      if (CAPPED_RECYCLE_STATUSES.has(slaStatus)) {
+        if (cappedRecycleAttempts >= BACKLOG_RECYCLE_CAP_PER_SWEEP) {
+          diagnostics.push({ leadId: lead.id, action: "SKIPPED", reason: "BACKLOG_RECYCLE_CAP_REACHED", slaStatus });
+          continue;
+        }
+        cappedRecycleAttempts++;
+      }
+
       const { error: recycleError } = await supabase.rpc("recycle_lead_atomic", {
         p_lead_id: lead.id,
         p_old_lead_history_id: activeHistory.id,
@@ -1058,10 +1101,27 @@ serve(async () => {
 
     }
 
+    // Silent-failure guard (2026-10-03) — RECYCLE_FAILED/JUNK_FAILED
+    // used to live only in this response body, which pg_net drops
+    // after its 5s timeout, so a constraint violation failed every
+    // follow-up recycle for ~2 months unseen. One anomaly row per sweep
+    // (not per lead), visible at /admin/system-health.
+    const failures = diagnostics.filter((d) => d.action === "RECYCLE_FAILED" || d.action === "JUNK_FAILED");
+
+    if (failures.length > 0) {
+      await logAnomaly(supabase, {
+        source: "recycle-stale-leads",
+        severity: "error",
+        message: `${failures.length} recycle/junk RPC call(s) failed this sweep`,
+        context: { failures: failures.slice(0, 20) }
+      });
+    }
+
     return new Response(
       JSON.stringify({
         success: true,
         recycledCount,
+        cappedRecycleAttempts,
         junkedCount,
         warnedCount,
         totalChecked: (leads || []).length,
