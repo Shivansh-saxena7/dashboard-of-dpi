@@ -12,6 +12,7 @@ import { guessFieldForHeader, MAPPED_FIELD_OPTIONS, MappedField } from "@/lib/cs
 import { fetchAllRows } from "@/lib/fetchAllRows";
 import DeleteModal from "../../components/DeleteModal";
 
+import PageHeader from "@/components/PageHeader";
 const NEW_SOURCE_SENTINEL = "__new__";
 
 type WizardStep = "UPLOAD" | "MAP" | "PREVIEW" | "RESULT";
@@ -737,18 +738,17 @@ export default function ImportLeadsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <Link
-          href="/admin/leads"
-          className="h-10 w-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-slate-500 hover:text-slate-800 transition"
-        >
-          <ArrowLeft size={16} />
-        </Link>
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800">Import Leads</h1>
-          <p className="text-sm text-slate-500">Upload a CSV from any source — no fixed header format required</p>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Leads"
+        title="Import Leads"
+        description="Upload a CSV from any source — no fixed header format required"
+        actions={
+          <Link href="/admin/leads" className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition">
+            <ArrowLeft size={14} />
+            Back to Leads
+          </Link>
+        }
+      />
 
       <div className="flex items-center gap-2">
         {STEPS.map((s, i) => (

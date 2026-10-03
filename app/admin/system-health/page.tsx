@@ -7,6 +7,7 @@ import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 
+import PageHeader from "@/components/PageHeader";
 interface Anomaly {
   id: string;
   detected_at: string;
@@ -117,33 +118,18 @@ export default function SystemHealthPage() {
 
   return (
     <div className="space-y-6 pb-10">
-      <motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="rounded-[24px] bg-gradient-to-br from-[#0f172a] via-[#7c2d12] to-[#c2410c] text-white p-6"
-      >
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-[10px] font-semibold tracking-[0.2em] text-orange-200 uppercase mb-2">
-              Silent-Bug Detection
-            </p>
-            <h1 className="text-xl font-bold">System Health</h1>
-            <p className="text-sm text-white/70 mt-1">
-              Anomalies the app's own defensive checks flagged automatically — nothing here required a human to
-              notice something looked off first.
-            </p>
-          </div>
-
-          <button
-            onClick={loadAnomalies}
-            className="flex items-center gap-1.5 h-9 px-3.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-xs font-semibold transition shrink-0"
-          >
+      <PageHeader
+        eyebrow="System"
+        title="System Health"
+        description="Anomalies the app's own defensive checks flagged automatically — nothing here required a human to notice something looked off first."
+        actions={
+          <button onClick={loadAnomalies} className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition">
             <RefreshCw size={13} />
             Refresh
           </button>
-        </div>
-
-        <div className="mt-4 flex items-center gap-2 flex-wrap">
+        }
+      >
+        <div className="flex items-center gap-2 flex-wrap">
           {unreviewed.length === 0 ? (
             <span className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full bg-green-50 text-green-700 border border-green-200">
               <CheckCircle2 size={13} />
@@ -155,7 +141,6 @@ export default function SystemHealthPage() {
               {unreviewed.length} unreviewed{errorCount > 0 ? ` (${errorCount} error)` : ""}
             </span>
           )}
-
           <button
             onClick={() => setShowReviewed((v) => !v)}
             className="text-xs font-semibold text-white/60 hover:text-white transition underline underline-offset-2"
@@ -163,7 +148,7 @@ export default function SystemHealthPage() {
             {showReviewed ? "Hide reviewed" : "Show reviewed too"}
           </button>
         </div>
-      </motion.div>
+      </PageHeader>
 
       {loading ? (
         <p className="text-sm text-slate-400 px-1">Loading...</p>

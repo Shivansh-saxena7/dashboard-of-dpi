@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { motion } from "framer-motion";
 import toast from "react-hot-toast";
 import { UserCheck, X } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
+import PageHeader from "@/components/PageHeader";
 interface RequestRow {
   id: string;
   candidate_id: string;
@@ -111,17 +111,16 @@ export default function EmployeeRequestsPage() {
 
   return (
     <div className="space-y-5">
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="rounded-[24px] bg-gradient-to-br from-violet-900 via-violet-700 to-fuchsia-600 p-5 md:p-7 text-white shadow-[0_15px_50px_rgba(124,58,237,0.25)]"
-      >
-        <h1 className="text-2xl md:text-4xl font-bold">Employee Requests</h1>
-        <p className="mt-2 text-white/80 text-xs md:text-sm">
-          HR-submitted requests to create employee accounts from converted candidates.
-          {!isSuperAdmin && " Only Super Admin can approve or reject — you're viewing read-only."}
-        </p>
-      </motion.div>
+      <PageHeader
+        eyebrow="People"
+        title="Employee Requests"
+        description={
+          <>
+            HR-submitted requests to create employee accounts from converted candidates.
+            {!isSuperAdmin && " Only Super Admin can approve or reject — you're viewing read-only."}
+          </>
+        }
+      />
 
       <div className="bg-white rounded-[24px] border border-slate-100 shadow-md p-5">
         <h2 className="text-lg font-bold text-slate-800 mb-4">Pending ({pending.length})</h2>

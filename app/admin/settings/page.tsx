@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { supabase } from "@/lib/supabase";
 import toast, { Toast } from "react-hot-toast";
 
+import PageHeader from "@/components/PageHeader";
 export default function SettingsPage() {
   const [employees, setEmployees] = useState<any[]>([]);
 
@@ -471,60 +472,11 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <motion.div
-        initial={{
-          opacity: 0,
-          y: -20
-        }}
-        animate={{
-          opacity: 1,
-          y: 0
-        }}
-        className="
-relative
-overflow-hidden
-rounded-[24px]
-bg-gradient-to-br
-from-[#0f172a]
-via-[#1d4ed8]
-to-[#06b6d4]
-p-6
-text-white
-shadow-[0_15px_50px_rgba(37,99,235,0.2)]
-"
-      >
-        <div
-          className="
-absolute
-top-[-60px]
-right-[-60px]
-w-[150px]
-h-[150px]
-rounded-full
-bg-white/10
-blur-3xl
-"
-        />
-
-        <h1
-          className="
-text-3xl
-font-bold
-"
-        >
-          Settings
-        </h1>
-
-        <p
-          className="
-mt-2
-text-white/80
-text-sm
-"
-        >
-          Manage application settings
-        </p>
-      </motion.div>
+      <PageHeader
+  eyebrow="System"
+  title="Settings"
+  description="Manage application settings"
+      />
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}

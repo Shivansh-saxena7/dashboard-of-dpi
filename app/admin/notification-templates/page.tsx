@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import AddTemplateModal from "@/components/AddTemplateModal";
 import EditTemplateModal from "@/components/EditTemplateModal";
+import PageHeader from "@/components/PageHeader";
 export default function NotificationTemplatesPage() {
   const [templates, setTemplates] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,128 +81,30 @@ const [openEditModal, setOpenEditModal] = useState(false);
 
       {/* HEADER */}
 
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="
-        relative
-        overflow-hidden
-        rounded-[30px]
-        bg-gradient-to-r
-        from-slate-900
-        via-blue-900
-        to-cyan-700
-        p-7
-        shadow-xl
-        "
+      <PageHeader
+  eyebrow="Content & Support"
+  title="Notification Templates"
+  description="Manage all notification slugs used by the system."
       >
-
-        <div
-          className="
-          absolute
-          -top-16
-          -right-16
-          h-52
-          w-52
-          rounded-full
-          bg-white/10
-          blur-3xl
-          "
-        />
-
-        <div className="relative z-10">
-
-          <h1 className="text-4xl font-bold text-white">
-            Notification Templates
-          </h1>
-
-          <p className="mt-2 text-blue-100">
-            Manage all notification slugs used by the system.
-          </p>
-
-          <div className="mt-6 flex flex-col md:flex-row gap-4">
-
-            <div
-              className="
-              flex
-              items-center
-              gap-3
-
-              rounded-2xl
-
-              bg-white/10
-
-              px-5
-              py-3
-
-              backdrop-blur-md
-
-              flex-1
-              "
-            >
-
-              <Search
-                size={18}
-                className="text-white"
-              />
-
-              <input
-                value={search}
-                onChange={(e) =>
-                  setSearch(e.target.value)
-                }
-                placeholder="Search template..."
-                className="
-                w-full
-                bg-transparent
-                outline-none
-                text-white
-                placeholder:text-blue-100
-                "
-              />
-
-            </div>
-<button
-
-onClick={() => setOpenAddModal(true)}
-
-className="
-flex
-items-center
-justify-center
-gap-2
-
-rounded-2xl
-
-bg-white
-
-px-6
-py-3
-
-font-semibold
-
-text-slate-800
-
-shadow-lg
-
-hover:scale-105
-
-transition
-"
-
->
-
-<Plus size={18}/>
-
-Add Template
-
-</button>
-
-          </div>
-
-        </div>
-
-      </motion.div>
+  <div className="flex flex-col md:flex-row gap-3">
+    <div className="flex items-center gap-3 rounded-xl bg-white/10 px-4 h-11 backdrop-blur-md flex-1">
+      <Search size={18} className="text-white" />
+      <input
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Search template..."
+        className="w-full bg-transparent outline-none text-white placeholder:text-blue-100"
+      />
+    </div>
+    <button
+      onClick={() => setOpenAddModal(true)}
+      className="flex items-center justify-center gap-2 rounded-xl bg-white px-5 h-11 font-semibold text-slate-800 shadow-lg transition"
+    >
+      <Plus size={18}/>
+      Add Template
+    </button>
+  </div>
+      </PageHeader>
 
       {/* BODY */}
 

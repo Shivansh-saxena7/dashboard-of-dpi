@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase";
 import toast from "react-hot-toast";
 import DeleteModal from "../components/DeleteModal";
 
+import PageHeader from "@/components/PageHeader";
 const NEW_PROJECT_SENTINEL = "__new__";
 
 interface Rule {
@@ -459,12 +460,11 @@ export default function ProjectRulesPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-slate-800">Project Rules</h1>
-        <p className="text-slate-500 mt-1">
-          Fixed employees bypass round robin entirely. Excluded employees stay in normal round robin for every other project — just not this one.
-        </p>
-      </div>
+      <PageHeader
+        eyebrow="Leads"
+        title="Project Rules"
+        description="Fixed employees bypass round robin entirely. Excluded employees stay in normal round robin for every other project — just not this one."
+      />
 
       <div className="bg-white rounded-[24px] border border-slate-100 shadow-md p-6">
         <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold mb-3">New Project Rule</p>

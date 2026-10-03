@@ -6,6 +6,7 @@ import toast from "react-hot-toast";
 import { Loader2, Plus, KeyRound } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
+import PageHeader from "@/components/PageHeader";
 interface MetaDataset {
   id: string;
   label: string;
@@ -164,13 +165,11 @@ export default function MetaDatasetsPage() {
 
   return (
     <div className="max-w-4xl space-y-5">
-      <div>
-        <h1 className="text-xl font-bold text-slate-800 mb-1">Meta Datasets</h1>
-        <p className="text-sm text-slate-500">
-          Har Dataset ek Meta Ads campaign/account ko represent karta hai. Project ko is-page-pe nahi, Project
-          Assets page pe ek Dataset se link kiya jaata hai.
-        </p>
-      </div>
+      <PageHeader
+        eyebrow="Leads"
+        title="Meta Datasets"
+        description="Har Dataset ek Meta Ads campaign/account ko represent karta hai. Project ko is-page-pe nahi, Project Assets page pe ek Dataset se link kiya jaata hai."
+      />
 
       <motion.div
         initial={{ opacity: 0, y: 10 }}

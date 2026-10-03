@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
 import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
 
+import PageHeader from "@/components/PageHeader";
 interface TransferRequest {
   id: string;
   lead_id: string;
@@ -133,20 +133,11 @@ export default function AdminLeadTransfersPage() {
 
   return (
     <div className="space-y-6 pb-10">
-      <motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="rounded-[24px] bg-gradient-to-br from-indigo-700 via-violet-600 to-indigo-500 text-white p-6"
-      >
-        <p className="text-[10px] font-semibold tracking-[0.2em] text-indigo-100 uppercase mb-2">
-          Lead Transfers
-        </p>
-        <h1 className="text-xl font-bold">Transfer Requests</h1>
-        <p className="text-sm text-white/70 mt-1">
-          Employees can ask to hand a lead off to someone else. Approve to reassign it, or reject to keep it
-          where it is.
-        </p>
-      </motion.div>
+      <PageHeader
+        eyebrow="Leads"
+        title="Transfer Requests"
+        description="Employees can ask to hand a lead off to someone else. Approve to reassign it, or reject to keep it where it is."
+      />
 
       <div className="flex gap-2">
         <button

@@ -5,8 +5,9 @@ import TopPerformers from "@/components/TopPerformers";
 import LowPerformer from "@/components/LowPerformer";
 import Charts from "@/components/Charts";
 import { calculateStats } from "@/lib/calculateStats";
-import { getUniquePosts } from "@/lib/getUniquePosts";
+import { getUniquePosts } from "@/lib/getUniquePosts";
 import { reportClientError } from "@/lib/reportClientError";
+import PageHeader from "@/components/PageHeader";
 export default function AdminDashboard() {
 
 const [allData,setAllData]=useState<any[]>([]);
@@ -200,152 +201,38 @@ return(
 
 {/* HEADER */}
 
-<div
-className="
-rounded-[30px]
-overflow-hidden
-relative
-bg-gradient-to-r
-from-slate-900
-via-blue-900
-to-cyan-700
-p-6
-md:p-8
-shadow-xl
-"
+<PageHeader
+  eyebrow="Overview"
+  title="Dashboard"
+  description="Admin overview and performance summary"
 >
-
-<div className="relative z-10">
-
-<h1 className="
-text-3xl
-md:text-5xl
-font-bold
-text-white
-tracking-tight
-">
-
-Dashboard
-
-</h1>
-
-<p className="
-text-blue-100
-mt-2
-text-sm
-">
-
-Admin overview and performance summary
-
-</p>
-
-
-
-{/* ✅ DATE FILTER */}
-
-<div className="
-mt-5
-flex
-gap-3
-items-center
-flex-wrap
-">
-
-<input
-type="date"
-value={selectedDate}
-onChange={(e)=>
-setSelectedDate(e.target.value)
-}
-className="
-border
-border-white/20
-bg-white/10
-text-white
-px-4
-py-2
-rounded-xl
-backdrop-blur-sm
-outline-none
-"
-/>
-
-
-<button
-onClick={()=>{
-
-const today=
-
-new Date()
-
-.toISOString()
-
-.split("T")[0];
-
-setSelectedDate(today);
-
-}}
-className="
-px-4
-py-2
-rounded-xl
-bg-white
-text-slate-800
-text-sm
-font-medium
-"
->
-
-Today
-
-</button>
-
-</div>
-
-
-
-
-<div
-className="
-mt-5
-bg-white/10
-backdrop-blur-sm
-rounded-full
-overflow-hidden
-h-3
-"
->
-
-<div
-className="
-bg-gradient-to-r
-from-cyan-300
-to-blue-400
-h-full
-transition-all
-duration-1000
-"
-style={{
-width:`${performance}%`
-}}
-/>
-
-</div>
-
-<p className="
-mt-3
-text-sm
-text-white
-">
-
-Performance :
-<b> {performance}%</b>
-
-</p>
-
-</div>
-
-</div>
+  <div className="flex gap-3 items-center flex-wrap">
+    <input
+      type="date"
+      value={selectedDate}
+      onChange={(e)=> setSelectedDate(e.target.value)}
+      className="border border-white/20 bg-white/10 text-white px-4 h-10 rounded-xl backdrop-blur-sm outline-none"
+    />
+    <button
+      onClick={()=>{
+        const today= new Date().toISOString().split("T")[0];
+        setSelectedDate(today);
+      }}
+      className="px-4 h-10 rounded-xl bg-white text-slate-800 text-sm font-medium"
+    >
+      Today
+    </button>
+  </div>
+  <div className="mt-5 bg-white/10 backdrop-blur-sm rounded-full overflow-hidden h-3">
+    <div
+      className="bg-gradient-to-r from-cyan-300 to-blue-400 h-full transition-all duration-1000"
+      style={{ width:`${performance}%` }}
+    />
+  </div>
+  <p className="mt-3 text-sm text-white">
+    Performance : <b>{performance}%</b>
+  </p>
+</PageHeader>
 
 
 

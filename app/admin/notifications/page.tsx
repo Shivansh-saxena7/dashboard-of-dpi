@@ -10,6 +10,7 @@ import {
   XCircle,
 } from "lucide-react";
 
+import PageHeader from "@/components/PageHeader";
 export default function NotificationsPage() {
 
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -77,58 +78,11 @@ export default function NotificationsPage() {
     <div className="space-y-6 pb-10">
         {/* HEADER */}
 
-      <motion.div
-        initial={{
-          opacity: 0,
-          y: -20,
-        }}
-        animate={{
-          opacity: 1,
-          y: 0,
-        }}
-        className="
-        relative
-        overflow-hidden
-        rounded-[30px]
-        bg-gradient-to-r
-        from-slate-900
-        via-blue-900
-        to-cyan-700
-        p-7
-        shadow-xl
-        "
-      >
-
-        <div
-          className="
-          absolute
-          -top-20
-          -right-20
-          h-64
-          w-64
-          rounded-full
-          bg-white/10
-          blur-3xl
-          "
-        />
-
-        <div className="relative z-10">
-
-          <h1 className="text-4xl font-bold text-white">
-
-            Notification History
-
-          </h1>
-
-          <p className="mt-2 text-blue-100">
-
-            View all notifications sent to employees.
-
-          </p>
-
-        </div>
-
-      </motion.div>
+      <PageHeader
+  eyebrow="Content & Support"
+  title="Notification History"
+  description="View all notifications sent to employees."
+      />
       {/* SEARCH + STATS */}
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-5">

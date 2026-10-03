@@ -19,6 +19,7 @@ import { getRecycleCutoff } from "@/lib/calculateSLAStatus";
 import { isLeadTerminal } from "@/lib/isLeadTerminal";
 import { useLeadSiblings } from "@/lib/useLeadSiblings";
 
+import PageHeader from "@/components/PageHeader";
 type SortOption = "NEWEST" | "OLDEST" | "SLA_URGENCY";
 
 const ALL_STATUSES = Object.keys(LEAD_STATUS_DISPLAY);
@@ -900,54 +901,30 @@ export default function AdminLeadsPage() {
 
   return (
     <div className="space-y-6">
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="relative overflow-hidden rounded-[24px] bg-gradient-to-br from-[#0f172a] via-[#1d4ed8] to-[#06b6d4] p-6 text-white shadow-[0_15px_50px_rgba(37,99,235,0.2)]"
-      >
-        <div className="absolute top-[-60px] right-[-60px] w-[150px] h-[150px] rounded-full bg-white/10 blur-3xl" />
-        <Target size={140} strokeWidth={1} className="absolute -bottom-8 -right-4 text-white/10 pointer-events-none" />
-
-        <div className="relative flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-          <div>
-            <h1 className="text-3xl font-bold">Leads</h1>
-            <p className="mt-2 text-white/80 text-sm">
-              {recyclingSoonFilter
-                ? `Every lead, across every employee — ${cardLeads.length} matching on this page (Recycling Soon total isn't server-computed)`
-                : `Every lead, across every employee — ${totalCount} matching`}
-            </p>
-          </div>
-
-          {/* Two buttons now (was one, before Manual-Lead-Entry) —
-              flex-wrap is the safety net on the narrowest phones where
-              even a stacked-below row can't fit both side-by-side;
-              sm:shrink-0 stops them competing with the title for width
-              once the row goes horizontal again at sm+. */}
-          <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
-            <button
-              onClick={() => setManualEntryOpen(true)}
-              className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition"
-            >
+      <PageHeader
+        eyebrow="Leads"
+        title="Leads"
+        icon={Target}
+        description={
+          recyclingSoonFilter
+            ? `Every lead, across every employee — ${cardLeads.length} matching on this page (Recycling Soon total isn't server-computed)`
+            : `Every lead, across every employee — ${totalCount} matching`
+        }
+        actions={
+          <>
+            <button onClick={() => setManualEntryOpen(true)} className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition">
               🎣 Add Manual Lead
             </button>
-
-            <button
-              onClick={() => setManualBookingOpen(true)}
-              className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition"
-            >
+            <button onClick={() => setManualBookingOpen(true)} className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition">
               🏆 Manual Booking Entry
             </button>
-
-            <Link
-              href="/admin/leads/import"
-              className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition"
-            >
+            <Link href="/admin/leads/import" className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition">
               <Upload size={14} />
               Import CSV
             </Link>
-          </div>
-        </div>
-      </motion.div>
+          </>
+        }
+      />
 
       {manualEntryOpen && (
         <ManualLeadEntryModal

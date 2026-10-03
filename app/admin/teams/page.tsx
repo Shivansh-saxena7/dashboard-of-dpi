@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase";
 import toast from "react-hot-toast";
 import DeleteModal from "../components/DeleteModal";
 
+import PageHeader from "@/components/PageHeader";
 // Admin-only team management — creating teams, assigning a Team
 // Leader, and adding/removing members, all from one team-centric
 // panel (select a team, see/edit its full roster) rather than a
@@ -389,37 +390,29 @@ export default function AdminTeamsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col md:flex-row justify-between gap-5">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-800">Teams</h1>
-          <p className="text-slate-500 mt-1">Manage teams, leaders, and members</p>
-        </div>
-
-        {/* flex-col below sm (was a plain flex row with no wrap/width
-            constraints — the input had no width class at all, so it
-            took its own default intrinsic width right next to the
-            fixed-content-width button, with nothing to shrink or wrap
-            when the two combined didn't fit a narrow screen, pushing
-            the button past the card's edge). Same flex-col -> flex-row
-            responsive-stacking pattern the outer header row above
-            already uses. */}
-        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-          <input
-            value={newTeamName}
-            onChange={(e) => setNewTeamName(e.target.value)}
-            placeholder="New team name..."
-            className="h-12 rounded-2xl bg-white border border-slate-200 px-4 outline-none focus:ring-4 focus:ring-cyan-200 w-full sm:w-auto sm:min-w-[200px]"
-          />
-          <button
-            onClick={createTeam}
-            disabled={creating || !newTeamName.trim()}
-            className="h-12 px-6 rounded-2xl text-white font-medium bg-gradient-to-r from-blue-600 to-cyan-500 shadow-lg hover:scale-105 transition disabled:opacity-50 disabled:hover:scale-100 flex items-center justify-center gap-2 shrink-0"
-          >
-            <Plus size={18} />
-            Create
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Leads"
+        title="Teams"
+        description="Manage teams, leaders, and members"
+        actions={
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            <input
+              value={newTeamName}
+              onChange={(e) => setNewTeamName(e.target.value)}
+              placeholder="New team name..."
+              className="h-10 rounded-xl bg-white text-slate-800 border border-white/20 px-4 outline-none focus:ring-4 focus:ring-cyan-200 w-full sm:w-auto sm:min-w-[200px]"
+            />
+            <button
+              onClick={createTeam}
+              disabled={creating || !newTeamName.trim()}
+              className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition justify-center disabled:opacity-50 shrink-0"
+            >
+              <Plus size={16} />
+              Create
+            </button>
+          </div>
+        }
+      />
 
       {loading ? (
         <div className="text-center text-sm text-slate-400 py-10">Loading teams...</div>

@@ -5,9 +5,10 @@ import Charts from "@/components/Charts";
 import TopPerformers from "@/components/TopPerformers";
 import LowPerformer from "@/components/LowPerformer";
 import {calculateStats} from "@/lib/calculateStats";
-import {getUniquePosts} from "@/lib/getUniquePosts";
+import {getUniquePosts} from "@/lib/getUniquePosts";
 import { reportClientError } from "@/lib/reportClientError";
 
+import PageHeader from "@/components/PageHeader";
 export default function AnalyticsPage(){
 
 const [allData,setAllData]=useState<any[]>([]);
@@ -219,118 +220,23 @@ space-y-6
 
 {/* HERO */}
 
-<div className="
-rounded-[35px]
-bg-gradient-to-r
-from-slate-900
-via-blue-900
-to-cyan-700
-p-7
-shadow-xl
-text-white
-">
-
-<h1 className="
-text-4xl
-font-bold
-">
-
-📊 Team Analytics
-
-</h1>
-
-<p className="
-text-white/70
-mt-2
-">
-
-Performance insights and employee tracking
-
-</p>
-<div className="
-flex
-gap-2
-flex-wrap
-mt-4
-">
-
-<button
-onClick={()=>setFilter("today")}
-className="
-px-3
-py-1
-rounded-full
-bg-white/20
-text-white
-text-xs
-"
+<PageHeader
+  eyebrow="Overview"
+  title="Team Analytics"
+  description="Performance insights and employee tracking"
 >
-Today
-</button>
-
-<button
-onClick={()=>setFilter("week")}
-className="
-px-3
-py-1
-rounded-full
-bg-white/20
-text-white
-text-xs
-"
->
-Week
-</button>
-
-<button
-onClick={()=>setFilter("month")}
-className="
-px-3
-py-1
-rounded-full
-bg-white/20
-text-white
-text-xs
-"
->
-Month
-</button>
-
-<button
-onClick={()=>setFilter("all")}
-className="
-px-3
-py-1
-rounded-full
-bg-white/20
-text-white
-text-xs
-"
->
-All Time
-</button>
-
-</div>
-
-<div className="
-mt-4
-inline-flex
-px-4
-py-2
-rounded-full
-text-sm
-font-semibold
-">
-
-<span className={health.color+" px-3 py-1 rounded-full"}>
-
-{health.label}
-
-</span>
-
-</div>
-
-</div>
+  <div className="flex gap-2 flex-wrap">
+    <button onClick={()=>setFilter("today")} className="px-3 h-8 rounded-full bg-white/20 text-white text-xs font-semibold">Today</button>
+    <button onClick={()=>setFilter("week")} className="px-3 h-8 rounded-full bg-white/20 text-white text-xs font-semibold">Week</button>
+    <button onClick={()=>setFilter("month")} className="px-3 h-8 rounded-full bg-white/20 text-white text-xs font-semibold">Month</button>
+    <button onClick={()=>setFilter("all")} className="px-3 h-8 rounded-full bg-white/20 text-white text-xs font-semibold">All Time</button>
+  </div>
+  <div className="mt-4 inline-flex text-sm font-semibold">
+    <span className={health.color+" px-3 py-1 rounded-full"}>
+      {health.label}
+    </span>
+  </div>
+</PageHeader>
 
 
 

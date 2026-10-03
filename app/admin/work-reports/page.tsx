@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import WorkReportView from "@/components/WorkReportView";
 import { todayKey } from "@/lib/leaderboardWeek";
 
+import PageHeader from "@/components/PageHeader";
 interface EmployeeOption {
   id: string;
   name: string;
@@ -101,10 +102,13 @@ export default function AdminWorkReportsPage() {
 
   return (
     <div className="max-w-4xl">
-      <h1 className="text-xl font-bold text-slate-800 mb-1">Work Reports</h1>
-      <p className="text-sm text-slate-500 mb-5">
-        Kisi bhi employee ka, kisi bhi din ka work report — full history, kabhi delete nahi hota.
-      </p>
+      <div className="mb-5">
+        <PageHeader
+          eyebrow="Overview"
+          title="Work Reports"
+          description="Kisi bhi employee ka, kisi bhi din ka work report — full history, kabhi delete nahi hota."
+        />
+      </div>
 
       <div className="bg-white rounded-2xl border border-red-100 shadow-md p-4 mb-4">
         <div className="flex items-center justify-between gap-2 mb-1">

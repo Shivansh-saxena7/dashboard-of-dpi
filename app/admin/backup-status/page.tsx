@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { motion } from "framer-motion";
 import { CheckCircle2, AlertTriangle, XCircle, RefreshCw, Play } from "lucide-react";
 import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
 
+import PageHeader from "@/components/PageHeader";
 interface Discrepancy {
   tab: string;
   expectedRows: number;
@@ -114,60 +114,45 @@ export default function BackupStatusPage() {
 
   return (
     <div className="space-y-6 pb-10">
-      <motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="rounded-[24px] bg-gradient-to-br from-[#0f172a] via-[#1d4ed8] to-[#06b6d4] text-white p-6"
+      <PageHeader
+  eyebrow="System"
+  title="Google Sheets Backup Status"
+  description="One row per run, every night at 2:00 AM IST — including per-tab discrepancies that a plain HTTP 200 from Google can silently hide."
+  actions={
+    <>
+      <button
+        onClick={handleTriggerNow}
+        disabled={triggering}
+        className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition disabled:opacity-50 disabled:cursor-wait"
       >
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-[10px] font-semibold tracking-[0.2em] text-cyan-200 uppercase mb-2">
-              Disaster Recovery
-            </p>
-            <h1 className="text-xl font-bold">Google Sheets Backup Status</h1>
-            <p className="text-sm text-white/70 mt-1">
-              One row per run, every night at 2:00 AM IST — including per-tab discrepancies that a plain HTTP 200
-              from Google can silently hide.
-            </p>
-          </div>
-
-          <div className="flex gap-2 shrink-0">
-            <button
-              onClick={handleTriggerNow}
-              disabled={triggering}
-              className="flex items-center gap-1.5 h-9 px-3.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-xs font-semibold transition disabled:opacity-50 disabled:cursor-wait"
-            >
-              <Play size={13} />
-              {triggering ? "Running..." : "Trigger Now"}
-            </button>
-            <button
-              onClick={loadRuns}
-              className="flex items-center gap-1.5 h-9 px-3.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-xs font-semibold transition"
-            >
-              <RefreshCw size={13} />
-              Refresh
-            </button>
-          </div>
-        </div>
-
-        {latest && (
-          <div className="mt-4 flex items-center gap-2">
-            {(() => {
-              const s = STATUS_DISPLAY[latest.status];
-              const Icon = s.icon;
-              return (
-                <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full ${s.className}`}>
-                  <Icon size={13} />
-                  Last run: {s.label}
-                </span>
-              );
-            })()}
-            <span className="text-xs text-white/60">
-              {new Date(latest.run_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-            </span>
-          </div>
-        )}
-      </motion.div>
+        <Play size={13} />
+        {triggering ? "Running..." : "Trigger Now"}
+      </button>
+      <button onClick={loadRuns} className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition">
+        <RefreshCw size={13} />
+        Refresh
+      </button>
+    </>
+  }
+      >
+  {latest && (
+    <div className="flex items-center gap-2">
+      {(() => {
+        const s = STATUS_DISPLAY[latest.status];
+        const Icon = s.icon;
+        return (
+          <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full ${s.className}`}>
+            <Icon size={13} />
+            Last run: {s.label}
+          </span>
+        );
+      })()}
+      <span className="text-xs text-white/60">
+        {new Date(latest.run_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+      </span>
+    </div>
+  )}
+      </PageHeader>
 
       {loading ? (
         <p className="text-sm text-slate-400 px-1">Loading...</p>

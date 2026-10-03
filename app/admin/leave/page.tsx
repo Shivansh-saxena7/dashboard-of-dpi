@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase";
 import { isLeadTerminal } from "@/lib/isLeadTerminal";
 import MarkEmployeeLeaveModal from "@/components/MarkEmployeeLeaveModal";
 
+import PageHeader from "@/components/PageHeader";
 interface LeavePeriod {
   id: string;
   employee_id: string;
@@ -195,31 +196,16 @@ export default function AdminLeavePage() {
 
   return (
     <div className="space-y-6 pb-10">
-      <motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="rounded-[24px] bg-gradient-to-br from-teal-700 via-emerald-600 to-teal-500 text-white p-6"
-      >
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <p className="text-[10px] font-semibold tracking-[0.2em] text-teal-100 uppercase mb-2">
-              Employee Leave
-            </p>
-            <h1 className="text-xl font-bold">Leave / Holiday Tracking</h1>
-            <p className="text-sm text-white/70 mt-1">
-              While an employee is marked on leave, their Follow-up leads' inactivity timer is paused — no
-              warning, no recycling — until leave ends.
-            </p>
-          </div>
-
-          <button
-            onClick={() => setModalOpen(true)}
-            className="shrink-0 flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition"
-          >
+      <PageHeader
+        eyebrow="People"
+        title="Leave / Holiday Tracking"
+        description="While an employee is marked on leave, their Follow-up leads' inactivity timer is paused — no warning, no recycling — until leave ends."
+        actions={
+          <button onClick={() => setModalOpen(true)} className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition">
             🌴 Mark Employee On Leave
           </button>
-        </div>
-      </motion.div>
+        }
+      />
 
       <div className="flex items-center gap-2">
         <label className="text-xs font-semibold text-slate-500">Filter by month:</label>

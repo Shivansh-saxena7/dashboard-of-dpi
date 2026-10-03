@@ -6,6 +6,7 @@ import toast from "react-hot-toast";
 import { Plus, Trash2, ChevronDown, ChevronRight, Video, FileText, Upload, Tag, X, Link2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
+import PageHeader from "@/components/PageHeader";
 const BUCKET = "project-assets";
 
 interface Project {
@@ -299,12 +300,11 @@ export default function ProjectAssetsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-bold text-slate-800">Project Assets</h1>
-        <p className="text-sm text-slate-500 mt-1">
-          Videos, brochures, and images organized by Project → Size/Type — shown to employees on the matching lead's detail page.
-        </p>
-      </div>
+      <PageHeader
+        eyebrow="Leads"
+        title="Project Assets"
+        description="Videos, brochures, and images organized by Project → Size/Type — shown to employees on the matching lead's detail page."
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-5">
         {/* Project list */}

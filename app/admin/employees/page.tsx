@@ -9,6 +9,7 @@ import DeleteModal from "../components/DeleteModal";
 import { useRouter } from "next/navigation";
 import { todayKey } from "@/lib/leaderboardWeek";
 
+import PageHeader from "@/components/PageHeader";
 export default function Employees(){
     const router = useRouter();
 
@@ -376,65 +377,16 @@ onDelete={deleteEmployee}
 
 {/* TOP */}
 
-<div className="
-flex
-flex-col
-md:flex-row
-justify-between
-gap-5
-">
-
-<div>
-
-<h1 className="
-text-3xl
-font-bold
-text-slate-800
-">
-
-Employees
-
-</h1>
-
-<p className="
-text-slate-500
-mt-1
-">
-
-Manage team members
-
-</p>
-
-</div>
-
-
-<button
-
-onClick={()=>
-setOpenModal(true)
-}
-
-className="
-h-12
-px-6
-rounded-2xl
-text-white
-font-medium
-bg-gradient-to-r
-from-blue-600
-to-cyan-500
-shadow-lg
-hover:scale-105
-transition
-"
-
->
-
-+ Add Employee
-
-</button>
-
-</div>
+<PageHeader
+  eyebrow="People"
+  title="Employees"
+  description="Manage team members"
+  actions={
+    <button onClick={()=>setOpenModal(true)} className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition">
+      + Add Employee
+    </button>
+  }
+/>
 
 
 
