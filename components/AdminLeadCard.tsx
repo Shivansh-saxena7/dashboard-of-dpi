@@ -328,7 +328,6 @@ function AdminLeadCard({
               {lead.project && (
                 <p className="text-xs text-slate-500 truncate">{lead.project}</p>
               )}
-              <ExistingClientBadge siblings={lead.siblings} />
             </div>
 
             <div className="shrink-0 flex flex-col items-end gap-1">
@@ -455,15 +454,14 @@ function AdminLeadCard({
             🌴 Timer Paused — Owner on Leave
           </span>
         )}
-
-        <RecycledBadge reason={lead.recycleReason} fromStage={lead.recycledFromStage} fromStatus={lead.recycledFromStatus} fullDetail />
-
-        {lead.recycleCount > 0 && (
-          <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-orange-50 text-orange-600">
-            Recycled {lead.recycleCount}x
-          </span>
-        )}
       </div>
+
+      {(lead.recycleCount > 0 || lead.recycleReason || (lead.siblings && lead.siblings.length > 0)) && (
+        <div className="flex items-center gap-1.5 mt-2.5 min-w-0">
+          <RecycledBadge reason={lead.recycleReason} fromStage={lead.recycledFromStage} fromStatus={lead.recycledFromStatus} count={lead.recycleCount} fullDetail />
+          <ExistingClientBadge siblings={lead.siblings} fullDetail />
+        </div>
+      )}
 
       <div className="flex items-center justify-between mt-3.5 pt-3.5 border-t border-slate-100">
         <div>

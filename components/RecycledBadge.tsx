@@ -1,27 +1,34 @@
-import { recycledText } from "@/lib/recycleReasonDisplay";
+import { recycledFromText } from "@/lib/recycleReasonDisplay";
 
-// Small "♻ Recycled from <stage/status>" pill for lead cards ("♻ Recycled"
-// when the origin isn't known). Renders nothing for a fresh lead, so fresh
-// cards stay exactly as they were.
+// One merged recycle pill (2026-10-05): "♻ Recycled 1x · from Follow-up ·
+// Not Interested" — the lifetime recycle count plus, when the CURRENT
+// assignment came from a recycle, where the lead was. Employee / Team
+// Leader views get the restricted origin wording (see recycledText);
+// Admin / Super Admin / Coordinator pass fullDetail. Truncates instead of
+// wrapping so the pill row stays on one line; the title holds the full text.
+// Renders nothing for a lead that was never recycled.
 export default function RecycledBadge({
   reason,
   fromStage,
   fromStatus,
+  count = 0,
   fullDetail = false
 }: {
   reason?: string | null;
   fromStage?: string | null;
   fromStatus?: string | null;
-  // Admin / Super Admin / Coordinator views only — see recycledText.
+  count?: number;
   fullDetail?: boolean;
 }) {
-  const text = recycledText(reason, fromStage, fromStatus, fullDetail);
-  if (!text) return null;
+  if (!reason && !(count > 0)) return null;
+
+  const from = reason ? recycledFromText(fromStage, fromStatus, fullDetail) : null;
+  const text = `Recycled${count > 0 ? ` ${count}x` : ""}${from ? ` · from ${from}` : ""}`;
 
   return (
     <span
-      title={`${text} — reassigned to this owner by the recycle sweep`}
-      className="inline-flex items-center text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-100 whitespace-nowrap"
+      title={text}
+      className="min-w-0 truncate inline-block text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-100 whitespace-nowrap"
     >
       ♻ {text}
     </span>

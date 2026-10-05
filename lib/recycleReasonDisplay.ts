@@ -42,9 +42,26 @@ function positiveOnly(stage: string | null | undefined, status: string | null | 
   return { stage: null, status: null };
 }
 
-// "Recycled from Follow-up" / generic "Recycled"; null for a fresh lead.
+// The "from" part alone — "Follow-up · Not Interested" (full detail: stage
+// and status when both are known) or the restricted positive-only label
+// ("Follow-up", "Connected"); null when nothing may be shown.
 // fullDetail defaults to false so a view that doesn't opt in can never show
 // a negative origin.
+export function recycledFromText(
+  fromStage: string | null | undefined,
+  fromStatus: string | null | undefined,
+  fullDetail: boolean = false
+): string | null {
+  if (fullDetail) {
+    const stageLabel = fromStage && fromStage !== "LEADS" ? recycledFromLabel(fromStage, null) : null;
+    const statusLabel = recycledFromLabel(null, fromStatus);
+    return [stageLabel, statusLabel].filter(Boolean).join(" · ") || null;
+  }
+  const shown = positiveOnly(fromStage, fromStatus);
+  return recycledFromLabel(shown.stage, shown.status);
+}
+
+// "Recycled from Follow-up" / generic "Recycled"; null for a fresh lead.
 export function recycledText(
   recycleReason: string | null | undefined,
   fromStage: string | null | undefined,
@@ -52,15 +69,7 @@ export function recycledText(
   fullDetail: boolean = false
 ): string | null {
   if (!recycleReason) return null;
-  if (fullDetail) {
-    // Full detail: stage AND status when both are known ("Follow-up · Not Interested").
-    const stageLabel = fromStage && fromStage !== "LEADS" ? recycledFromLabel(fromStage, null) : null;
-    const statusLabel = recycledFromLabel(null, fromStatus);
-    const from = [stageLabel, statusLabel].filter(Boolean).join(" · ");
-    return from ? `Recycled from ${from}` : "Recycled";
-  }
-  const shown = positiveOnly(fromStage, fromStatus);
-  const from = recycledFromLabel(shown.stage, shown.status);
+  const from = recycledFromText(fromStage, fromStatus, fullDetail);
   return from ? `Recycled from ${from}` : "Recycled";
 }
 

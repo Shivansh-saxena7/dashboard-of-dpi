@@ -268,14 +268,12 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
               {lead.project && (
                 <p className="text-xs text-slate-500 truncate">{lead.project}</p>
               )}
-              <ExistingClientBadge siblings={lead.siblings} />
             </div>
 
             <div className="shrink-0 flex flex-col items-end gap-1">
               <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${priorityDisplay.badgeClassName}`}>
                 {priorityDisplay.label}
               </span>
-              <RecycledBadge reason={lead.recycle_reason} fromStage={lead.recycled_from_stage} fromStatus={lead.recycled_from_status} />
               {/* Dedicated badge instead of the generic source pill
                   below (2026-09-23) — source='Personal' would already
                   render there, but a plain indigo pill reading
@@ -308,6 +306,13 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
           </div>
         </div>
       </div>
+
+      {(lead.recycle_count > 0 || lead.recycle_reason || (lead.siblings && lead.siblings.length > 0)) && (
+        <div className="flex items-center gap-1.5 mt-3 min-w-0">
+          <RecycledBadge reason={lead.recycle_reason} fromStage={lead.recycled_from_stage} fromStatus={lead.recycled_from_status} count={lead.recycle_count} />
+          <ExistingClientBadge siblings={lead.siblings} />
+        </div>
+      )}
 
       <div className="flex items-center flex-wrap gap-1.5 mt-3.5">
         <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${statusDisplay.badgeClassName}`}>
