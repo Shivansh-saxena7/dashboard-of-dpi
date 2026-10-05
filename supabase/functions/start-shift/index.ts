@@ -165,6 +165,14 @@ serve(withMonitoring("start-shift", async (req) => {
     // before. Not just "always pass" — genuinely never evaluated, so
     // no distance/accuracy computation happens for this employee at
     // all.
+    //
+    // distanceMeters is declared here, outside the if block (2026-10-05):
+    // `geofence` only exists inside the block, so the success response
+    // below used to throw "geofence is not defined" AFTER the attendance
+    // row was saved — every first Start Shift tap showed an error even
+    // though the shift had started. Field employees get null.
+    let distanceMeters: number | null = null;
+
     if (!isFieldEmployee) {
       const geofence = calculateGeofenceStatus(
         lat,
@@ -173,6 +181,8 @@ serve(withMonitoring("start-shift", async (req) => {
         settings.office_lng,
         settings.geofence_radius_meters
       );
+
+      distanceMeters = Math.round(geofence.distanceMeters);
 
       if (!geofence.withinGeofence) {
         const roundedAccuracy = typeof accuracy === "number" ? Math.round(accuracy) : null;
@@ -242,7 +252,7 @@ serve(withMonitoring("start-shift", async (req) => {
       alreadyStarted: false,
       shiftStartAt: inserted.shift_start_at,
       attendanceType: inserted.attendance_type,
-      distanceMeters: Math.round(geofence.distanceMeters)
+      distanceMeters
     });
 
   } catch (err) {
