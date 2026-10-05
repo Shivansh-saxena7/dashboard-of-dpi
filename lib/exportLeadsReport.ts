@@ -63,7 +63,9 @@ export const EXPORT_COLUMNS = [
 // here (e.g. ["recycleCount"]) — Excel is unaffected either way.
 const PDF_EXCLUDED_KEYS: string[] = [];
 
-export function buildExportRows(leads: AdminExportLead[]): ExportRow[] {
+// fullRecycleDetail: Admin / Super Admin / Coordinator exports only; Team
+// Leader exports get the restricted origin wording (see recycledText).
+export function buildExportRows(leads: AdminExportLead[], fullRecycleDetail: boolean = false): ExportRow[] {
   return leads.map((lead) => {
     const history = lead.lead_history?.[0];
     const assignedAt = history?.assigned_at ?? null;
@@ -105,29 +107,29 @@ export function buildExportRows(leads: AdminExportLead[]): ExportRow[] {
       responseTime,
       firstWhatsAppTime: firstWhatsAppAt ? formatDateTime(firstWhatsAppAt) : "Not yet contacted",
       recycleCount: lead.recycle_count ?? 0,
-      origin: originExportText(history?.recycle_reason, history?.recycled_from_stage, history?.recycled_from_status)
+      origin: originExportText(history?.recycle_reason, history?.recycled_from_stage, history?.recycled_from_status, fullRecycleDetail)
     };
   });
 }
 
-export async function exportLeadsToExcel(leads: AdminExportLead[], meta: ExportReportMeta) {
+export async function exportLeadsToExcel(leads: AdminExportLead[], meta: ExportReportMeta, options: { fullRecycleDetail?: boolean } = {}) {
   await exportTableToExcel({
     reportTitle: "DPI Lead Report",
     sheetName: "Leads",
     filenamePrefix: "leads-export",
     columns: EXPORT_COLUMNS,
-    rows: buildExportRows(leads),
+    rows: buildExportRows(leads, options.fullRecycleDetail),
     meta
   });
 }
 
-export async function exportLeadsToPDF(leads: AdminExportLead[], meta: ExportReportMeta) {
+export async function exportLeadsToPDF(leads: AdminExportLead[], meta: ExportReportMeta, options: { fullRecycleDetail?: boolean } = {}) {
   await exportTableToPDF({
     reportTitle: "DPI Lead Report",
     sheetName: "Leads",
     filenamePrefix: "leads-export",
     columns: EXPORT_COLUMNS,
-    rows: buildExportRows(leads),
+    rows: buildExportRows(leads, options.fullRecycleDetail),
     meta,
     pdfExcludedKeys: PDF_EXCLUDED_KEYS
   });

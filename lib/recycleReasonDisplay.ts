@@ -29,14 +29,38 @@ export function recycledFromLabel(stage: string | null | undefined, status: stri
   return null;
 }
 
+// Who sees the full origin (2026-10-05). Employees and Team Leaders only
+// ever see a POSITIVE origin — a later stage (Follow-up, Visit, Booking) or
+// an engaged status (Connected, Converted) — otherwise a neutral "Recycled":
+// "Recycled from Not Interested / Not Connected" made people skip the call.
+// Admin, Super Admin and Coordinator see everything. Display-only.
+const POSITIVE_FROM_STATUSES = new Set(["CONNECTED", "CONVERTED"]);
+
+function positiveOnly(stage: string | null | undefined, status: string | null | undefined): { stage: string | null; status: string | null } {
+  if (stage && stage !== "LEADS") return { stage, status: null };
+  if (status && POSITIVE_FROM_STATUSES.has(status)) return { stage: null, status };
+  return { stage: null, status: null };
+}
+
 // "Recycled from Follow-up" / generic "Recycled"; null for a fresh lead.
+// fullDetail defaults to false so a view that doesn't opt in can never show
+// a negative origin.
 export function recycledText(
   recycleReason: string | null | undefined,
   fromStage: string | null | undefined,
-  fromStatus: string | null | undefined
+  fromStatus: string | null | undefined,
+  fullDetail: boolean = false
 ): string | null {
   if (!recycleReason) return null;
-  const from = recycledFromLabel(fromStage, fromStatus);
+  if (fullDetail) {
+    // Full detail: stage AND status when both are known ("Follow-up · Not Interested").
+    const stageLabel = fromStage && fromStage !== "LEADS" ? recycledFromLabel(fromStage, null) : null;
+    const statusLabel = recycledFromLabel(null, fromStatus);
+    const from = [stageLabel, statusLabel].filter(Boolean).join(" · ");
+    return from ? `Recycled from ${from}` : "Recycled";
+  }
+  const shown = positiveOnly(fromStage, fromStatus);
+  const from = recycledFromLabel(shown.stage, shown.status);
   return from ? `Recycled from ${from}` : "Recycled";
 }
 
@@ -44,7 +68,8 @@ export function recycledText(
 export function originExportText(
   recycleReason: string | null | undefined,
   fromStage?: string | null,
-  fromStatus?: string | null
+  fromStatus?: string | null,
+  fullDetail: boolean = false
 ): string {
-  return recycledText(recycleReason, fromStage, fromStatus) || "Fresh";
+  return recycledText(recycleReason, fromStage, fromStatus, fullDetail) || "Fresh";
 }

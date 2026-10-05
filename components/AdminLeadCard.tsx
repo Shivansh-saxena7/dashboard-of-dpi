@@ -456,7 +456,7 @@ function AdminLeadCard({
           </span>
         )}
 
-        <RecycledBadge reason={lead.recycleReason} fromStage={lead.recycledFromStage} fromStatus={lead.recycledFromStatus} />
+        <RecycledBadge reason={lead.recycleReason} fromStage={lead.recycledFromStage} fromStatus={lead.recycledFromStatus} fullDetail />
 
         {lead.recycleCount > 0 && (
           <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-orange-50 text-orange-600">

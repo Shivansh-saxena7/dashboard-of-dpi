@@ -56,11 +56,11 @@ const COLUMN_VISIBILITY: Record<(typeof EXPORT_COLUMNS)[number]["key"], string> 
 // breakpoint only the columns meant for it are showing — but it's
 // kept in case a device sits right at a breakpoint edge with a
 // narrow window (e.g. a resized browser, not just a phone).
-export default function ExportPreviewTable({ leads }: { leads: AdminExportLead[] }) {
+export default function ExportPreviewTable({ leads, fullRecycleDetail = false }: { leads: AdminExportLead[]; fullRecycleDetail?: boolean }) {
 
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
-  const rows = useMemo(() => buildExportRows(leads), [leads]);
+  const rows = useMemo(() => buildExportRows(leads, fullRecycleDetail), [leads, fullRecycleDetail]);
   const shown = rows.slice(0, visibleCount);
 
   if (leads.length === 0) {

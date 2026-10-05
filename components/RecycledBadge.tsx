@@ -6,13 +6,16 @@ import { recycledText } from "@/lib/recycleReasonDisplay";
 export default function RecycledBadge({
   reason,
   fromStage,
-  fromStatus
+  fromStatus,
+  fullDetail = false
 }: {
   reason?: string | null;
   fromStage?: string | null;
   fromStatus?: string | null;
+  // Admin / Super Admin / Coordinator views only — see recycledText.
+  fullDetail?: boolean;
 }) {
-  const text = recycledText(reason, fromStage, fromStatus);
+  const text = recycledText(reason, fromStage, fromStatus, fullDetail);
   if (!text) return null;
 
   return (

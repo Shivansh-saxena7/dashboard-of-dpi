@@ -882,9 +882,9 @@ export default function AdminLeadsPage() {
         return;
       }
       if (format === "excel") {
-        await exportLeadsToExcel(rows, reportMeta);
+        await exportLeadsToExcel(rows, reportMeta, { fullRecycleDetail: true });
       } else {
-        await exportLeadsToPDF(rows, reportMeta);
+        await exportLeadsToPDF(rows, reportMeta, { fullRecycleDetail: true });
       }
     } catch (err) {
       console.error(err);
@@ -1141,7 +1141,7 @@ export default function AdminLeadsPage() {
           <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold mb-3">
             Report Table{recyclingSoonFilter ? " (This Page)" : ""} — {previewRows.length} lead{previewRows.length === 1 ? "" : "s"}
           </p>
-          <ExportPreviewTable leads={previewRows} />
+          <ExportPreviewTable leads={previewRows} fullRecycleDetail />
         </motion.div>
       )}
 

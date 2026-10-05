@@ -750,8 +750,8 @@ export default function CoordinatorDashboard() {
     if (visibleLeads.length === 0 || exporting) return;
     setExporting(true);
     try {
-      if (format === "excel") await exportLeadsToExcel(visibleLeads, leadsReportMeta);
-      else await exportLeadsToPDF(visibleLeads, leadsReportMeta);
+      if (format === "excel") await exportLeadsToExcel(visibleLeads, leadsReportMeta, { fullRecycleDetail: true });
+      else await exportLeadsToPDF(visibleLeads, leadsReportMeta, { fullRecycleDetail: true });
     } catch (err) {
       console.error(err);
       toast.error("Export failed. Please try again.");
@@ -1411,7 +1411,7 @@ export default function CoordinatorDashboard() {
               <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold mb-3">
                 Report Table — {visibleLeads.length} lead{visibleLeads.length === 1 ? "" : "s"}
               </p>
-              <ExportPreviewTable leads={visibleLeads} />
+              <ExportPreviewTable leads={visibleLeads} fullRecycleDetail />
             </div>
           )}
 
