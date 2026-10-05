@@ -19,13 +19,15 @@ import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
 import { istDateStringToRangeStartUTC, istDateStringToRangeEndUTC } from "@/lib/istTime";
 import { useLeadSiblings } from "@/lib/useLeadSiblings";
+import { leadOrigin, LeadOrigin } from "@/lib/recycleReasonDisplay";
+import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 
 interface LeadListProps {
   employeeId: string;
 }
 
 type ActiveTab = BoardStage | "HISTORY";
-type SortOption = "NEWEST" | "OLDEST" | "SLA_URGENCY";
+type SortOption = "NEWEST" | "OLDEST" | "SLA_URGENCY" | "FRESH_FIRST";
 type DateRangeOption = "ALL" | "THIS_WEEK" | "THIS_MONTH" | "CUSTOM";
 
 const SLA_RECHECK_INTERVAL_MS = 30000;
@@ -136,6 +138,10 @@ export default function LeadList({ employeeId }: LeadListProps) {
   // board-stage tab instead of only whichever one they happen to
   // currently sit in, same reasoning as those two.
   const [personalOnlyFilter, setPersonalOnlyFilter] = useState(false);
+  // Origin / Priority filters (2026-10-05) — origin comes from the active
+  // assignment's recycle_reason; priority is the existing leads.priority.
+  const [originFilter, setOriginFilter] = useState<"" | LeadOrigin>("");
+  const [priorityFilter, setPriorityFilter] = useState<"" | LeadPriority>("");
   const [addPersonalLeadOpen, setAddPersonalLeadOpen] = useState(false);
   const [addPersonalLeadInitialMobile, setAddPersonalLeadInitialMobile] = useState<string | undefined>(undefined);
   // Quick Dial (2026-09-23) — quickDialOpen is the "enter a number,
@@ -297,6 +303,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
           first_whatsapp_at,
           assigned_by_type,
           reassign_note,
+          recycle_reason,
           last_activity_at,
           paused_until,
           pause_reason,
@@ -482,6 +489,14 @@ export default function LeadList({ employeeId }: LeadListProps) {
       result = result.filter((lead) => lead.is_personal_lead);
     }
 
+    if (originFilter) {
+      result = result.filter((lead) => leadOrigin(lead.lead_history[0]?.recycle_reason) === originFilter);
+    }
+
+    if (priorityFilter) {
+      result = result.filter((lead) => lead.priority === priorityFilter);
+    }
+
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       // Mobile search bug fix (2026-09-24) — the raw check above
@@ -583,12 +598,20 @@ export default function LeadList({ employeeId }: LeadListProps) {
       const aAssigned = new Date(a.lead_history[0]?.assigned_at || a.created_at).getTime();
       const bAssigned = new Date(b.lead_history[0]?.assigned_at || b.created_at).getTime();
 
+      // Fresh first: fresh leads ahead of recycled ones, newest first within each.
+      if (sortBy === "FRESH_FIRST") {
+        const aRecycled = a.lead_history[0]?.recycle_reason ? 1 : 0;
+        const bRecycled = b.lead_history[0]?.recycle_reason ? 1 : 0;
+        if (aRecycled !== bRecycled) return aRecycled - bRecycled;
+        return bAssigned - aAssigned;
+      }
+
       return sortBy === "OLDEST" ? aAssigned - bAssigned : bAssigned - aAssigned;
     });
 
     return result;
 
-  }, [leads, activeTab, searchQuery, projectFilter, sourceFilter, statusFilter, recyclingSoonFilter, dateRangeFilter, customStart, customEnd, sortBy, personalOnlyFilter]);
+  }, [leads, activeTab, searchQuery, projectFilter, sourceFilter, statusFilter, recyclingSoonFilter, dateRangeFilter, customStart, customEnd, sortBy, personalOnlyFilter, originFilter, priorityFilter]);
 
   // Same fix as app/admin/leads/page.tsx's cardLeads (2026-09-18) — the
   // render loop below used to build `lead={{ ...inline object... }}`
@@ -629,6 +652,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
         assigned_by_type: lead.lead_history[0]?.assigned_by_type ?? null,
         assigned_by: lead.lead_history[0]?.assigned_by ?? null,
         reassign_note: lead.lead_history[0]?.reassign_note ?? null,
+        recycle_reason: lead.lead_history[0]?.recycle_reason ?? null,
         last_activity_at: lead.lead_history[0]?.last_activity_at ?? null,
         paused_until: lead.lead_history[0]?.paused_until ?? null,
         pause_reason: lead.lead_history[0]?.pause_reason ?? null,
@@ -766,6 +790,19 @@ export default function LeadList({ employeeId }: LeadListProps) {
               ))}
             </FilterSelect>
 
+            <FilterSelect value={originFilter} onChange={(e) => setOriginFilter(e.target.value as "" | LeadOrigin)}>
+              <option value="">All Origins</option>
+              <option value="FRESH">Fresh</option>
+              <option value="RECYCLED">Recycled</option>
+            </FilterSelect>
+
+            <FilterSelect value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value as "" | LeadPriority)}>
+              <option value="">All Priorities</option>
+              {Object.entries(LEAD_PRIORITY_DISPLAY).map(([value, display]) => (
+                <option key={value} value={value}>{display.label}</option>
+              ))}
+            </FilterSelect>
+
             <button
               type="button"
               onClick={() => setRecyclingSoonFilter((v) => !v)}
@@ -804,6 +841,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
               <option value="NEWEST">Newest First</option>
               <option value="OLDEST">Oldest First</option>
               <option value="SLA_URGENCY">SLA Urgency</option>
+              <option value="FRESH_FIRST">Fresh First</option>
             </FilterSelect>
 
             {dateRangeFilter === "CUSTOM" && (

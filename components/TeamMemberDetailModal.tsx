@@ -10,6 +10,7 @@ import { BOARD_STAGES } from "@/lib/leadBoardStageDisplay";
 import { assignedByLabel, AssignedBySource } from "@/lib/assignedByDisplay";
 import { MemberAttendanceStatus } from "./TeamMemberCard";
 
+import RecycledBadge from "./RecycledBadge";
 interface TeamMemberDetailModalProps {
   member: { id: string; name: string };
   teamLeaderId: string;
@@ -29,6 +30,7 @@ interface MemberLead {
   activeHistoryId: string | null;
   assignedByType: "SYSTEM" | "ADMIN" | "TEAM_LEADER" | "SALES_COORDINATOR" | "SELF" | null;
   assignedByName: string | null;
+  recycleReason: string | null;
 }
 
 interface TeamNote {
@@ -106,7 +108,7 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
         `
         id, name, project, status, board_stage,
         lead_history!inner (
-          id, assigned_by_type,
+          id, assigned_by_type, recycle_reason,
           assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)
         )
         `,
@@ -125,7 +127,7 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
         project: string | null;
         status: string;
         board_stage: string | null;
-        lead_history: (AssignedBySource & { id: string })[] | null;
+        lead_history: (AssignedBySource & { id: string; recycle_reason: string | null })[] | null;
       };
 
       const mapped = (data as unknown as RawLead[]).map((lead) => {
@@ -140,7 +142,8 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
           assignedByType: activeHistory?.assigned_by_type ?? null,
           assignedByName: activeHistory
             ? assignedByLabel(activeHistory)
-            : null
+            : null,
+          recycleReason: activeHistory?.recycle_reason ?? null
         };
       });
 
@@ -296,7 +299,7 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
 
                   return (
                     <div key={lead.id} className="rounded-xl bg-white border border-slate-100 p-3">
-                      <p className="text-sm font-semibold text-slate-700">{lead.name}</p>
+                      <p className="text-sm font-semibold text-slate-700 flex items-center gap-1.5 flex-wrap">{lead.name} <RecycledBadge reason={lead.recycleReason} /></p>
                       {lead.project && <p className="text-xs text-slate-500">{lead.project}</p>}
                       <div className="flex items-center gap-1.5 mt-1.5">
                         {statusDisplay && (

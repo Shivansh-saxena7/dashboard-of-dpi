@@ -18,6 +18,8 @@ import { istDateStringToRangeStartUTC, istDateStringToRangeEndUTC } from "@/lib/
 import { getRecycleCutoff } from "@/lib/calculateSLAStatus";
 import { isLeadTerminal } from "@/lib/isLeadTerminal";
 import { useLeadSiblings } from "@/lib/useLeadSiblings";
+import { LeadOrigin } from "@/lib/recycleReasonDisplay";
+import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 
 import PageHeader from "@/components/PageHeader";
 type SortOption = "NEWEST" | "OLDEST" | "SLA_URGENCY";
@@ -153,6 +155,9 @@ export default function AdminLeadsPage() {
   // is its own documented, deliberate exception — see its own comment
   // — this filter has no such reason to deviate from the norm).
   const [personalOnlyFilter, setPersonalOnlyFilter] = useState(false);
+  // Origin (active assignment's recycle_reason) / Priority filters, 2026-10-05.
+  const [originFilter, setOriginFilter] = useState<"" | LeadOrigin>("");
+  const [priorityFilter, setPriorityFilter] = useState<"" | LeadPriority>("");
   const [typeFilter, setTypeFilter] = useState("");
   const [dateRangeFilter, setDateRangeFilter] = useState<DateRangeOption>("ALL");
   const [customStart, setCustomStart] = useState("");
@@ -184,6 +189,8 @@ export default function AdminLeadsPage() {
   const filtersSignature = JSON.stringify([
     debouncedSearchQuery,
     employeeFilter,
+    originFilter,
+    priorityFilter,
     projectFilter,
     sourceFilter,
     boardStageFilter,
@@ -285,7 +292,7 @@ export default function AdminLeadsPage() {
         pending_team:teams ( name ),
         lead_history!inner (
           assigned_at, is_active, first_call_at, first_whatsapp_at, assigned_by_type, call_count,
-          last_activity_at, paused_until, pause_reason, pause_note, outcome_at,
+          last_activity_at, paused_until, pause_reason, pause_note, outcome_at, recycle_reason,
           assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)
         )
       `;
@@ -362,6 +369,9 @@ export default function AdminLeadsPage() {
     }
 
     if (statusFilter) q = q.eq("status", statusFilter);
+    if (priorityFilter) q = q.eq("priority", priorityFilter);
+    if (originFilter === "RECYCLED") q = q.not("lead_history.recycle_reason", "is", null);
+    if (originFilter === "FRESH") q = q.is("lead_history.recycle_reason", null);
 
     if (typeFilter) {
       q = typeFilter === "LEAD" ? q.or("lead_type.eq.LEAD,lead_type.is.null") : q.eq("lead_type", typeFilter);
@@ -717,6 +727,7 @@ export default function AdminLeadsPage() {
         priority: lead.priority,
         boardStage: lead.board_stage || "LEADS",
         recycleCount: lead.recycle_count,
+        recycleReason: lead.lead_history?.[0]?.recycle_reason ?? null,
         ownerName: lead.employees?.name ?? null,
         currentOwnerId: lead.current_owner_id ?? null,
         catcherName: lead.catcher_name ?? null,
@@ -816,6 +827,14 @@ export default function AdminLeadsPage() {
       otherFilters.push({ label: "Personal", value: "Only" });
     }
 
+    if (originFilter) {
+      otherFilters.push({ label: "Origin", value: originFilter === "RECYCLED" ? "Recycled" : "Fresh" });
+    }
+
+    if (priorityFilter) {
+      otherFilters.push({ label: "Priority", value: LEAD_PRIORITY_DISPLAY[priorityFilter].label });
+    }
+
     const dateLabel = dateRangeFilterLabel(dateRangeFilter, customStart, customEnd);
     if (dateLabel) {
       otherFilters.push({ label: "Date", value: dateLabel });
@@ -828,6 +847,8 @@ export default function AdminLeadsPage() {
     sourceFilter,
     boardStageFilter,
     statusFilter,
+    originFilter,
+    priorityFilter,
     typeFilter,
     personalOnlyFilter,
     dateRangeFilter,
@@ -991,6 +1012,19 @@ export default function AdminLeadsPage() {
             <option value="">All Statuses</option>
             {ALL_STATUSES.map((status) => (
               <option key={status} value={status}>{LEAD_STATUS_DISPLAY[status as keyof typeof LEAD_STATUS_DISPLAY].label}</option>
+            ))}
+          </FilterSelect>
+
+          <FilterSelect value={originFilter} onChange={(e) => setOriginFilter(e.target.value as "" | LeadOrigin)}>
+            <option value="">All Origins</option>
+            <option value="FRESH">Fresh</option>
+            <option value="RECYCLED">Recycled</option>
+          </FilterSelect>
+
+          <FilterSelect value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value as "" | LeadPriority)}>
+            <option value="">All Priorities</option>
+            {Object.entries(LEAD_PRIORITY_DISPLAY).map(([value, display]) => (
+              <option key={value} value={value}>{display.label}</option>
             ))}
           </FilterSelect>
 

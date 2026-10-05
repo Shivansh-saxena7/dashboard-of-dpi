@@ -11,6 +11,7 @@ import {
   ExportRow
 } from "@/lib/exportTable";
 
+import { originExportText } from "@/lib/recycleReasonDisplay";
 // Re-exported for every pre-existing importer (admin/leads/page.tsx,
 // app/team/page.tsx's Team Reports, ExportPreviewTable.tsx,
 // app/coordinator/page.tsx) — this file's public API is unchanged by
@@ -31,7 +32,7 @@ export interface AdminExportLead {
   // export correctly without needing to be touched.
   lead_type?: string | null;
   employees: { name: string } | null;
-  lead_history: (AssignedBySource & { assigned_at: string | null; first_call_at: string | null; first_whatsapp_at: string | null })[] | null;
+  lead_history: (AssignedBySource & { assigned_at: string | null; first_call_at: string | null; first_whatsapp_at: string | null; recycle_reason?: string | null })[] | null;
 }
 
 // Single source of truth for export columns — Excel and PDF both
@@ -52,7 +53,9 @@ export const EXPORT_COLUMNS = [
   { key: "firstCallTime", header: "First Call Time", align: "left", width: 20 },
   { key: "responseTime", header: "Response Time", align: "center", width: 16 },
   { key: "firstWhatsAppTime", header: "First WhatsApp Time", align: "left", width: 20 },
-  { key: "recycleCount", header: "Recycle Count", align: "center", width: 14 }
+  { key: "recycleCount", header: "Recycle Count", align: "center", width: 14 },
+  // Appended last (2026-10-05) so every existing column keeps its position.
+  { key: "origin", header: "Origin / Recycle reason", align: "left", width: 26 }
 ] as const;
 
 // Landscape + small font comfortably fits these columns for typical
@@ -101,7 +104,8 @@ export function buildExportRows(leads: AdminExportLead[]): ExportRow[] {
       firstCallTime: firstCallAt ? formatDateTime(firstCallAt) : "Not yet contacted",
       responseTime,
       firstWhatsAppTime: firstWhatsAppAt ? formatDateTime(firstWhatsAppAt) : "Not yet contacted",
-      recycleCount: lead.recycle_count ?? 0
+      recycleCount: lead.recycle_count ?? 0,
+      origin: originExportText(history?.recycle_reason)
     };
   });
 }

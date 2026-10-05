@@ -6,6 +6,8 @@ import toast from "react-hot-toast";
 import { Search, ChevronDown, CheckCircle2, XCircle, Clock, FileSpreadsheet, FileText, Table2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import AdminLeadCard from "@/components/AdminLeadCard";
+import { leadOrigin, LeadOrigin } from "@/lib/recycleReasonDisplay";
+import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 import ExportPreviewTable from "@/components/ExportPreviewTable";
 import ManualLeadEntryModal from "@/components/ManualLeadEntryModal";
 import WeeklyLeaderboardView from "@/components/WeeklyLeaderboardView";
@@ -200,6 +202,9 @@ export default function CoordinatorDashboard() {
   const [boardStageFilter, setBoardStageFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
+  // Origin / Priority filters (2026-10-05), same as the employee and Admin lead views.
+  const [originFilter, setOriginFilter] = useState<"" | LeadOrigin>("");
+  const [priorityFilter, setPriorityFilter] = useState<"" | LeadPriority>("");
   const [dateRangeFilter, setDateRangeFilter] = useState<DateRangeOption>("ALL");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
@@ -395,7 +400,7 @@ export default function CoordinatorDashboard() {
         employees ( name ),
         lead_history (
           id, assigned_at, is_active, first_call_at, first_whatsapp_at, assigned_by_type, call_count,
-          last_activity_at, paused_until, pause_reason, outcome_at,
+          last_activity_at, paused_until, pause_reason, outcome_at, recycle_reason,
           assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)
         )
         `,
@@ -602,6 +607,14 @@ export default function CoordinatorDashboard() {
       result = result.filter((lead) => lead.status === statusFilter);
     }
 
+    if (originFilter) {
+      result = result.filter((lead) => leadOrigin(lead.lead_history?.[0]?.recycle_reason) === originFilter);
+    }
+
+    if (priorityFilter) {
+      result = result.filter((lead) => lead.priority === priorityFilter);
+    }
+
     if (typeFilter) {
       result = result.filter((lead) => (lead.lead_type || "LEAD") === typeFilter);
     }
@@ -638,6 +651,8 @@ export default function CoordinatorDashboard() {
     sourceFilter,
     boardStageFilter,
     statusFilter,
+    originFilter,
+    priorityFilter,
     typeFilter,
     dateRangeFilter,
     customStart,
@@ -664,6 +679,7 @@ export default function CoordinatorDashboard() {
         priority: lead.priority,
         boardStage: lead.board_stage || "LEADS",
         recycleCount: lead.recycle_count,
+        recycleReason: lead.lead_history?.[0]?.recycle_reason ?? null,
         ownerName: lead.employees?.name ?? null,
         currentOwnerId: lead.current_owner_id ?? null,
         assignedAt: lead.lead_history?.[0]?.assigned_at ?? null,
@@ -719,12 +735,14 @@ export default function CoordinatorDashboard() {
     }
 
     if (typeFilter) otherFilters.push({ label: "Type", value: typeFilter === "DATA" ? "Data" : "Leads" });
+    if (originFilter) otherFilters.push({ label: "Origin", value: originFilter === "RECYCLED" ? "Recycled" : "Fresh" });
+    if (priorityFilter) otherFilters.push({ label: "Priority", value: LEAD_PRIORITY_DISPLAY[priorityFilter].label });
 
     const dateLabel = dateRangeFilterLabel(dateRangeFilter, customStart, customEnd);
     if (dateLabel) otherFilters.push({ label: "Date", value: dateLabel });
 
     return { employeeLabel, otherFilters, scopeLabel: "Sales Coordinator" };
-  }, [employeeFilter, teamFilter, teamNameMap, projectFilter, sourceFilter, boardStageFilter, statusFilter, typeFilter, dateRangeFilter, customStart, customEnd, employeeOptions]);
+  }, [employeeFilter, teamFilter, teamNameMap, projectFilter, sourceFilter, boardStageFilter, statusFilter, originFilter, priorityFilter, typeFilter, dateRangeFilter, customStart, customEnd, employeeOptions]);
 
   async function handleExportLeads(format: "excel" | "pdf") {
     if (visibleLeads.length === 0 || exporting) return;
@@ -1294,6 +1312,19 @@ export default function CoordinatorDashboard() {
                 <option value="">All Statuses</option>
                 {ALL_STATUSES.map((status) => (
                   <option key={status} value={status}>{LEAD_STATUS_DISPLAY[status as keyof typeof LEAD_STATUS_DISPLAY].label}</option>
+                ))}
+              </FilterSelect>
+
+              <FilterSelect value={originFilter} onChange={(e) => setOriginFilter(e.target.value as "" | LeadOrigin)}>
+                <option value="">All Origins</option>
+                <option value="FRESH">Fresh</option>
+                <option value="RECYCLED">Recycled</option>
+              </FilterSelect>
+
+              <FilterSelect value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value as "" | LeadPriority)}>
+                <option value="">All Priorities</option>
+                {Object.entries(LEAD_PRIORITY_DISPLAY).map(([value, display]) => (
+                  <option key={value} value={value}>{display.label}</option>
                 ))}
               </FilterSelect>
 

@@ -12,6 +12,8 @@ import EmployeeTabBar from "@/components/EmployeeTabBar";
 import StartShiftCard from "@/components/StartShiftCard";
 import TeamMemberCard, { MemberAttendanceStatus } from "@/components/TeamMemberCard";
 import TeamMemberDetailModal from "@/components/TeamMemberDetailModal";
+import { leadOrigin, LeadOrigin } from "@/lib/recycleReasonDisplay";
+import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 import ExportPreviewTable from "@/components/ExportPreviewTable";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES } from "@/lib/leadBoardStageDisplay";
@@ -97,6 +99,9 @@ export default function TeamPage() {
   const [reportBoardStageFilter, setReportBoardStageFilter] = useState("");
   const [reportStatusFilter, setReportStatusFilter] = useState("");
   const [reportTypeFilter, setReportTypeFilter] = useState("");
+  // Origin / Priority filters (2026-10-05), same as the other lead views.
+  const [reportOriginFilter, setReportOriginFilter] = useState<"" | LeadOrigin>("");
+  const [reportPriorityFilter, setReportPriorityFilter] = useState<"" | LeadPriority>("");
   const [reportDateRangeFilter, setReportDateRangeFilter] = useState<DateRangeOption>("ALL");
   const [reportCustomStart, setReportCustomStart] = useState("");
   const [reportCustomEnd, setReportCustomEnd] = useState("");
@@ -241,7 +246,7 @@ export default function TeamPage() {
         current_owner_id,
         employees ( name ),
         lead_history (
-          assigned_at, is_active, first_call_at, first_whatsapp_at, assigned_by_type,
+          assigned_at, is_active, first_call_at, first_whatsapp_at, assigned_by_type, recycle_reason,
           assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)
         )
       `,
@@ -404,6 +409,14 @@ export default function TeamPage() {
       result = result.filter((lead) => lead.status === reportStatusFilter);
     }
 
+    if (reportOriginFilter) {
+      result = result.filter((lead) => leadOrigin(lead.lead_history?.[0]?.recycle_reason) === reportOriginFilter);
+    }
+
+    if (reportPriorityFilter) {
+      result = result.filter((lead) => lead.priority === reportPriorityFilter);
+    }
+
     if (reportTypeFilter) {
       result = result.filter((lead) => (lead.lead_type || "LEAD") === reportTypeFilter);
     }
@@ -427,6 +440,8 @@ export default function TeamPage() {
     reportSourceFilter,
     reportBoardStageFilter,
     reportStatusFilter,
+    reportOriginFilter,
+    reportPriorityFilter,
     reportTypeFilter,
     reportDateRangeFilter,
     reportCustomStart,
@@ -462,6 +477,14 @@ export default function TeamPage() {
       });
     }
 
+    if (reportOriginFilter) {
+      otherFilters.push({ label: "Origin", value: reportOriginFilter === "RECYCLED" ? "Recycled" : "Fresh" });
+    }
+
+    if (reportPriorityFilter) {
+      otherFilters.push({ label: "Priority", value: LEAD_PRIORITY_DISPLAY[reportPriorityFilter].label });
+    }
+
     if (reportTypeFilter) {
       otherFilters.push({ label: "Type", value: reportTypeFilter === "DATA" ? "Data" : "Leads" });
     }
@@ -478,6 +501,8 @@ export default function TeamPage() {
     reportSourceFilter,
     reportBoardStageFilter,
     reportStatusFilter,
+    reportOriginFilter,
+    reportPriorityFilter,
     reportTypeFilter,
     reportDateRangeFilter,
     reportCustomStart,
@@ -719,6 +744,19 @@ export default function TeamPage() {
               <option value="">All Statuses</option>
               {ALL_STATUSES.map((status) => (
                 <option key={status} value={status}>{LEAD_STATUS_DISPLAY[status as keyof typeof LEAD_STATUS_DISPLAY].label}</option>
+              ))}
+            </FilterSelect>
+
+            <FilterSelect value={reportOriginFilter} onChange={(e) => setReportOriginFilter(e.target.value as "" | LeadOrigin)}>
+              <option value="">All Origins</option>
+              <option value="FRESH">Fresh</option>
+              <option value="RECYCLED">Recycled</option>
+            </FilterSelect>
+
+            <FilterSelect value={reportPriorityFilter} onChange={(e) => setReportPriorityFilter(e.target.value as "" | LeadPriority)}>
+              <option value="">All Priorities</option>
+              {Object.entries(LEAD_PRIORITY_DISPLAY).map(([value, display]) => (
+                <option key={value} value={value}>{display.label}</option>
               ))}
             </FilterSelect>
 

@@ -13,6 +13,7 @@ import { buildWhatsAppLink } from "@/lib/buildWhatsAppLink";
 import { rememberCalledCard } from "@/lib/lastCalledLead";
 import type { LeadSibling } from "@/lib/useLeadSiblings";
 import ExistingClientBadge from "./ExistingClientBadge";
+import RecycledBadge from "./RecycledBadge";
 
 interface LeadCardLead {
   id: string;
@@ -38,6 +39,7 @@ interface LeadCardLead {
   pause_reason?: string | null;
   is_personal_lead?: boolean;
   siblings?: LeadSibling[];
+  recycle_reason?: string | null;
 }
 
 interface LeadCardProps {
@@ -271,6 +273,7 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
               <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${priorityDisplay.badgeClassName}`}>
                 {priorityDisplay.label}
               </span>
+              <RecycledBadge reason={lead.recycle_reason} />
               {/* Dedicated badge instead of the generic source pill
                   below (2026-09-23) — source='Personal' would already
                   render there, but a plain indigo pill reading

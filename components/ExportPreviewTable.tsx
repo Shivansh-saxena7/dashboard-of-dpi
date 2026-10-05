@@ -36,7 +36,8 @@ const COLUMN_VISIBILITY: Record<(typeof EXPORT_COLUMNS)[number]["key"], string> 
   firstCallTime: "hidden xl:table-cell",
   responseTime: "hidden xl:table-cell",
   firstWhatsAppTime: "hidden 2xl:table-cell",
-  recycleCount: "hidden 2xl:table-cell"
+  recycleCount: "hidden 2xl:table-cell",
+  origin: "hidden 2xl:table-cell"
 };
 
 // Reuses buildExportRows directly rather than re-deriving labels a

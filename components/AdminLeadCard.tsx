@@ -11,6 +11,7 @@ import { FOLLOWUP_INACTIVITY_WARNING_DAYS, FOLLOWUP_INACTIVITY_RECYCLE_DAYS, get
 import { isLeadTerminal } from "@/lib/isLeadTerminal";
 import AdminLeadHistoryModal from "./AdminLeadHistoryModal";
 import ExistingClientBadge from "./ExistingClientBadge";
+import RecycledBadge from "./RecycledBadge";
 import type { LeadSibling } from "@/lib/useLeadSiblings";
 
 const RECYCLE_REASON_LABEL: Record<RecycleCutoffReason, string> = {
@@ -59,6 +60,8 @@ interface AdminLeadCardLead {
   // Other leads for the same client (same mobile) — optional, so the
   // Coordinator page's cards simply don't show the badge.
   siblings?: LeadSibling[];
+  // Why the active assignment exists (lead_history.recycle_reason), 2026-10-05.
+  recycleReason?: string | null;
 }
 
 interface AdminLeadCardProps {
@@ -450,6 +453,8 @@ function AdminLeadCard({
             🌴 Timer Paused — Owner on Leave
           </span>
         )}
+
+        <RecycledBadge reason={lead.recycleReason} />
 
         {lead.recycleCount > 0 && (
           <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-orange-50 text-orange-600">
