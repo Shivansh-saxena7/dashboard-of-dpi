@@ -6,6 +6,7 @@ import toast from "react-hot-toast";
 import { Search, ChevronDown, CheckCircle2, XCircle, Clock, FileSpreadsheet, FileText, Table2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import AdminLeadCard from "@/components/AdminLeadCard";
+import { useLeadSiblings } from "@/lib/useLeadSiblings";
 import { leadOrigin, LeadOrigin } from "@/lib/recycleReasonDisplay";
 import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 import ExportPreviewTable from "@/components/ExportPreviewTable";
@@ -710,6 +711,17 @@ export default function CoordinatorDashboard() {
   );
 
   const totalCardPages = Math.max(1, Math.ceil(cardLeads.length / CARD_PAGE_SIZE));
+
+  // Existing-client pill (2026-10-05): siblings for the cards on the CURRENT
+  // page only (<= CARD_PAGE_SIZE ids, one get_lead_siblings call per page),
+  // fetched after the list renders so it never slows the page load.
+  // Coordinator gets the full project/owner list from the function, same as Admin.
+  const pagedLeadIds = useMemo(() => pagedCardLeads.map((l) => l.id), [pagedCardLeads]);
+  const siblingsByLeadId = useLeadSiblings(pagedLeadIds);
+  const pagedCardLeadsWithSiblings = useMemo(
+    () => pagedCardLeads.map((l) => ({ ...l, siblings: siblingsByLeadId[l.id] })),
+    [pagedCardLeads, siblingsByLeadId]
+  );
 
   const leadsReportMeta = useMemo(() => {
     const employeeLabel = employeeFilter
@@ -1420,7 +1432,7 @@ export default function CoordinatorDashboard() {
           ) : (
             <>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                {pagedCardLeads.map((cardLead, index) => (
+                {pagedCardLeadsWithSiblings.map((cardLead, index) => (
                   <AdminLeadCard
                     key={cardLead.id}
                     index={index}
