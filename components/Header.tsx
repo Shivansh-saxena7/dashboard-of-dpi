@@ -10,6 +10,8 @@ import { Bell, LogOut, X, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import NotificationModal from "./NotificationModal";
+import { showFocusReminderToast } from "./FocusReminderToast";
+import { FOCUS_REMINDER_TYPES } from "@/lib/focusReminders";
 import BookingCelebrationModal from "./BookingCelebrationModal";
 import LeaderboardPopupModal from "./LeaderboardPopupModal";
 import { getEmployeeTabs } from "./EmployeeTabBar";
@@ -114,6 +116,10 @@ useEffect(() => {
       setMyDepartment(employee.department);
       setMyRole(employee.role);
 
+      // Focus reminders (2026-10-05): unread Recycling Tomorrow / Visit lock /
+      // Snooze reminders from the last 24h, shown once per browser session.
+      void showFocusReminderToast(employee.id, router, { oncePerSession: true });
+
       const existing = supabase.getChannels().find((ch) => ch.topic === `realtime:employee-${employee.id}`);
 
       if (existing) {
@@ -145,6 +151,10 @@ useEffect(() => {
             // single place that marks celebration_shown_at, so a live
             // one and a catch-up one (found on mount) can never race
             // on which "owns" that update.
+            if (FOCUS_REMINDER_TYPES.includes(payload.new?.type)) {
+              void showFocusReminderToast(employee.id, router);
+            }
+
             if (CELEBRATION_TYPES.includes(payload.new?.type)) {
               setCelebrationQueue((prev) => [...prev, { id: payload.new.id, message: payload.new.message }]);
             }
@@ -159,7 +169,7 @@ useEffect(() => {
       cancelled = true;
       if (channel) supabase.removeChannel(channel);
     };
-  }, []);
+  }, [router]);
 
   // Drains celebrationQueue one at a time — the single place
   // celebration_shown_at gets set, for both the live (realtime) path

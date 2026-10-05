@@ -41,6 +41,7 @@ const NOTIFICATION_TYPE_LABELS: Record<string, string> = {
   LEAD_JUNKED: "Lead Junked",
   PROJECT_RULE_STALE: "Project Rule Alert",
   PAUSE_EXPIRY_WARNING: "Pause Ending Soon",
+  RECYCLE_TOMORROW: "Recycling Tomorrow",
   PAUSE_EXPIRED: "Pause Ended",
   VISIT_VERIFIED: "Visit Verified",
   VISIT_DENIED: "Visit Not Verified",
@@ -70,7 +71,8 @@ const CALL_ACTION_TYPES = new Set([
   "LEAD_REMINDER",
   "SLA_WARNING",
   "PAUSE_EXPIRY_WARNING",
-  "PAUSE_EXPIRED"
+  "PAUSE_EXPIRED",
+  "RECYCLE_TOMORROW"
 ]);
 
 export function hasCallAction(type: string | null | undefined): boolean {

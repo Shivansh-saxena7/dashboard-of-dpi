@@ -214,8 +214,16 @@ export default function LeadList({ employeeId }: LeadListProps) {
   useEffect(() => {
     if (loading) return;
     const openLeadId = searchParams.get("openLead");
+    // ?filter=recycling-tomorrow — the focus-reminder toast's "Open
+    // Recycling Tomorrow" button (2026-10-05).
+    const filterParam = searchParams.get("filter");
+    if (filterParam === "recycling-tomorrow") {
+      setRecyclingTomorrowFilter(true);
+    }
     if (openLeadId) {
       setSelectedLeadId(openLeadId);
+    }
+    if (openLeadId || filterParam) {
       router.replace("/leads");
     }
   }, [loading, searchParams, router]);
