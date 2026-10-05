@@ -62,6 +62,8 @@ interface AdminLeadCardLead {
   siblings?: LeadSibling[];
   // Why the active assignment exists (lead_history.recycle_reason), 2026-10-05.
   recycleReason?: string | null;
+  recycledFromStatus?: string | null;
+  recycledFromStage?: string | null;
 }
 
 interface AdminLeadCardProps {
@@ -454,7 +456,7 @@ function AdminLeadCard({
           </span>
         )}
 
-        <RecycledBadge reason={lead.recycleReason} />
+        <RecycledBadge reason={lead.recycleReason} fromStage={lead.recycledFromStage} fromStatus={lead.recycledFromStatus} />
 
         {lead.recycleCount > 0 && (
           <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-orange-50 text-orange-600">

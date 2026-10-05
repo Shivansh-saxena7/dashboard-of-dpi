@@ -32,7 +32,7 @@ export interface AdminExportLead {
   // export correctly without needing to be touched.
   lead_type?: string | null;
   employees: { name: string } | null;
-  lead_history: (AssignedBySource & { assigned_at: string | null; first_call_at: string | null; first_whatsapp_at: string | null; recycle_reason?: string | null })[] | null;
+  lead_history: (AssignedBySource & { assigned_at: string | null; first_call_at: string | null; first_whatsapp_at: string | null; recycle_reason?: string | null; recycled_from_status?: string | null; recycled_from_stage?: string | null })[] | null;
 }
 
 // Single source of truth for export columns — Excel and PDF both
@@ -105,7 +105,7 @@ export function buildExportRows(leads: AdminExportLead[]): ExportRow[] {
       responseTime,
       firstWhatsAppTime: firstWhatsAppAt ? formatDateTime(firstWhatsAppAt) : "Not yet contacted",
       recycleCount: lead.recycle_count ?? 0,
-      origin: originExportText(history?.recycle_reason)
+      origin: originExportText(history?.recycle_reason, history?.recycled_from_stage, history?.recycled_from_status)
     };
   });
 }

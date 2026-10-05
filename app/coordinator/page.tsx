@@ -400,7 +400,7 @@ export default function CoordinatorDashboard() {
         employees ( name ),
         lead_history (
           id, assigned_at, is_active, first_call_at, first_whatsapp_at, assigned_by_type, call_count,
-          last_activity_at, paused_until, pause_reason, outcome_at, recycle_reason,
+          last_activity_at, paused_until, pause_reason, outcome_at, recycle_reason, recycled_from_status, recycled_from_stage,
           assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)
         )
         `,
@@ -680,6 +680,8 @@ export default function CoordinatorDashboard() {
         boardStage: lead.board_stage || "LEADS",
         recycleCount: lead.recycle_count,
         recycleReason: lead.lead_history?.[0]?.recycle_reason ?? null,
+        recycledFromStatus: lead.lead_history?.[0]?.recycled_from_status ?? null,
+        recycledFromStage: lead.lead_history?.[0]?.recycled_from_stage ?? null,
         ownerName: lead.employees?.name ?? null,
         currentOwnerId: lead.current_owner_id ?? null,
         assignedAt: lead.lead_history?.[0]?.assigned_at ?? null,

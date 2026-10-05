@@ -20,6 +20,7 @@ import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
 import { istDateStringToRangeStartUTC, istDateStringToRangeEndUTC } from "@/lib/istTime";
 import { useLeadSiblings } from "@/lib/useLeadSiblings";
 import { leadOrigin, LeadOrigin } from "@/lib/recycleReasonDisplay";
+import { recyclingTomorrowCutoff } from "@/lib/recyclingTomorrow";
 import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 
 interface LeadListProps {
@@ -105,6 +106,28 @@ function FilterSelect({
 // horizontally, filters collapse to a 2-column grid below `sm`
 // rather than wrapping unpredictably, every tap target is
 // comfortably sized.
+// Recycling Tomorrow cutoff for a loaded lead (null = not in the filter).
+// Same lead shape the Recycling Soon filter builds for getRecycleCutoff.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function recyclingTomorrowCutoffFor(lead: any): Date | null {
+  const h = lead.lead_history[0];
+  return recyclingTomorrowCutoff(
+    {
+      status: lead.status,
+      sla_deadline: lead.sla_deadline,
+      recycle_count: lead.recycle_count,
+      board_stage: lead.board_stage,
+      paused_until: h?.paused_until ?? null,
+      last_activity_at: h?.last_activity_at ?? null,
+      pause_reason: h?.pause_reason ?? null,
+      assigned_at: h?.assigned_at ?? null
+    },
+    h?.outcome_at ?? null,
+    h?.call_count ?? 0,
+    Boolean(lead.is_personal_lead)
+  );
+}
+
 export default function LeadList({ employeeId }: LeadListProps) {
 
   const [leads, setLeads] = useState<any[]>([]);
@@ -140,6 +163,9 @@ export default function LeadList({ employeeId }: LeadListProps) {
   const [personalOnlyFilter, setPersonalOnlyFilter] = useState(false);
   // Origin / Priority filters (2026-10-05) — origin comes from the active
   // assignment's recycle_reason; priority is the existing leads.priority.
+  // Recycling Tomorrow (2026-10-05): worth-saving leads whose recycle
+  // cutoff is within 24h, any stage, soonest first. See lib/recyclingTomorrow.ts.
+  const [recyclingTomorrowFilter, setRecyclingTomorrowFilter] = useState(false);
   const [originFilter, setOriginFilter] = useState<"" | LeadOrigin>("");
   const [priorityFilter, setPriorityFilter] = useState<"" | LeadPriority>("");
   const [addPersonalLeadOpen, setAddPersonalLeadOpen] = useState(false);
@@ -304,6 +330,8 @@ export default function LeadList({ employeeId }: LeadListProps) {
           assigned_by_type,
           reassign_note,
           recycle_reason,
+          recycled_from_status,
+          recycled_from_stage,
           last_activity_at,
           paused_until,
           pause_reason,
@@ -482,11 +510,15 @@ export default function LeadList({ employeeId }: LeadListProps) {
     // same bypass for the identical reason. Plain tab-browsing with no
     // search/status/personal-only filter active is completely
     // unchanged.
-    const bypassTabFilter = Boolean(searchQuery.trim()) || Boolean(statusFilter) || personalOnlyFilter;
+    const bypassTabFilter = Boolean(searchQuery.trim()) || Boolean(statusFilter) || personalOnlyFilter || recyclingTomorrowFilter;
     let result = bypassTabFilter ? leads : leads.filter((lead) => (lead.board_stage || "LEADS") === activeTab);
 
     if (personalOnlyFilter) {
       result = result.filter((lead) => lead.is_personal_lead);
+    }
+
+    if (recyclingTomorrowFilter) {
+      result = result.filter((lead) => recyclingTomorrowCutoffFor(lead) !== null);
     }
 
     if (originFilter) {
@@ -588,6 +620,11 @@ export default function LeadList({ employeeId }: LeadListProps) {
     }
 
     result = [...result].sort((a, b) => {
+      // Recycling Tomorrow: whichever goes first is shown first.
+      if (recyclingTomorrowFilter) {
+        return (recyclingTomorrowCutoffFor(a)?.getTime() ?? Infinity) - (recyclingTomorrowCutoffFor(b)?.getTime() ?? Infinity);
+      }
+
 
       if (sortBy === "SLA_URGENCY") {
         const aDeadline = a.sla_deadline ? new Date(a.sla_deadline).getTime() : Infinity;
@@ -611,7 +648,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
 
     return result;
 
-  }, [leads, activeTab, searchQuery, projectFilter, sourceFilter, statusFilter, recyclingSoonFilter, dateRangeFilter, customStart, customEnd, sortBy, personalOnlyFilter, originFilter, priorityFilter]);
+  }, [leads, activeTab, searchQuery, projectFilter, sourceFilter, statusFilter, recyclingSoonFilter, dateRangeFilter, customStart, customEnd, sortBy, personalOnlyFilter, originFilter, priorityFilter, recyclingTomorrowFilter]);
 
   // Same fix as app/admin/leads/page.tsx's cardLeads (2026-09-18) — the
   // render loop below used to build `lead={{ ...inline object... }}`
@@ -626,6 +663,11 @@ export default function LeadList({ employeeId }: LeadListProps) {
   // reaches LeadCard as its own prop (the countdown genuinely needs to
   // tick), this only stops that tick from ALSO rebuilding data that
   // hasn't changed.
+  const recyclingTomorrowCount = useMemo(
+    () => leads.filter((lead) => recyclingTomorrowCutoffFor(lead) !== null).length,
+    [leads]
+  );
+
   // "Existing client" badge data for every loaded lead — refetched only
   // when the loaded set changes, not on filter/tab changes.
   const loadedLeadIds = useMemo(() => leads.map((lead) => lead.id), [leads]);
@@ -653,6 +695,8 @@ export default function LeadList({ employeeId }: LeadListProps) {
         assigned_by: lead.lead_history[0]?.assigned_by ?? null,
         reassign_note: lead.lead_history[0]?.reassign_note ?? null,
         recycle_reason: lead.lead_history[0]?.recycle_reason ?? null,
+        recycled_from_status: lead.lead_history[0]?.recycled_from_status ?? null,
+        recycled_from_stage: lead.lead_history[0]?.recycled_from_stage ?? null,
         last_activity_at: lead.lead_history[0]?.last_activity_at ?? null,
         paused_until: lead.lead_history[0]?.paused_until ?? null,
         pause_reason: lead.lead_history[0]?.pause_reason ?? null,
@@ -813,6 +857,16 @@ export default function LeadList({ employeeId }: LeadListProps) {
               }`}
             >
               ⚠️ Recycling Soon
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setRecyclingTomorrowFilter((v) => !v)}
+              className={`h-11 sm:h-10 rounded-xl px-3 text-xs font-semibold border transition ${
+                recyclingTomorrowFilter ? "bg-rose-100 border-rose-300 text-rose-700" : "bg-white border-slate-200 text-slate-600"
+              }`}
+            >
+              ⏳ Recycling Tomorrow{recyclingTomorrowCount > 0 ? ` (${recyclingTomorrowCount})` : ""}
             </button>
 
             <button

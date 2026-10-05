@@ -31,6 +31,8 @@ interface MemberLead {
   assignedByType: "SYSTEM" | "ADMIN" | "TEAM_LEADER" | "SALES_COORDINATOR" | "SELF" | null;
   assignedByName: string | null;
   recycleReason: string | null;
+  recycledFromStatus: string | null;
+  recycledFromStage: string | null;
 }
 
 interface TeamNote {
@@ -108,7 +110,7 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
         `
         id, name, project, status, board_stage,
         lead_history!inner (
-          id, assigned_by_type, recycle_reason,
+          id, assigned_by_type, recycle_reason, recycled_from_status, recycled_from_stage,
           assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)
         )
         `,
@@ -127,7 +129,7 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
         project: string | null;
         status: string;
         board_stage: string | null;
-        lead_history: (AssignedBySource & { id: string; recycle_reason: string | null })[] | null;
+        lead_history: (AssignedBySource & { id: string; recycle_reason: string | null; recycled_from_status: string | null; recycled_from_stage: string | null })[] | null;
       };
 
       const mapped = (data as unknown as RawLead[]).map((lead) => {
@@ -143,7 +145,9 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
           assignedByName: activeHistory
             ? assignedByLabel(activeHistory)
             : null,
-          recycleReason: activeHistory?.recycle_reason ?? null
+          recycleReason: activeHistory?.recycle_reason ?? null,
+          recycledFromStatus: activeHistory?.recycled_from_status ?? null,
+          recycledFromStage: activeHistory?.recycled_from_stage ?? null
         };
       });
 
@@ -299,7 +303,7 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
 
                   return (
                     <div key={lead.id} className="rounded-xl bg-white border border-slate-100 p-3">
-                      <p className="text-sm font-semibold text-slate-700 flex items-center gap-1.5 flex-wrap">{lead.name} <RecycledBadge reason={lead.recycleReason} /></p>
+                      <p className="text-sm font-semibold text-slate-700 flex items-center gap-1.5 flex-wrap">{lead.name} <RecycledBadge reason={lead.recycleReason} fromStage={lead.recycledFromStage} fromStatus={lead.recycledFromStatus} /></p>
                       {lead.project && <p className="text-xs text-slate-500">{lead.project}</p>}
                       <div className="flex items-center gap-1.5 mt-1.5">
                         {statusDisplay && (
