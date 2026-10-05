@@ -139,9 +139,9 @@ export default function CommissionPlansBuilder({ onCreated }: { onCreated?: () =
 
         <div className="space-y-1.5">
           {newPlanTiers.map((tier, idx) => (
-            <div key={idx} className="flex items-end gap-2">
+            <div key={idx} className="flex flex-wrap items-end gap-2">
               <div>
-                <label className="text-xs font-semibold text-slate-500">Min Bookings</label>
+                <label className="block text-xs font-semibold text-slate-500">Min Bookings</label>
                 <input
                   type="number"
                   min={0}
@@ -151,18 +151,18 @@ export default function CommissionPlansBuilder({ onCreated }: { onCreated?: () =
                 />
               </div>
               <div>
-                <label className="text-xs font-semibold text-slate-500">Rate Type</label>
+                <label className="block text-xs font-semibold text-slate-500">Rate Type</label>
                 <select
                   value={tier.rate_type}
                   onChange={(e) => updatePlanTierRow(idx, { rate_type: e.target.value })}
-                  className="mt-1 h-8 w-44 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300"
+                  className="mt-1 h-8 w-40 sm:w-44 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-violet-100 focus:border-violet-300"
                 >
                   <option value="PERCENT_OF_SALE_VALUE">% of Sale Value</option>
                   <option value="FLAT_PER_BOOKING">Flat Rs. per Booking</option>
                 </select>
               </div>
               <div>
-                <label className="text-xs font-semibold text-slate-500">{tier.rate_type === "FLAT_PER_BOOKING" ? "Rs. / booking" : "Rate %"}</label>
+                <label className="block text-xs font-semibold text-slate-500">{tier.rate_type === "FLAT_PER_BOOKING" ? "Rs. / booking" : "Rate %"}</label>
                 <input
                   type="number"
                   min={0}

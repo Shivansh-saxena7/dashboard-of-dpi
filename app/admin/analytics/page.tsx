@@ -9,6 +9,7 @@ import {getUniquePosts} from "@/lib/getUniquePosts";
 import { reportClientError } from "@/lib/reportClientError";
 
 import PageHeader from "@/components/PageHeader";
+import Card from "@/components/StatCard";
 export default function AnalyticsPage(){
 
 const [allData,setAllData]=useState<any[]>([]);
@@ -365,25 +366,3 @@ data={allData}
 
 
 
-
-function Card({
-title,
-value,
-icon
-}:any){
-
-// Label on its own full-width line (UI/UX Phase 8): beside a 56px icon
-// in a half-width phone card it collided with the icon, then truncated.
-return(
-<div className="bg-white rounded-[30px] shadow-md p-4 sm:p-5">
-  <p className="text-xs text-gray-400">{title}</p>
-  <div className="flex items-center justify-between gap-3 mt-2">
-    <h2 className="text-2xl sm:text-3xl font-bold">{value}</h2>
-    <div className="h-11 w-11 sm:h-14 sm:w-14 shrink-0 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 flex items-center justify-center text-xl sm:text-2xl text-white">
-      {icon}
-    </div>
-  </div>
-</div>
-);
-
-}

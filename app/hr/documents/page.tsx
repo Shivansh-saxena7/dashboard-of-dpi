@@ -603,7 +603,7 @@ export default function HrDocumentsPage() {
               Employees can view their own documents but never download them — only HR/Admin can here.
             </p>
           </div>
-          <div className="flex gap-2 flex-wrap shrink-0">
+          <div className="flex gap-2 flex-wrap min-w-0">
             <button
               onClick={() => setUploadOpen(true)}
               className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition"

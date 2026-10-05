@@ -7,6 +7,7 @@ import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { calculateStatus } from "@/components/calculateStatus";
 import { reportClientError } from "@/lib/reportClientError";
+import Card from "@/components/StatCard";
 export default function EmployeeDetailsPage(){
 
 const params=useParams();
@@ -856,68 +857,3 @@ calculateStatus(post)==="MISSED"
 
 
 
-
-function Card({
-title,
-value,
-icon
-}:any){
-
-return(
-
-<div className="
-bg-white
-rounded-[30px]
-shadow-md
-p-5
-flex
-justify-between
-items-center
-">
-
-<div>
-
-<p className="
-text-gray-400
-text-xs
-">
-
-{title}
-
-</p>
-
-<h2 className="
-text-3xl
-font-bold
-mt-2
-">
-
-{value}
-
-</h2>
-
-</div>
-
-<div className="
-h-14
-w-14
-rounded-2xl
-bg-gradient-to-r
-from-cyan-500
-to-blue-600
-flex
-justify-center
-items-center
-text-white
-text-2xl
-">
-
-{icon}
-
-</div>
-
-</div>
-
-);
-
-}
