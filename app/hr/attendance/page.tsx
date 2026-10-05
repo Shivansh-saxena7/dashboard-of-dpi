@@ -508,7 +508,7 @@ export default function HrAttendancePage() {
                         {STATUS_DISPLAY[status].label}
                       </span>
                       {status === "LATE_COMING" && settings && row && (
-                        <p className="text-[10px] text-slate-400 mt-1">
+                        <p className="text-xs text-slate-400 mt-1">
                           Cutoff:{" "}
                           {formatTimeStringAsClock(
                             row.attendance_type === "HALF_DAY_SECOND"

@@ -8,6 +8,7 @@ import "react-datepicker/dist/react-datepicker.css";
 import { calculateStatus } from "@/components/calculateStatus";
 import { reportClientError } from "@/lib/reportClientError";
 import Card from "@/components/StatCard";
+import PageHeader from "@/components/PageHeader";
 export default function EmployeeDetailsPage(){
 
 const params=useParams();
@@ -304,77 +305,22 @@ return(
 
 {/* HERO */}
 
-<div className="
-rounded-[35px]
-bg-gradient-to-r
-from-slate-900
-via-blue-900
-to-cyan-700
-p-7
-shadow-xl
-mb-7
-">
-
-<div className="
-flex
-justify-between
-items-center
-flex-wrap
-gap-5
-">
-
-<div>
-
-<h1 className="
-text-white
-text-4xl
-font-bold
-">
-
-{employeeName}
-
-</h1>
-
-<p className="
-text-white/70
-mt-2
-">
-
-Employee Dashboard
-
-</p>
-
-</div>
-
-
-
-<div className="
-bg-white/10
-backdrop-blur-xl
-rounded-3xl
-px-4
-py-3
-">
-
-<DatePicker
-selected={selectedDate}
-onChange={(date:Date | null)=>
-setSelectedDate(date)
-}
-dateFormat="dd-MM-yyyy"
-className="
-bg-transparent
-text-white
-outline-none
-font-semibold
-w-[130px]
-cursor-pointer
-"
-/>
-</div>
-
-</div>
-
+<div className="mb-7">
+  <PageHeader
+    eyebrow="People"
+    title={employeeName}
+    description="Employee Dashboard"
+    actions={
+      <div className="bg-white/10 backdrop-blur-xl rounded-xl px-4 h-10 flex items-center">
+        <DatePicker
+          selected={selectedDate}
+          onChange={(date:Date | null)=> setSelectedDate(date)}
+          dateFormat="dd-MM-yyyy"
+          className="bg-transparent text-white outline-none font-semibold w-[110px] cursor-pointer"
+        />
+      </div>
+    }
+  />
 </div>
 
 

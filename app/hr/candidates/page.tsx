@@ -1289,7 +1289,7 @@ export default function HrCandidatesPage() {
                                 </div>
                                 <div className="min-w-0">
                                   <p className="text-xs font-bold text-slate-700 truncate">{DOCUMENT_TYPE_LABELS[d.document_type] || d.label}</p>
-                                  <p className="text-[10px] text-slate-400">
+                                  <p className="text-xs text-slate-400">
                                     {d.is_generated ? "Generated" : "Uploaded"} · {new Date(d.created_at).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}
                                     {d.emailed_at && (
                                       <span className="text-emerald-600 font-semibold"> · Sent {new Date(d.emailed_at).toLocaleDateString([], { month: "short", day: "numeric" })}</span>

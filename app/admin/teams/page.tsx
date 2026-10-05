@@ -482,7 +482,7 @@ export default function AdminTeamsPage() {
                   <div className="flex items-start justify-between gap-3 mb-3">
                     <div className="min-w-0">
                       <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold">Team Name</p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">Edit and press Save to rename</p>
+                      <p className="text-xs text-slate-400 mt-0.5">Edit and press Save to rename</p>
                     </div>
                     <button
                       onClick={() => setDeleteModalOpen(true)}
@@ -554,7 +554,7 @@ export default function AdminTeamsPage() {
                     <p className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold">
                       Members ({memberCountByTeam.get(selectedTeam.id) || 0})
                     </p>
-                    <p className="flex items-center gap-1 text-[10px] text-emerald-600 font-medium">
+                    <p className="flex items-center gap-1 text-xs text-emerald-600 font-medium">
                       <Check size={11} />
                       Changes save automatically
                     </p>
