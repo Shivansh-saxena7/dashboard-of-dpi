@@ -232,6 +232,40 @@ export function isNotificationWindowOpen(cal: WorkingCalendar | null | undefined
   return hour >= NOTIFY_START_HOUR_IST && hour < NOTIFY_END_HOUR_IST && !nonWorkingStatusAt(workingCal, ms).isNonWorking;
 }
 
+// "Timers paused" display (2026-10-07, Step 8) for the employee banner and
+// the lead-card badge — one wording everywhere. Null when the switch is
+// OFF or right now is a working moment. A range ending exactly at IST
+// midnight reads as "end of <previous day>", which is what Admin entered.
+export interface TimersPausedDisplay {
+  kind: NonWorkingKind;
+  reason: string | null;
+  until: Date;
+  untilLabel: string;
+}
+
+export function formatPauseUntil(until: TimeInput): string {
+  const ms = toMs(until);
+  const local = new Date(ms + IST_OFFSET_MS);
+  const atMidnight = local.getUTCHours() === 0 && local.getUTCMinutes() === 0;
+  const fmt = (d: number, withTime: boolean) =>
+    new Date(d).toLocaleString("en-IN", {
+      timeZone: "Asia/Kolkata",
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      ...(withTime ? { hour: "numeric", minute: "2-digit" } : {})
+    });
+  return atMidnight ? `end of ${fmt(ms - 1, false)}` : fmt(ms, true);
+}
+
+export function timersPausedDisplay(cal: WorkingCalendar | null | undefined, at: TimeInput = Date.now()): TimersPausedDisplay | null {
+  const workingCal = timerCalendar(cal);
+  if (!workingCal) return null;
+  const status = nonWorkingStatusAt(workingCal, at);
+  if (!status.isNonWorking) return null;
+  return { kind: status.kind, reason: status.reason, until: status.until, untilLabel: formatPauseUntil(status.until) };
+}
+
 // Is `at` non-working, and if so why and until when (the next working
 // moment, following back-to-back weekly-off days and ranges)? For the
 // "Timers paused till <date>" banner and for pausing sweeps/notifications.

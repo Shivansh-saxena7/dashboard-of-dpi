@@ -26,7 +26,7 @@ function loadLib(file) {
   new Function("module", "exports", "require", outputText)(mod, mod.exports, requireLib);
   return mod.exports;
 }
-const { workingAdd, workingElapsedMs, nonWorkingStatusAt, loadJobWorkingCalendar, isNotificationWindowOpen, timerMsUntil, DAY_MS } = loadLib("workingCalendar.ts");
+const { workingAdd, workingElapsedMs, nonWorkingStatusAt, loadJobWorkingCalendar, isNotificationWindowOpen, timerMsUntil, timersPausedDisplay, formatPauseUntil, DAY_MS } = loadLib("workingCalendar.ts");
 const { calculateSLAStatus, getRecycleCutoff } = loadLib("calculateSLAStatus.ts");
 const { recyclingTomorrowCutoff } = loadLib("recyclingTomorrow.ts");
 
@@ -143,6 +143,12 @@ async function main() {
     ["P1 pause ends Fri 12:00, now Mon 12:00, ON = 72 working h (warn)", timerMsUntil(tuesdayOff, ist("2026-10-16T12:00"), ist("2026-10-12T12:00")), 72 * HOUR],
     ["P2 same, OFF = 96h (no warn yet, old behaviour)", timerMsUntil(switchOff, ist("2026-10-16T12:00"), ist("2026-10-12T12:00")), 96 * HOUR],
     ["P3 already passed stays negative", timerMsUntil(tuesdayOff, ist("2026-10-12T11:00"), ist("2026-10-12T12:00")), -HOUR],
+    ["B1 banner ON, Tue: weekly off, till end of Tue", (() => { const d = timersPausedDisplay(tuesdayOff, ist("2026-10-13T10:00")); return d ? `${d.kind} | ${d.untilLabel}` : null; })(), "WEEKLY_OFF | end of Tue, 13 Oct"],
+    ["B2 banner ON, inside Admin pause Fri 13:00", (() => { const d = timersPausedDisplay(bothOn, ist("2026-10-16T13:00")); return d ? `${d.kind} | ${d.reason} | ${d.untilLabel}` : null; })(), "TIMER_PAUSE | TEST pause | Fri, 16 Oct, 6:00 pm"],
+    ["B3 banner ON, Tue + Wed holiday chain: till end of Wed", (() => { const d = timersPausedDisplay(holidayOn, ist("2026-10-13T10:00")); return d ? d.untilLabel : null; })(), "end of Wed, 14 Oct"],
+    ["B4 banner ON, Mon working = nothing", timersPausedDisplay(tuesdayOff, ist("2026-10-12T10:00")), null],
+    ["B5 banner OFF, Tue = nothing (old behaviour)", timersPausedDisplay(switchOff, ist("2026-10-13T10:00")), null],
+    ["B6 holiday ending at midnight reads as end of last day", formatPauseUntil(ist("2026-10-15T00:00")), "end of Wed, 14 Oct"],
     ["E1 sweep early exit ON, Tue 10:00 = weekly off until Wed 00:00", (() => { const st = nonWorkingStatusAt(tuesdayOff, ist("2026-10-13T10:00")); return st.isNonWorking ? st.until.getTime() : -1; })(), ist("2026-10-14T00:00")]
   );
 

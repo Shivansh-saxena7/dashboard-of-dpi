@@ -11,6 +11,8 @@ import { assignedByLabel, AssignedBySource } from "@/lib/assignedByDisplay";
 import { MemberAttendanceStatus } from "./TeamMemberCard";
 
 import RecycledBadge from "./RecycledBadge";
+import TimerPausedBadge from "./TimerPausedBadge";
+import { getRecycleCutoff } from "@/lib/calculateSLAStatus";
 interface TeamMemberDetailModalProps {
   member: { id: string; name: string };
   teamLeaderId: string;
@@ -33,6 +35,8 @@ interface MemberLead {
   recycleReason: string | null;
   recycledFromStatus: string | null;
   recycledFromStage: string | null;
+  // Step 8: recycle/SLA clock running (for the "Timer paused" badge).
+  clockRunning: boolean;
 }
 
 interface TeamNote {
@@ -108,9 +112,10 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
       .from("leads")
       .select(
         `
-        id, name, project, status, board_stage,
+        id, name, project, status, board_stage, lead_type, recycle_count, sla_deadline, is_personal_lead,
         lead_history!inner (
           id, assigned_by_type, recycle_reason, recycled_from_status, recycled_from_stage,
+          paused_until, pause_reason, last_activity_at, assigned_at, outcome_at,
           assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)
         )
         `,
@@ -129,7 +134,14 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
         project: string | null;
         status: string;
         board_stage: string | null;
-        lead_history: (AssignedBySource & { id: string; recycle_reason: string | null; recycled_from_status: string | null; recycled_from_stage: string | null })[] | null;
+        lead_type: string;
+        recycle_count: number | null;
+        sla_deadline: string | null;
+        is_personal_lead: boolean | null;
+        lead_history: (AssignedBySource & {
+          id: string; recycle_reason: string | null; recycled_from_status: string | null; recycled_from_stage: string | null;
+          paused_until: string | null; pause_reason: string | null; last_activity_at: string | null; assigned_at: string | null; outcome_at: string | null;
+        })[] | null;
       };
 
       const mapped = (data as unknown as RawLead[]).map((lead) => {
@@ -147,7 +159,28 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
             : null,
           recycleReason: activeHistory?.recycle_reason ?? null,
           recycledFromStatus: activeHistory?.recycled_from_status ?? null,
-          recycledFromStage: activeHistory?.recycled_from_stage ?? null
+          recycledFromStage: activeHistory?.recycled_from_stage ?? null,
+          // Same rule as the employee/admin cards: a recycle cutoff exists
+          // (null for paused/locked/personal/terminal leads), or a NEW
+          // lead's SLA deadline is still ahead and the lead isn't paused.
+          clockRunning:
+            getRecycleCutoff(
+              {
+                status: lead.status,
+                sla_deadline: lead.sla_deadline,
+                recycle_count: lead.recycle_count ?? 0,
+                lead_type: lead.lead_type,
+                board_stage: lead.board_stage,
+                paused_until: activeHistory?.paused_until ?? null,
+                last_activity_at: activeHistory?.last_activity_at ?? null,
+                pause_reason: activeHistory?.pause_reason ?? null,
+                assigned_at: activeHistory?.assigned_at ?? null
+              },
+              activeHistory?.outcome_at ?? null,
+              Boolean(lead.is_personal_lead)
+            ) !== null ||
+            (lead.status === "NEW" && !lead.is_personal_lead && Boolean(lead.sla_deadline) && new Date(lead.sla_deadline as string) > new Date() &&
+              !(activeHistory?.paused_until && new Date(activeHistory.paused_until) > new Date()))
         };
       });
 
@@ -305,7 +338,7 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
                     <div key={lead.id} className="rounded-xl bg-white border border-slate-100 p-3">
                       <p className="text-sm font-semibold text-slate-700 flex items-center gap-1.5 flex-wrap">{lead.name} <RecycledBadge reason={lead.recycleReason} fromStage={lead.recycledFromStage} fromStatus={lead.recycledFromStatus} /></p>
                       {lead.project && <p className="text-xs text-slate-500">{lead.project}</p>}
-                      <div className="flex items-center gap-1.5 mt-1.5">
+                      <div className="flex items-center flex-wrap gap-1.5 mt-1.5">
                         {statusDisplay && (
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusDisplay.badgeClassName}`}>
                             {statusDisplay.label}
@@ -316,6 +349,7 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
                             {boardStageDisplay.emoji} {boardStageDisplay.label}
                           </span>
                         )}
+                        <TimerPausedBadge clockRunning={lead.clockRunning} size="sm" />
                       </div>
 
                       {lead.assignedByName && (

@@ -57,6 +57,7 @@ const menuSections=[
     title:"System",
     items:[
       { name:"Settings", href:"/admin/settings", icon:"⚙️" },
+      { name:"Non-working Days", href:"/admin/non-working-days", icon:"⏸️" },
       { name:"System Health", href:"/admin/system-health", icon:"🩺" },
       { name:"Backup Status", href:"/admin/backup-status", icon:"🛟" }
     ]

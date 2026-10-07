@@ -13,6 +13,7 @@ import NotificationModal from "./NotificationModal";
 import { showFocusReminderToast } from "./FocusReminderToast";
 import { FOCUS_REMINDER_TYPES } from "@/lib/focusReminders";
 import BookingCelebrationModal from "./BookingCelebrationModal";
+import TimersPausedBanner from "./TimersPausedBanner";
 import LeaderboardPopupModal from "./LeaderboardPopupModal";
 import { getEmployeeTabs } from "./EmployeeTabBar";
 import { getISTParts, ymd, formatShortDate, getMostRecentCompletedWeek, weekEndKey } from "@/lib/leaderboardWeek";
@@ -430,6 +431,8 @@ useEffect(() => {
     <>
       {/* HEADER */}
       <div className="w-full sticky top-0 z-50 backdrop-blur-xl bg-gradient-to-r from-white/70 via-blue-100/60 to-white/70 border-b border-white/30 shadow-lg">
+        {/* Working-calendar Step 8: only renders while timers are paused (switch ON). */}
+        <TimersPausedBanner />
         <div className="w-full px-3 lg:px-5 h-16 flex justify-between items-center">
          <div className="group flex items-center gap-2 sm:gap-3 cursor-pointer min-w-0 flex-1">
   <Image

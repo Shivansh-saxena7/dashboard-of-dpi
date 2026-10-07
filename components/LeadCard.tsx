@@ -15,6 +15,7 @@ import { rememberCalledCard } from "@/lib/lastCalledLead";
 import type { LeadSibling } from "@/lib/useLeadSiblings";
 import ExistingClientBadge from "./ExistingClientBadge";
 import RecycledBadge from "./RecycledBadge";
+import TimerPausedBadge from "./TimerPausedBadge";
 
 interface LeadCardLead {
   id: string;
@@ -340,6 +341,9 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
             {slaBadge.label}
           </span>
         )}
+
+        {/* Step 8: weekly off / Admin pause — only on leads whose recycle or SLA clock is running. */}
+        <TimerPausedBadge clockRunning={Boolean(recycleCutoff) || (slaStatus === "WITHIN_SLA" && Boolean(lead.sla_deadline))} />
 
         {lead.call_count > 0 && (
           <span className="text-[11px] font-medium text-slate-400 px-1">

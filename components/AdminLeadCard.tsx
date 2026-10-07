@@ -14,6 +14,7 @@ import { DAY_MS, timerCalendar, workingElapsedMs } from "@/lib/workingCalendar";
 import AdminLeadHistoryModal from "./AdminLeadHistoryModal";
 import ExistingClientBadge from "./ExistingClientBadge";
 import RecycledBadge from "./RecycledBadge";
+import TimerPausedBadge from "./TimerPausedBadge";
 import type { LeadSibling } from "@/lib/useLeadSiblings";
 
 const RECYCLE_REASON_LABEL: Record<RecycleCutoffReason, string> = {
@@ -464,6 +465,9 @@ function AdminLeadCard({
             🌴 Timer Paused — Owner on Leave
           </span>
         )}
+        {/* Step 8: weekly off / Admin pause. recycleCutoff is already null for
+            paused, on-leave, personal and terminal leads, so those never get it. */}
+        <TimerPausedBadge clockRunning={Boolean(recycleCutoff)} />
       </div>
 
       {(lead.recycleCount > 0 || lead.recycleReason || (lead.siblings && lead.siblings.length > 0)) && (

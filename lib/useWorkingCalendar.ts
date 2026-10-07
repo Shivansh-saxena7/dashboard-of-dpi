@@ -10,7 +10,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { fetchWorkingCalendar, DAY_MS, type WorkingCalendar } from "@/lib/workingCalendar";
+import { fetchWorkingCalendar, timersPausedDisplay, DAY_MS, type TimersPausedDisplay, type WorkingCalendar } from "@/lib/workingCalendar";
 import { reportClientError } from "@/lib/reportClientError";
 
 const REFRESH_MS = 10 * 60 * 1000;
@@ -41,6 +41,35 @@ export function loadWorkingCalendar(): Promise<WorkingCalendar | null> {
       inFlight = null;
     });
   return inFlight;
+}
+
+// One shared minute tick for every "timers paused" banner/badge on the
+// page, so a pause that ends while the page is open disappears by itself.
+let minuteTimer: ReturnType<typeof setInterval> | null = null;
+const minuteListeners = new Set<(now: number) => void>();
+
+function useMinuteTick(): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    minuteListeners.add(setNow);
+    if (!minuteTimer) minuteTimer = setInterval(() => minuteListeners.forEach((listener) => listener(Date.now())), 60 * 1000);
+    return () => {
+      minuteListeners.delete(setNow);
+      if (minuteListeners.size === 0 && minuteTimer) {
+        clearInterval(minuteTimer);
+        minuteTimer = null;
+      }
+    };
+  }, []);
+  return now;
+}
+
+// Step 8: "Timers paused" right now (weekly off / Admin range), or null
+// when timers are running or the working-days switch is OFF.
+export function useTimersPaused(): TimersPausedDisplay | null {
+  const calendar = useWorkingCalendar();
+  const now = useMinuteTick();
+  return timersPausedDisplay(calendar, now);
 }
 
 export function useWorkingCalendar(): WorkingCalendar | null {
