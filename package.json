@@ -4,11 +4,13 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node scripts/check-unbounded-queries.js",
+    "prebuild": "node scripts/check-unbounded-queries.js && node scripts/check-working-calendar.js",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "check:unbounded-queries": "node scripts/check-unbounded-queries.js"
+    "check:unbounded-queries": "node scripts/check-unbounded-queries.js",
+    "check:working-calendar": "node scripts/check-working-calendar.js",
+    "check:working-calendar-parity": "node --env-file=.env.local scripts/check-working-calendar-parity.mjs"
   },
   "dependencies": {
     "@supabase/auth-helpers-nextjs": "^0.15.0",
