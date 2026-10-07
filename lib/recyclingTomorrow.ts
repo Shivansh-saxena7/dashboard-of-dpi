@@ -1,5 +1,5 @@
 import { getRecycleCutoff } from "./calculateSLAStatus.ts";
-import type { WorkingCalendar } from "./workingCalendar.ts";
+import { timerMsUntil, type WorkingCalendar } from "./workingCalendar.ts";
 
 type SLALead = Parameters<typeof getRecycleCutoff>[0];
 
@@ -28,13 +28,14 @@ export function recyclingTomorrowCutoff(
   isPersonalLead: boolean,
   now: number = Date.now(),
   // Passed straight to getRecycleCutoff so "recycles at" always matches
-  // the sweep. The 24h "tomorrow" window itself is still calendar time
-  // (working-days version is Step 6).
+  // the sweep. With the switch ON the 24h "tomorrow" window also counts
+  // working time only (Step 6) — e.g. Monday evening, a lead due Wednesday
+  // noon is "tomorrow" because Tuesday is the weekly off.
   calendar: WorkingCalendar | null = null
 ): Date | null {
   if (!isWorthSaving(lead.status, callCount)) return null;
   const cutoff = getRecycleCutoff(lead, lastOutcomeAt, isPersonalLead, calendar);
   if (!cutoff) return null;
   const msLeft = cutoff.cutoffAt.getTime() - now;
-  return msLeft > 0 && msLeft <= DAY_MS ? cutoff.cutoffAt : null;
+  return msLeft > 0 && timerMsUntil(calendar, cutoff.cutoffAt, now) <= DAY_MS ? cutoff.cutoffAt : null;
 }

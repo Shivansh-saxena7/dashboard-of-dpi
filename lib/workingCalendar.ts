@@ -204,6 +204,34 @@ export function workingElapsedMs(cal: WorkingCalendar, from: TimeInput, to: Time
   return total;
 }
 
+// Time left until `to`, counted the way lead timers count: working time
+// when the switch is ON, plain milliseconds when OFF / no calendar. Never
+// positive for a moment already passed (same sign as to - from).
+export function timerMsUntil(cal: WorkingCalendar | null | undefined, to: TimeInput, from: TimeInput = Date.now()): number {
+  const fromMs = toMs(from);
+  const toMsValue = toMs(to);
+  if (toMsValue <= fromMs) return toMsValue - fromMs;
+  const workingCal = timerCalendar(cal);
+  return workingCal ? workingElapsedMs(workingCal, fromMs, toMsValue) : toMsValue - fromMs;
+}
+
+// Employee reminder window (2026-10-07, Step 6). With the switch ON,
+// LEAD_REMINDER / RECYCLE_TOMORROW / PAUSE_EXPIRY_WARNING only go out
+// 9 AM-8 PM IST at a working moment (not the weekly off, not inside an
+// Admin range). Outside it they are HELD, not dropped: nothing is marked
+// sent, so the next run inside the window sends them. OFF / no calendar =
+// always open (the pre-switch behaviour).
+export const NOTIFY_START_HOUR_IST = 9;
+export const NOTIFY_END_HOUR_IST = 20;
+
+export function isNotificationWindowOpen(cal: WorkingCalendar | null | undefined, at: TimeInput = Date.now()): boolean {
+  const workingCal = timerCalendar(cal);
+  if (!workingCal) return true;
+  const ms = toMs(at);
+  const hour = new Date(ms + IST_OFFSET_MS).getUTCHours();
+  return hour >= NOTIFY_START_HOUR_IST && hour < NOTIFY_END_HOUR_IST && !nonWorkingStatusAt(workingCal, ms).isNonWorking;
+}
+
 // Is `at` non-working, and if so why and until when (the next working
 // moment, following back-to-back weekly-off days and ranges)? For the
 // "Timers paused till <date>" banner and for pausing sweeps/notifications.

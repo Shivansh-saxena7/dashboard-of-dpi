@@ -4,7 +4,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createMonitoredClient, withMonitoring } from "../_shared/monitoring.ts";
 import { fetchAllRows } from "../../../lib/fetchAllRows.ts";
 import { recyclingTomorrowCutoff } from "../../../lib/recyclingTomorrow.ts";
-import { loadJobWorkingCalendar } from "../../../lib/workingCalendar.ts";
+import { isNotificationWindowOpen, loadJobWorkingCalendar, nonWorkingStatusAt, timerCalendar } from "../../../lib/workingCalendar.ts";
 import { logAnomaly } from "../../../lib/logAnomaly.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 
@@ -34,7 +34,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 // Once only, with no new column: skip when this owner already has a
 // RECYCLE_TOMORROW notification for the lead created since their CURRENT
 // assignment began — a reassigned lead's new owner gets their own reminder.
-async function sendRecycleTomorrowReminders(supabase: any) {
+async function sendRecycleTomorrowReminders(supabase: any, workingCalendar: any) {
   const istHour = Number(new Intl.DateTimeFormat("en-GB", { hour: "numeric", hour12: false, timeZone: "Asia/Kolkata" }).format(new Date()));
   if (istHour < 9 || istHour >= 20) {
     return { skipped: "outside 9 AM-8 PM IST", istHour };
@@ -57,34 +57,8 @@ async function sendRecycleTomorrowReminders(supabase: any) {
   );
   if (error) return { error: error.message };
 
-  // Working calendar (Step 4) — "recycles at" must match the sweep. Failed
-  // load (see loadJobWorkingCalendar): switch OFF = carry on with calendar
-  // time + a warning; switch ON = skip this run's alerts (never warn with
-  // a wrong time) + a warning, so the skip is never silent.
-  const source = "check-lead-reminders:working-calendar";
-  const calendarLoad = await loadJobWorkingCalendar(
-    supabase,
-    async () => {
-      const { data, error: switchError } = await supabase
-        .from("lead_engine_settings")
-        .select("working_days_timers_enabled")
-        .eq("id", 1)
-        .single();
-      if (switchError) throw switchError;
-      return data?.working_days_timers_enabled === true;
-    },
-    (message, context) => logAnomaly(supabase, { source, severity: "warning", message, context })
-  );
-  if (calendarLoad.skipTimerWork) {
-    await logAnomaly(supabase, {
-      source,
-      severity: "warning",
-      message: "Working calendar failed to load with the working-days switch ON (or unreadable); Recycling Tomorrow alerts skipped this run",
-      context: { error: calendarLoad.error }
-    });
-    return { skipped: "working calendar unavailable", error: calendarLoad.error };
-  }
-  const workingCalendar = calendarLoad.calendar;
+  // Working calendar: loaded once per run in the handler below (Step 6),
+  // so "recycles at" matches the sweep.
 
   const now = Date.now();
   const due = (followups || [])
@@ -162,6 +136,52 @@ serve(withMonitoring("check-lead-reminders", async () => {
 
     const supabase = createMonitoredClient("check-lead-reminders");
 
+    // Working calendar (Steps 4 + 6), once per run. Failed load (see
+    // loadJobWorkingCalendar): switch OFF = carry on exactly as before + a
+    // warning; switch ON = hold this run's reminders (never send at a
+    // wrong time) + a warning, so the hold is never silent.
+    const calendarSource = "check-lead-reminders:working-calendar";
+    const calendarLoad = await loadJobWorkingCalendar(
+      supabase,
+      async () => {
+        const { data, error: switchError } = await supabase
+          .from("lead_engine_settings")
+          .select("working_days_timers_enabled")
+          .eq("id", 1)
+          .single();
+        if (switchError) throw switchError;
+        return data?.working_days_timers_enabled === true;
+      },
+      (message, context) => logAnomaly(supabase, { source: calendarSource, severity: "warning", message, context })
+    );
+    if (calendarLoad.skipTimerWork) {
+      await logAnomaly(supabase, {
+        source: calendarSource,
+        severity: "warning",
+        message: "Working calendar failed to load with the working-days switch ON (or unreadable); reminders held this run",
+        context: { error: calendarLoad.error }
+      });
+      return new Response(
+        JSON.stringify({ success: true, held: "working calendar unavailable", error: calendarLoad.error }),
+        { headers: { "Content-Type": "application/json" } }
+      );
+    }
+    const workingCalendar = calendarLoad.calendar;
+
+    // Step 6 (2026-10-07): with the switch ON, LEAD_REMINDER and
+    // RECYCLE_TOMORROW only go out 9 AM-8 PM IST on a working day. Outside
+    // that window this run sends nothing and marks nothing — due reminders
+    // stay unnotified and go out on the first run inside the window (the
+    // next working day ~9:30 AM, this cron runs at :30 IST). 200, so the
+    // heartbeat is still written. OFF = always open (old behaviour).
+    if (!isNotificationWindowOpen(workingCalendar)) {
+      const nonWorking = timerCalendar(workingCalendar) ? nonWorkingStatusAt(workingCalendar) : { isNonWorking: false };
+      return new Response(
+        JSON.stringify({ success: true, held: "outside working notification window", nonWorking }),
+        { headers: { "Content-Type": "application/json" } }
+      );
+    }
+
     const { data: dueNotes, error: dueNotesError } = await supabase
       .from("lead_notes")
       .select(
@@ -230,7 +250,7 @@ serve(withMonitoring("check-lead-reminders", async () => {
 
     }
 
-    const recycleTomorrow = await sendRecycleTomorrowReminders(supabase);
+    const recycleTomorrow = await sendRecycleTomorrowReminders(supabase, workingCalendar);
 
     return new Response(
       JSON.stringify({ success: true, notifiedCount, totalChecked: (dueNotes || []).length, diagnostics, recycleTomorrow }),

@@ -8,7 +8,7 @@ import { calculateLeadAssignment } from "../../../lib/calculateLeadAssignment.ts
 import { isLeadTerminal } from "../../../lib/isLeadTerminal.ts";
 import { fetchAllRows } from "../../../lib/fetchAllRows.ts";
 import { logAnomaly } from "../../../lib/logAnomaly.ts";
-import { loadJobWorkingCalendar, timerCalendar } from "../../../lib/workingCalendar.ts";
+import { isNotificationWindowOpen, loadJobWorkingCalendar, nonWorkingStatusAt, timerCalendar, timerMsUntil } from "../../../lib/workingCalendar.ts";
 
 // Backlog-recycle cap (2026-10-03). Follow-up-inactivity / Data-max-
 // attempts recycles were silently failing on every sweep since
@@ -94,6 +94,21 @@ serve(withMonitoring("recycle-stale-leads", async () => {
     }
     const workingCalendar = calendarLoad.calendar;
     const workingDaysLabel = timerCalendar(workingCalendar) ? "working days" : "days";
+
+    // Step 6 (2026-10-07): with the switch ON, the whole sweep rests during
+    // non-working time (weekly off / Admin holiday or timer-pause range) —
+    // no recycles, no warnings; timers don't count that time anyway. A 200
+    // response, so withMonitoring still writes the heartbeat and the
+    // watchdog doesn't raise a false "not running" alarm.
+    if (timerCalendar(workingCalendar)) {
+      const nonWorking = nonWorkingStatusAt(workingCalendar);
+      if (nonWorking.isNonWorking) {
+        return new Response(
+          JSON.stringify({ success: true, skipped: "NON_WORKING_TIME", kind: nonWorking.kind, reason: nonWorking.reason, until: nonWorking.until }),
+          { headers: { "Content-Type": "application/json" } }
+        );
+      }
+    }
 
     // employees(is_active) joined so the multi-employee group-recycle
     // branch below can skip a deactivated member's turn without a
@@ -569,10 +584,15 @@ serve(withMonitoring("recycle-stale-leads", async () => {
         // creation." Only the SNOOZE/VISIT_LOCK reasons get a
         // heads-up; Pending-Verification only ever fires its
         // "expired, go act on it" notice below.
+        // Step 6: with the switch ON, "3 days before" counts working
+        // days, and the heads-up waits for the 9 AM-8 PM working-day
+        // window (held, not dropped — the sent flag stays unset until it
+        // actually goes out). OFF = exactly the old condition.
         if (
           !isPendingVerification &&
           msUntilExpiry > 0 &&
-          msUntilExpiry <= threeDaysMs &&
+          timerMsUntil(workingCalendar, pausedUntilDate) <= threeDaysMs &&
+          isNotificationWindowOpen(workingCalendar) &&
           !activeHistory.pause_expiry_warning_sent_at
         ) {
 

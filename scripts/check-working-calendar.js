@@ -26,7 +26,7 @@ function loadLib(file) {
   new Function("module", "exports", "require", outputText)(mod, mod.exports, requireLib);
   return mod.exports;
 }
-const { workingAdd, workingElapsedMs, nonWorkingStatusAt, loadJobWorkingCalendar, DAY_MS } = loadLib("workingCalendar.ts");
+const { workingAdd, workingElapsedMs, nonWorkingStatusAt, loadJobWorkingCalendar, isNotificationWindowOpen, timerMsUntil, DAY_MS } = loadLib("workingCalendar.ts");
 const { calculateSLAStatus, getRecycleCutoff } = loadLib("calculateSLAStatus.ts");
 const { recyclingTomorrowCutoff } = loadLib("recyclingTomorrow.ts");
 
@@ -121,6 +121,29 @@ async function main() {
     ["F5 RPC throws + switch ON = skip run", await jobLoad({ rpc: rpcThrows, switchOn: true }), "calendar=null skip=true warnings=0"],
     ["F6 RPC error + switch unreadable = skip run (safe side)", await jobLoad({ rpc: rpcError, switchOn: "throws" }), "calendar=null skip=true warnings=0"],
     ["F7 OFF fallback (null calendar) = old calendar-day cutoff", cutoffMs(followup(monAct), null), ist("2026-10-18T17:00")]
+  );
+
+  // Step 6 (2026-10-07): notification window, working-day "tomorrow",
+  // working-day pause-expiry heads-up. OFF must equal the old behaviour.
+  const bothOn = { ...withBoth, timersEnabled: true };
+  const wedAct = ist("2026-10-07T12:00");
+  const tomorrow = (nowMs, cal) => recyclingTomorrowCutoff(followup(wedAct), null, 0, false, nowMs, cal)?.getTime() ?? null;
+  cases.push(
+    ["W1 window ON, Mon 10:00 = open", isNotificationWindowOpen(tuesdayOff, ist("2026-10-12T10:00")), true],
+    ["W2 window ON, Mon 08:30 = held", isNotificationWindowOpen(tuesdayOff, ist("2026-10-12T08:30")), false],
+    ["W3 window ON, Mon 20:30 = held", isNotificationWindowOpen(tuesdayOff, ist("2026-10-12T20:30")), false],
+    ["W4 window ON, Tue (weekly off) 10:00 = held", isNotificationWindowOpen(tuesdayOff, ist("2026-10-13T10:00")), false],
+    ["W5 window ON, inside Admin pause Fri 13:00 = held", isNotificationWindowOpen(bothOn, ist("2026-10-16T13:00")), false],
+    ["W6 window ON, Fri 19:00 after pause = open", isNotificationWindowOpen(bothOn, ist("2026-10-16T19:00")), true],
+    ["W7 window OFF, Tue 10:00 = open (old behaviour)", isNotificationWindowOpen(switchOff, ist("2026-10-13T10:00")), true],
+    ["W8 window, no calendar, 02:00 = open (old behaviour)", isNotificationWindowOpen(null, ist("2026-10-13T02:00")), true],
+    ["R1 Recycling Tomorrow ON, Mon 18:00: due Wed 12:00 (18 working h) = flagged", tomorrow(ist("2026-10-12T18:00"), tuesdayOff), ist("2026-10-14T12:00")],
+    ["R2 Recycling Tomorrow OFF, Mon 18:00: old cutoff Tue 12:00 = flagged", tomorrow(ist("2026-10-12T18:00"), switchOff), ist("2026-10-13T12:00")],
+    ["R3 Recycling Tomorrow ON, Mon 10:00: 26 working h left = not flagged", tomorrow(ist("2026-10-12T10:00"), tuesdayOff), null],
+    ["P1 pause ends Fri 12:00, now Mon 12:00, ON = 72 working h (warn)", timerMsUntil(tuesdayOff, ist("2026-10-16T12:00"), ist("2026-10-12T12:00")), 72 * HOUR],
+    ["P2 same, OFF = 96h (no warn yet, old behaviour)", timerMsUntil(switchOff, ist("2026-10-16T12:00"), ist("2026-10-12T12:00")), 96 * HOUR],
+    ["P3 already passed stays negative", timerMsUntil(tuesdayOff, ist("2026-10-12T11:00"), ist("2026-10-12T12:00")), -HOUR],
+    ["E1 sweep early exit ON, Tue 10:00 = weekly off until Wed 00:00", (() => { const st = nonWorkingStatusAt(tuesdayOff, ist("2026-10-13T10:00")); return st.isNonWorking ? st.until.getTime() : -1; })(), ist("2026-10-14T00:00")]
   );
 
   let failures = 0;
