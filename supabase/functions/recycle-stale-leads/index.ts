@@ -8,6 +8,7 @@ import { calculateLeadAssignment } from "../../../lib/calculateLeadAssignment.ts
 import { isLeadTerminal } from "../../../lib/isLeadTerminal.ts";
 import { fetchAllRows } from "../../../lib/fetchAllRows.ts";
 import { logAnomaly } from "../../../lib/logAnomaly.ts";
+import { loadJobWorkingCalendar, timerCalendar } from "../../../lib/workingCalendar.ts";
 
 // Backlog-recycle cap (2026-10-03). Follow-up-inactivity / Data-max-
 // attempts recycles were silently failing on every sweep since
@@ -73,6 +74,26 @@ serve(withMonitoring("recycle-stale-leads", async () => {
         { headers: { "Content-Type": "application/json" }, status: 500 }
       );
     }
+
+    // Working calendar (2026-10-07, Step 4) — weekly off + Admin
+    // non-working ranges + the master switch, one call per sweep. Failed
+    // load (see loadJobWorkingCalendar): switch OFF = carry on with
+    // calendar time + a warning; switch ON = skip this run (the 500 below
+    // is logged as an error and alerts Admin via withMonitoring) rather
+    // than recycle leads earlier than the working-day rule.
+    const calendarLoad = await loadJobWorkingCalendar(
+      supabase,
+      async () => settings.working_days_timers_enabled === true,
+      (message, context) => logAnomaly(supabase, { source: "recycle-stale-leads:working-calendar", severity: "warning", message, context })
+    );
+    if (calendarLoad.skipTimerWork) {
+      return new Response(
+        JSON.stringify({ success: false, step: "FETCH_WORKING_CALENDAR", error: calendarLoad.error }),
+        { headers: { "Content-Type": "application/json" }, status: 500 }
+      );
+    }
+    const workingCalendar = calendarLoad.calendar;
+    const workingDaysLabel = timerCalendar(workingCalendar) ? "working days" : "days";
 
     // employees(is_active) joined so the multi-employee group-recycle
     // branch below can skip a deactivated member's turn without a
@@ -727,7 +748,10 @@ serve(withMonitoring("recycle-stale-leads", async () => {
         // as a complete no-op (same as any terminal/paused lead) —
         // confirmed by reading every branch below that acts on
         // slaStatus, none of which match NOT_APPLICABLE.
-        lead.is_personal_lead
+        lead.is_personal_lead,
+        // Working calendar (Step 4) — only changes anything when the
+        // master switch is ON (Follow-up inactivity clock only).
+        workingCalendar
       );
 
       if (slaStatus === "JUNK_ELIGIBLE") {
@@ -794,7 +818,7 @@ serve(withMonitoring("recycle-stale-leads", async () => {
             employee_id: lead.current_owner_id,
             employee_name: employee?.name || "",
             title: "Follow-up needs attention",
-            message: `A lead in your Follow-up/Visit list hasn't had any activity in ${FOLLOWUP_INACTIVITY_WARNING_DAYS} days — follow up soon or it may be reassigned to another team member.`,
+            message: `A lead in your Follow-up/Visit list hasn't had any activity in ${FOLLOWUP_INACTIVITY_WARNING_DAYS} ${workingDaysLabel} — follow up soon or it may be reassigned to another team member.`,
             type: "SLA_WARNING",
             is_read: false,
             // Notification-Call-Action (2026-09-23) -- see

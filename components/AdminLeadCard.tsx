@@ -9,6 +9,8 @@ import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
 import { FOLLOWUP_INACTIVITY_WARNING_DAYS, FOLLOWUP_INACTIVITY_RECYCLE_DAYS, getRecycleCutoff, RecycleCutoffReason } from "@/lib/calculateSLAStatus";
 import { isLeadTerminal } from "@/lib/isLeadTerminal";
+import { useWorkingCalendar } from "@/lib/useWorkingCalendar";
+import { DAY_MS, timerCalendar, workingElapsedMs } from "@/lib/workingCalendar";
 import AdminLeadHistoryModal from "./AdminLeadHistoryModal";
 import ExistingClientBadge from "./ExistingClientBadge";
 import RecycledBadge from "./RecycledBadge";
@@ -166,6 +168,7 @@ function AdminLeadCard({
   selected = false,
   onToggleSelect
 }: AdminLeadCardProps) {
+  const workingCalendar = useWorkingCalendar();
 
   const [historyOpen, setHistoryOpen] = useState(false);
   const [reassignOpen, setReassignOpen] = useState(false);
@@ -226,8 +229,13 @@ function AdminLeadCard({
     !isTerminal &&
     (lead.pauseReason === "VISIT_PENDING_VERIFICATION" ||
       Boolean(lead.pausedUntil && new Date(lead.pausedUntil) > new Date()));
+  // Working calendar (Step 4) — with the switch ON, "days since
+  // activity" counts working time only, same as the sweep.
+  const workingCal = timerCalendar(workingCalendar);
   const daysSinceActivity = lead.lastActivityAt
-    ? (Date.now() - new Date(lead.lastActivityAt).getTime()) / (1000 * 60 * 60 * 24)
+    ? workingCal
+      ? workingElapsedMs(workingCal, lead.lastActivityAt, Date.now()) / DAY_MS
+      : (Date.now() - new Date(lead.lastActivityAt).getTime()) / (1000 * 60 * 60 * 24)
     : null;
   const isBeyondLeadsStage = lead.leadType !== "DATA" && lead.boardStage !== "LEADS";
   // Employee Leave/Holiday gap (2026-08-23, Point A) — mirrors
@@ -270,7 +278,9 @@ function AdminLeadCard({
             assigned_at: lead.assignedAt,
             lead_type: lead.leadType
           },
-          lead.outcomeAt ?? null
+          lead.outcomeAt ?? null,
+          false,
+          workingCalendar
         )
       : null;
   const recycleCutoffMsRemaining = recycleCutoff ? recycleCutoff.cutoffAt.getTime() - Date.now() : 0;

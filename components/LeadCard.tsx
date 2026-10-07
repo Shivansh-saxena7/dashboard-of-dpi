@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { Phone, Timer, Repeat, MessageCircle, Zap } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { calculateSLAStatus, getRecycleCutoff, RecycleCutoffReason } from "@/lib/calculateSLAStatus";
+import { useWorkingCalendar } from "@/lib/useWorkingCalendar";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
@@ -117,6 +118,9 @@ function formatCountdown(msRemaining: number): string {
 // itself is already a stable object reference between renders unless
 // its actual data changed, straight from the Supabase response.
 function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) {
+  // Working calendar (Step 4) — same one the recycle sweep counts with,
+  // so the badge/countdown matches when the lead actually recycles.
+  const workingCalendar = useWorkingCalendar();
 
   const slaStatus = calculateSLAStatus(
     {
@@ -135,7 +139,8 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
     // Phase 4's recycling engine is the real consumer of.
     0,
     false,
-    lead.is_personal_lead
+    lead.is_personal_lead,
+    workingCalendar
   );
 
   // Stale/Recycle-Warning filter (2026-09-16) — same inputs already
@@ -152,7 +157,8 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
       assigned_at: lead.assigned_at
     },
     lead.outcome_at,
-    lead.is_personal_lead
+    lead.is_personal_lead,
+    workingCalendar
   );
 
   const statusDisplay = LEAD_STATUS_DISPLAY[lead.status];

@@ -4,6 +4,7 @@
 // (assignment engine, recycling Edge Function, SLA countdown UI).
 
 import { isLeadTerminal } from "./isLeadTerminal.ts";
+import { DAY_MS, timerCalendar, workingAdd, workingElapsedMs, type WorkingCalendar } from "./workingCalendar.ts";
 
 export type SLAStatus =
   | "WITHIN_SLA"
@@ -93,7 +94,13 @@ export function calculateSLAStatus(
   // defaults-false/backward-compatible shape as isOwnerOnLeave above —
   // every pre-existing caller that doesn't pass it behaves exactly as
   // before.
-  isPersonalLead: boolean = false
+  isPersonalLead: boolean = false,
+  // Working calendar (2026-10-07, Step 4) — from get_working_calendar.
+  // Only used when its master switch is ON; null/omitted/OFF = the
+  // Follow-up inactivity clock counts plain calendar time, exactly as
+  // before. ON = only working time counts (weekly off + Admin
+  // non-working ranges skipped). Cooldowns are not on it yet (Step 5).
+  calendar: WorkingCalendar | null = null
 ): SLAStatus {
 
   if (isPersonalLead) {
@@ -247,7 +254,10 @@ export function calculateSLAStatus(
       return "FOLLOWUP_WITHIN_WINDOW";
     }
 
-    const daysSinceActivity = (now.getTime() - lastActivity.getTime()) / (1000 * 60 * 60 * 24);
+    const workingCal = timerCalendar(calendar);
+    const daysSinceActivity = workingCal
+      ? workingElapsedMs(workingCal, lastActivity, now) / DAY_MS
+      : (now.getTime() - lastActivity.getTime()) / (1000 * 60 * 60 * 24);
 
     if (daysSinceActivity >= FOLLOWUP_INACTIVITY_RECYCLE_DAYS) {
       return "FOLLOWUP_INACTIVITY_RECYCLE_READY";
@@ -335,7 +345,11 @@ export function getRecycleCutoff(
   // a personal lead never shows a recycle countdown either, same
   // "no SLA/urgency whatsoever" requirement. Optional/defaults-false,
   // every pre-existing caller unaffected.
-  isPersonalLead: boolean = false
+  isPersonalLead: boolean = false,
+  // Same working calendar as calculateSLAStatus above, same meaning —
+  // the cutoff it returns must always agree with when the sweep
+  // actually recycles.
+  calendar: WorkingCalendar | null = null
 ): { cutoffAt: Date; reason: RecycleCutoffReason } | null {
 
   if (isPersonalLead) return null;
@@ -356,6 +370,13 @@ export function getRecycleCutoff(
     ((lead.board_stage && lead.board_stage !== "LEADS") || lead.status === "CONNECTED" || hasGenuineActivitySinceAssignment)
   ) {
     if (!lead.last_activity_at) return null;
+    const workingCal = timerCalendar(calendar);
+    if (workingCal) {
+      return {
+        cutoffAt: workingAdd(workingCal, lead.last_activity_at, FOLLOWUP_INACTIVITY_RECYCLE_DAYS * DAY_MS),
+        reason: "FOLLOWUP_INACTIVITY"
+      };
+    }
     const cutoffAt = new Date(lead.last_activity_at);
     cutoffAt.setDate(cutoffAt.getDate() + FOLLOWUP_INACTIVITY_RECYCLE_DAYS);
     return { cutoffAt, reason: "FOLLOWUP_INACTIVITY" };

@@ -4,6 +4,8 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createMonitoredClient, withMonitoring } from "../_shared/monitoring.ts";
 import { fetchAllRows } from "../../../lib/fetchAllRows.ts";
 import { recyclingTomorrowCutoff } from "../../../lib/recyclingTomorrow.ts";
+import { loadJobWorkingCalendar } from "../../../lib/workingCalendar.ts";
+import { logAnomaly } from "../../../lib/logAnomaly.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 
 // Scheduled sweep (pg_cron, once daily) — reminders now carry
@@ -55,6 +57,35 @@ async function sendRecycleTomorrowReminders(supabase: any) {
   );
   if (error) return { error: error.message };
 
+  // Working calendar (Step 4) — "recycles at" must match the sweep. Failed
+  // load (see loadJobWorkingCalendar): switch OFF = carry on with calendar
+  // time + a warning; switch ON = skip this run's alerts (never warn with
+  // a wrong time) + a warning, so the skip is never silent.
+  const source = "check-lead-reminders:working-calendar";
+  const calendarLoad = await loadJobWorkingCalendar(
+    supabase,
+    async () => {
+      const { data, error: switchError } = await supabase
+        .from("lead_engine_settings")
+        .select("working_days_timers_enabled")
+        .eq("id", 1)
+        .single();
+      if (switchError) throw switchError;
+      return data?.working_days_timers_enabled === true;
+    },
+    (message, context) => logAnomaly(supabase, { source, severity: "warning", message, context })
+  );
+  if (calendarLoad.skipTimerWork) {
+    await logAnomaly(supabase, {
+      source,
+      severity: "warning",
+      message: "Working calendar failed to load with the working-days switch ON (or unreadable); Recycling Tomorrow alerts skipped this run",
+      context: { error: calendarLoad.error }
+    });
+    return { skipped: "working calendar unavailable", error: calendarLoad.error };
+  }
+  const workingCalendar = calendarLoad.calendar;
+
   const now = Date.now();
   const due = (followups || [])
     .map((lead: any) => {
@@ -74,7 +105,8 @@ async function sendRecycleTomorrowReminders(supabase: any) {
         h.outcome_at,
         h.call_count ?? 0,
         Boolean(lead.is_personal_lead),
-        now
+        now,
+        workingCalendar
       );
       return cutoff ? { lead, assignedAt: h.assigned_at, cutoff } : null;
     })

@@ -21,6 +21,8 @@ import { istDateStringToRangeStartUTC, istDateStringToRangeEndUTC } from "@/lib/
 import { useLeadSiblings } from "@/lib/useLeadSiblings";
 import { leadOrigin, LeadOrigin } from "@/lib/recycleReasonDisplay";
 import { recyclingTomorrowCutoff } from "@/lib/recyclingTomorrow";
+import { useWorkingCalendar } from "@/lib/useWorkingCalendar";
+import type { WorkingCalendar } from "@/lib/workingCalendar";
 import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 
 interface LeadListProps {
@@ -109,7 +111,7 @@ function FilterSelect({
 // Recycling Tomorrow cutoff for a loaded lead (null = not in the filter).
 // Same lead shape the Recycling Soon filter builds for getRecycleCutoff.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function recyclingTomorrowCutoffFor(lead: any): Date | null {
+function recyclingTomorrowCutoffFor(lead: any, workingCalendar: WorkingCalendar | null): Date | null {
   const h = lead.lead_history[0];
   return recyclingTomorrowCutoff(
     {
@@ -124,7 +126,9 @@ function recyclingTomorrowCutoffFor(lead: any): Date | null {
     },
     h?.outcome_at ?? null,
     h?.call_count ?? 0,
-    Boolean(lead.is_personal_lead)
+    Boolean(lead.is_personal_lead),
+    Date.now(),
+    workingCalendar
   );
 }
 
@@ -134,6 +138,8 @@ export default function LeadList({ employeeId }: LeadListProps) {
   const [slaBreachHistory, setSlaBreachHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(new Date());
+  // Working calendar (Step 4) — same one LeadCard and the sweep use.
+  const workingCalendar = useWorkingCalendar();
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -526,7 +532,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
     }
 
     if (recyclingTomorrowFilter) {
-      result = result.filter((lead) => recyclingTomorrowCutoffFor(lead) !== null);
+      result = result.filter((lead) => recyclingTomorrowCutoffFor(lead, workingCalendar) !== null);
     }
 
     if (originFilter) {
@@ -630,7 +636,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
     result = [...result].sort((a, b) => {
       // Recycling Tomorrow: whichever goes first is shown first.
       if (recyclingTomorrowFilter) {
-        return (recyclingTomorrowCutoffFor(a)?.getTime() ?? Infinity) - (recyclingTomorrowCutoffFor(b)?.getTime() ?? Infinity);
+        return (recyclingTomorrowCutoffFor(a, workingCalendar)?.getTime() ?? Infinity) - (recyclingTomorrowCutoffFor(b, workingCalendar)?.getTime() ?? Infinity);
       }
 
 
@@ -656,7 +662,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
 
     return result;
 
-  }, [leads, activeTab, searchQuery, projectFilter, sourceFilter, statusFilter, recyclingSoonFilter, dateRangeFilter, customStart, customEnd, sortBy, personalOnlyFilter, originFilter, priorityFilter, recyclingTomorrowFilter]);
+  }, [leads, activeTab, searchQuery, projectFilter, sourceFilter, statusFilter, recyclingSoonFilter, dateRangeFilter, customStart, customEnd, sortBy, personalOnlyFilter, originFilter, priorityFilter, recyclingTomorrowFilter, workingCalendar]);
 
   // Same fix as app/admin/leads/page.tsx's cardLeads (2026-09-18) — the
   // render loop below used to build `lead={{ ...inline object... }}`
@@ -672,8 +678,8 @@ export default function LeadList({ employeeId }: LeadListProps) {
   // tick), this only stops that tick from ALSO rebuilding data that
   // hasn't changed.
   const recyclingTomorrowCount = useMemo(
-    () => leads.filter((lead) => recyclingTomorrowCutoffFor(lead) !== null).length,
-    [leads]
+    () => leads.filter((lead) => recyclingTomorrowCutoffFor(lead, workingCalendar) !== null).length,
+    [leads, workingCalendar]
   );
 
   // "Existing client" badge data for every loaded lead — refetched only

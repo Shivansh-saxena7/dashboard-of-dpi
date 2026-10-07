@@ -36,6 +36,9 @@ export interface WorkingCalendar {
   // 0 = Sunday ... 6 = Saturday, same as Postgres extract(dow ...).
   weeklyOffDay: number | null;
   ranges: NonWorkingRange[];
+  // lead_engine_settings.working_days_timers_enabled — the master switch.
+  // OFF = lead timers keep counting plain calendar time.
+  timersEnabled: boolean;
 }
 
 export type NonWorkingStatus =
@@ -85,6 +88,7 @@ export function parseWorkingCalendar(raw: any): WorkingCalendar {
   const weeklyOffDay = raw?.weekly_off_day;
   return {
     weeklyOffDay: typeof weeklyOffDay === "number" ? weeklyOffDay : null,
+    timersEnabled: raw?.timers_enabled === true,
     ranges: (Array.isArray(raw?.ranges) ? raw.ranges : []).map((r: any) => ({
       id: r.id ?? null,
       startsAt: toMs(r.starts_at),
@@ -108,6 +112,45 @@ export async function fetchWorkingCalendar(
   });
   if (error) throw new Error(`get_working_calendar: ${error.message}`);
   return parseWorkingCalendar(data);
+}
+
+// Background jobs (recycle-stale-leads, check-lead-reminders) load the
+// calendar through this one function so a failed load is handled the same
+// way everywhere (2026-10-07):
+// - loaded: use it (its timersEnabled decides calendar vs working time).
+// - failed, switch OFF: the job doesn't need it — carry on with null
+//   (plain calendar time, the pre-switch behaviour) and report a warning.
+// - failed, switch ON (or the switch itself can't be read): the caller
+//   must skip its timer work — falling back to calendar time would fire
+//   timers earlier than the working-day rule. The caller reports that.
+export async function loadJobWorkingCalendar(
+  supabase: { rpc: (fn: string, args: Record<string, unknown>) => PromiseLike<{ data: any; error: any }> },
+  readSwitchOn: () => Promise<boolean>,
+  logWarning: (message: string, context: Record<string, unknown>) => Promise<void>,
+  now: number = Date.now()
+): Promise<{ calendar: WorkingCalendar | null; skipTimerWork: boolean; error: string | null }> {
+  try {
+    const calendar = await fetchWorkingCalendar(supabase, now - 60 * DAY_MS, now + 400 * DAY_MS);
+    return { calendar, skipTimerWork: false, error: null };
+  } catch (err) {
+    const error = String(err instanceof Error ? err.message : err);
+    let switchOn = true;
+    try {
+      switchOn = await readSwitchOn();
+    } catch {
+      switchOn = true;
+    }
+    if (switchOn) return { calendar: null, skipTimerWork: true, error };
+    await logWarning("Working calendar failed to load; switch is OFF, so continuing on calendar time", { error });
+    return { calendar: null, skipTimerWork: false, error };
+  }
+}
+
+// The calendar a lead timer should count with: the calendar itself when
+// the master switch is ON, null (= plain calendar time, the pre-switch
+// behaviour) when it is OFF or no calendar was loaded.
+export function timerCalendar(cal: WorkingCalendar | null | undefined): WorkingCalendar | null {
+  return cal && cal.timersEnabled ? cal : null;
 }
 
 // from + amountMs of WORKING time. Starting inside non-working time waits

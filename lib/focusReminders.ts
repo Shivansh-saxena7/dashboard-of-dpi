@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import { recyclingTomorrowCutoff } from "@/lib/recyclingTomorrow";
+import { loadWorkingCalendar } from "@/lib/useWorkingCalendar";
 
 // Focus reminders (2026-10-05) — the notifications that get the prominent
 // toast instead of only a bell entry. Both are ordinary notification rows
@@ -52,6 +53,9 @@ export async function loadFocusReminderItems(employeeId: string): Promise<FocusR
     .eq("lead_history.is_active", true)
     .limit(50);
 
+  // Working calendar (Step 4) — the toast's "recycles in" must match the
+  // sweep and the lead card (shared, cached, one RPC per page).
+  const workingCalendar = await loadWorkingCalendar();
   const now = Date.now();
   const byLead = new Map<string, FocusReminderItem>();
 
@@ -78,7 +82,8 @@ export async function loadFocusReminderItems(employeeId: string): Promise<FocusR
         h.outcome_at,
         h.call_count ?? 0,
         Boolean(lead.is_personal_lead),
-        now
+        now,
+        workingCalendar
       );
       if (cutoff) {
         kind = "RECYCLE";
