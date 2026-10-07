@@ -169,6 +169,11 @@ serve(withMonitoring("import-leads-csv", async (req) => {
     // It returns one jsonb value, so no PostgREST row cap applies.
     let existingNormalized = new Set();
     let leadConflictIndexes = new Set();
+    // DATA Option B (2026-10-07): numbers that already belong to an active
+    // LEAD (any project/owner, status not JUNK) are skipped so the same
+    // client isn't cold-called by a second person. The rule is owned by
+    // find_active_lead_mobiles in the DB (shared with the import preview).
+    let activeLeadNormalized = new Set();
 
     if (leadType === "DATA") {
       const { data: existingLeads, error: existingLeadsError } = await fetchAllRows(() =>
@@ -190,6 +195,19 @@ serve(withMonitoring("import-leads-csv", async (req) => {
       existingNormalized = new Set(
         (existingLeads || []).map((l) => normalizeMobile(l.mobile))
       );
+
+      const { data: activeMobiles, error: activeMobilesError } = await supabase.rpc("find_active_lead_mobiles", {
+        p_mobiles: rows.map((row) => row.mobile || "")
+      });
+
+      if (activeMobilesError) {
+        return respond(
+          { success: false, step: "FIND_ACTIVE_LEAD_MOBILES", error: activeMobilesError.message },
+          500
+        );
+      }
+
+      activeLeadNormalized = new Set(activeMobiles || []);
     } else {
       const { data: conflicts, error: conflictsError } = await supabase.rpc("find_lead_conflicts", {
         p_candidates: rows.map((row) => ({ mobile: row.mobile || "", project: row.project || null }))
@@ -208,6 +226,7 @@ serve(withMonitoring("import-leads-csv", async (req) => {
     const seenInBatch = new Set();
     const toInsert = [];
     let duplicateCount = 0;
+    let activeLeadSkippedCount = 0;
 
     for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
 
@@ -222,6 +241,11 @@ serve(withMonitoring("import-leads-csv", async (req) => {
       // practice), but is re-applied here since this is the
       // authoritative check, not something to trust the client for.
       if (!normalized) {
+        continue;
+      }
+
+      if (leadType === "DATA" && activeLeadNormalized.has(normalized)) {
+        activeLeadSkippedCount++;
         continue;
       }
 
@@ -270,6 +294,7 @@ serve(withMonitoring("import-leads-csv", async (req) => {
         success: true,
         totalRows: rows.length,
         duplicateCount,
+        activeLeadSkippedCount,
         importedCount: 0,
         assignedCount: 0,
         distributionSummary: {}
@@ -292,7 +317,7 @@ serve(withMonitoring("import-leads-csv", async (req) => {
         filename: filename || null,
         uploaded_by_employee_id: auth.employeeId,
         total_rows: rows.length,
-        duplicate_count: duplicateCount,
+        duplicate_count: duplicateCount + activeLeadSkippedCount,
         imported_count: insertedLeads.length,
         excluded_employee_ids: excludedEmployeeIds.length > 0 ? excludedEmployeeIds : null,
         lead_type: leadType
@@ -319,7 +344,8 @@ serve(withMonitoring("import-leads-csv", async (req) => {
     console.log("import-leads-csv: leads inserted and tagged", {
       batchId: batchRow.id,
       importedCount: insertedLeads.length,
-      duplicateCount
+      duplicateCount,
+      activeLeadSkippedCount
     });
 
     // --- Data: manual per-employee distribution. Checked before
@@ -344,6 +370,7 @@ serve(withMonitoring("import-leads-csv", async (req) => {
           batchId: batchRow.id,
           totalRows: rows.length,
           duplicateCount,
+          activeLeadSkippedCount,
           importedCount: insertedLeads.length,
           assignedCount: 0,
           distributionSummary: {},
@@ -382,6 +409,7 @@ serve(withMonitoring("import-leads-csv", async (req) => {
         batchId: batchRow.id,
         totalRows: rows.length,
         duplicateCount,
+        activeLeadSkippedCount,
         importedCount: insertedLeads.length,
         assignedCount,
         distributionSummary,
@@ -430,6 +458,7 @@ serve(withMonitoring("import-leads-csv", async (req) => {
         batchId: batchRow.id,
         totalRows: rows.length,
         duplicateCount,
+        activeLeadSkippedCount,
         importedCount: insertedLeads.length,
         assignedCount: 0,
         distributionSummary: {},
@@ -454,6 +483,7 @@ serve(withMonitoring("import-leads-csv", async (req) => {
         batchId: batchRow.id,
         totalRows: rows.length,
         duplicateCount,
+        activeLeadSkippedCount,
         importedCount: insertedLeads.length,
         assignedCount: 0,
         distributionSummary: {},
@@ -498,6 +528,7 @@ serve(withMonitoring("import-leads-csv", async (req) => {
       batchId: batchRow.id,
       totalRows: rows.length,
       duplicateCount,
+      activeLeadSkippedCount,
       importedCount: insertedLeads.length,
       assignedCount,
       distributionSummary,

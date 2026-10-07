@@ -28,6 +28,8 @@ interface MappedRow {
   extra_data: Record<string, string> | null;
   isValid: boolean;
   isDuplicate: boolean;
+  // DATA only (2026-10-07): the number already belongs to an active LEAD.
+  isActiveLead?: boolean;
 }
 
 function FilterSelect({
@@ -542,12 +544,28 @@ export default function ImportLeadsPage() {
       );
       const existingNormalized = new Set((existing || []).map((l) => normalizeMobile(l.mobile)));
 
+      // Option B (2026-10-07): numbers that already belong to an active LEAD
+      // are skipped — same find_active_lead_mobiles rule the import itself
+      // applies, checked first so a row is counted once.
+      const { data: activeMobiles, error: activeMobilesError } = await supabase.rpc("find_active_lead_mobiles", {
+        p_mobiles: built.filter((row) => row.isValid).map((row) => row.mobile)
+      });
+
+      if (activeMobilesError) {
+        toast.error(activeMobilesError.message || "Could not check for active leads.");
+        setBuildingPreview(false);
+        return;
+      }
+
+      const activeLeadNormalized = new Set<string>(activeMobiles || []);
       const seen = new Set<string>();
 
       finalRows = built.map((row) => {
         if (!row.isValid) return { ...row, isDuplicate: false };
 
         const norm = normalizeMobile(row.mobile);
+        if (activeLeadNormalized.has(norm)) return { ...row, isDuplicate: false, isActiveLead: true };
+
         const isDuplicate = existingNormalized.has(norm) || seen.has(norm);
         seen.add(norm);
 
@@ -731,7 +749,8 @@ export default function ImportLeadsPage() {
     );
   }
 
-  const validCount = mappedRows.filter((r) => r.isValid && !r.isDuplicate).length;
+  const validCount = mappedRows.filter((r) => r.isValid && !r.isDuplicate && !r.isActiveLead).length;
+  const activeLeadCount = mappedRows.filter((r) => r.isValid && r.isActiveLead).length;
   const duplicateCount = mappedRows.filter((r) => r.isValid && r.isDuplicate).length;
   const invalidCount = mappedRows.filter((r) => !r.isValid).length;
   const currentStepIndex = STEPS.findIndex((s) => s.key === step);
@@ -1144,7 +1163,7 @@ export default function ImportLeadsPage() {
             )
           )}
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className={`grid gap-3 ${leadType === "DATA" ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3"}`}>
             <div className="rounded-xl bg-emerald-50 p-4">
               <p className="text-[10px] uppercase tracking-wide text-emerald-600 font-bold">Will Import</p>
               <p className="text-2xl font-bold text-emerald-700 mt-1">{validCount}</p>
@@ -1153,6 +1172,12 @@ export default function ImportLeadsPage() {
               <p className="text-[10px] uppercase tracking-wide text-amber-600 font-bold">Duplicates (skipped)</p>
               <p className="text-2xl font-bold text-amber-700 mt-1">{duplicateCount}</p>
             </div>
+            {leadType === "DATA" && (
+              <div className="rounded-xl bg-violet-50 p-4">
+                <p className="text-[10px] uppercase tracking-wide text-violet-600 font-bold">Already an active Lead (skipped)</p>
+                <p className="text-2xl font-bold text-violet-700 mt-1">{activeLeadCount}</p>
+              </div>
+            )}
             <div className="rounded-xl bg-red-50 p-4">
               <p className="text-[10px] uppercase tracking-wide text-red-600 font-bold">Missing Mobile</p>
               <p className="text-2xl font-bold text-red-700 mt-1">{invalidCount}</p>
@@ -1187,6 +1212,8 @@ export default function ImportLeadsPage() {
                     <td className="px-3 py-2">
                       {!row.isValid ? (
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-50 text-red-600">Missing mobile</span>
+                      ) : row.isActiveLead ? (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-50 text-violet-700">Active Lead — will skip</span>
                       ) : row.isDuplicate ? (
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">Duplicate — will skip</span>
                       ) : (
@@ -1285,6 +1312,12 @@ export default function ImportLeadsPage() {
               <p className="text-[10px] uppercase tracking-wide text-amber-600 font-bold">Duplicates Skipped</p>
               <p className="text-2xl font-bold text-amber-700 mt-1">{result.duplicateCount}</p>
             </div>
+            {leadType === "DATA" && typeof result.activeLeadSkippedCount === "number" && (
+              <div className="rounded-xl bg-violet-50 p-4">
+                <p className="text-[10px] uppercase tracking-wide text-violet-600 font-bold">Already an active Lead — skipped</p>
+                <p className="text-2xl font-bold text-violet-700 mt-1">{result.activeLeadSkippedCount}</p>
+              </div>
+            )}
           </div>
 
           {result.distributionSummary && Object.keys(result.distributionSummary).length > 0 && (
