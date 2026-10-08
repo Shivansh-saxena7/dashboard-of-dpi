@@ -13,6 +13,7 @@ import ExportPreviewTable from "@/components/ExportPreviewTable";
 import ManualLeadEntryModal from "@/components/ManualLeadEntryModal";
 import WeeklyLeaderboardView from "@/components/WeeklyLeaderboardView";
 import TicketsView from "@/components/TicketsView";
+import LegacyLookup from "@/components/LegacyLookup";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES } from "@/lib/leadBoardStageDisplay";
 import { exportLeadsToExcel, exportLeadsToPDF } from "@/lib/exportLeadsReport";
@@ -23,7 +24,7 @@ import { DateRangeOption, isWithinDateRange, dateRangeFilterLabel } from "@/lib/
 import { fetchAllRows } from "@/lib/fetchAllRows";
 import { normalizeMobile } from "@/lib/normalizeMobile";
 
-type ActiveTab = "LEADS" | "SUMMARY" | "VERIFY" | "SNOOZE" | "LEADERBOARD" | "TICKETS";
+type ActiveTab = "LEADS" | "SUMMARY" | "VERIFY" | "SNOOZE" | "LEADERBOARD" | "TICKETS" | "LEGACY";
 type SortOption = "NEWEST" | "OLDEST" | "SLA_URGENCY";
 type VisitStatusFilter = "PENDING" | "VERIFIED" | "DENIED" | "ALL";
 type SnoozeStatusFilter = "ACTIVE" | "EXPIRED" | "CANCELLED" | "ALL";
@@ -1253,7 +1254,8 @@ export default function CoordinatorDashboard() {
     { key: "VERIFY", label: "✅ Visit Verification", count: pendingVisitsCount },
     { key: "SNOOZE", label: "😴 Snooze Activity", count: snoozeLog.length },
     { key: "LEADERBOARD", label: "🏆 Leaderboard" },
-    { key: "TICKETS", label: "🎫 Tickets" }
+    { key: "TICKETS", label: "🎫 Tickets" },
+    { key: "LEGACY", label: "📒 Legacy Lookup" }
   ];
 
   if (loading) {
@@ -2131,6 +2133,9 @@ export default function CoordinatorDashboard() {
       {activeTab === "TICKETS" && (
         <TicketsView myEmployeeId={viewerEmployeeId} />
       )}
+
+      {/* Legacy Phase 3 (2026-10-08): typed-number lookup + "Make real lead". */}
+      {activeTab === "LEGACY" && <LegacyLookup />}
 
       {manualEntryOpen && (
         <ManualLeadEntryModal

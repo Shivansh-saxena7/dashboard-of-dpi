@@ -218,7 +218,7 @@ export default function NonWorkingDaysPage() {
       <PageHeader
         eyebrow="System"
         title="Non-working Days"
-        description="Holidays aur timer-pause ranges. Is time mein lead timers (recycle, follow-up, reminders) nahi chalte; khatam hone par bache hue time se resume hote hain. Weekly off Settings se aata hai."
+        description="Holidays and timer-pause ranges. Lead timers (recycle, follow-up, reminders) don't run during these; they resume with the time that was left. The weekly off comes from Settings."
       />
 
       {calendar && !switchOn && (
@@ -291,7 +291,7 @@ export default function NonWorkingDaysPage() {
             <p>{preview.paused_leads} Visit-lock / Snooze end date(s) will move forward.</p>
             <p>{preview.sla_leads} NEW lead SLA deadline(s) will move forward.</p>
             <p className="text-xs text-sky-700">
-              Cancel karne par (range shuru hone se pehle) ye dates wapas aa jayengi — sirf wo nahi jo is beech contacted/touched hui hon ya jinka original time nikal chuka ho. Range shuru hone ke baad cancel par kuch wapas nahi hota.
+              If you cancel before the range starts, these dates move back — except for leads contacted/touched in the meantime or whose original time has already passed. Cancelling after the range has started moves nothing back.
             </p>
           </div>
         )}
@@ -319,13 +319,13 @@ export default function NonWorkingDaysPage() {
           <div className="mb-3 rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-900 space-y-1">
             <p className="font-bold">Cancel &quot;{cancelPreview.period.reason}&quot;? — preview, nothing changed yet</p>
             {cancelPreview.revert.range_started ? (
-              <p>Range shuru ho chuki hai — koi date wapas nahi aayegi (wo time sach mein non-working tha). Aage ke liye timers phir se chalenge.</p>
+              <p>The range has already started — no dates will move back (that time really was non-working). Timers will run again from now on.</p>
             ) : (
               <>
-                <p>Wapas aayengi: {cancelPreview.revert.sla_revert} NEW-lead SLA deadline(s) aur {cancelPreview.revert.pause_revert} Visit-lock/Snooze date(s).</p>
+                <p>Will move back: {cancelPreview.revert.sla_revert} NEW-lead SLA deadline(s) and {cancelPreview.revert.pause_revert} Visit-lock/Snooze date(s).</p>
                 <p>
-                  Skip hongi: {cancelPreview.revert.skip_touched} contacted/touched lead(s), {cancelPreview.revert.skip_original_passed} jinka original time nikal chuka,{" "}
-                  {cancelPreview.revert.skip_value_changed} jinki date baad mein haath se badli.
+                  Will be skipped: {cancelPreview.revert.skip_touched} contacted/touched lead(s), {cancelPreview.revert.skip_original_passed} whose original time has passed,{" "}
+                  {cancelPreview.revert.skip_value_changed} whose date was changed manually since.
                 </p>
               </>
             )}

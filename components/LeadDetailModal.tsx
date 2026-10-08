@@ -252,7 +252,7 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
       const points = visitType === "VISIT" ? LEAD_POINTS.VISIT : LEAD_POINTS.REVISIT;
 
       if (visitType === "VISIT" && visitNoteRequired && visitNote.trim().length < 10) {
-        toast.error("Is personal lead ke liye visit ke baare mein chhota note likhein (kam se kam 10 characters).");
+        toast.error("Please add a short note about this visit (at least 10 characters) — this personal lead was created recently.");
         return;
       }
 
@@ -266,7 +266,7 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
       if (error) {
         toast.error(
           error.message?.includes("PERSONAL_LEAD_NOTE_REQUIRED")
-            ? "Is personal lead ke liye visit ke baare mein chhota note likhein (kam se kam 10 characters)."
+            ? "Please add a short note about this visit (at least 10 characters) — this personal lead was created recently."
             : error.message || "Could not log this visit."
         );
         return;
@@ -500,18 +500,18 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
 
               {visitPromptOpen ? (
                 <div>
-                  <p className="text-xs text-slate-500 mb-2">Pehli Visit hai ya Revisit?</p>
+                  <p className="text-xs text-slate-500 mb-2">Is this the first visit or a revisit?</p>
                   {visitNoteRequired && (
                     <div className="mb-2">
                       <p className="text-[11px] text-violet-700 mb-1">
-                        🔖 Ye personal lead abhi-abhi bani hai — First Visit ke liye chhota note zaroori hai (Coordinator ko dikhega).
+                        🔖 This personal lead was just created — a short note is required for the first visit (the Coordinator will see it).
                       </p>
                       <textarea
                         value={visitNote}
                         onChange={(e) => setVisitNote(e.target.value)}
                         rows={2}
                         maxLength={300}
-                        placeholder="e.g. Client mere saath site par aaye the"
+                        placeholder="e.g. Client came to the site with me"
                         className="w-full rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-violet-200"
                       />
                     </div>

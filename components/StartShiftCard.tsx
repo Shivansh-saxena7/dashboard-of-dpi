@@ -122,7 +122,7 @@ export default function StartShiftCard({ employeeId, compact = false }: StartShi
   const nonWorkingGate = shiftStartBlock(workingCalendar, Date.now(), { hasOverride: hasShiftOverride });
   const nonWorkingDayLabel = nonWorkingGate.blocked ? (nonWorkingGate.kind === "WEEKLY_OFF" ? "🗓️ Weekly off" : "🎉 Holiday") : null;
   const nonWorkingDayNote = nonWorkingGate.blocked
-    ? `${nonWorkingGate.kind === "WEEKLY_OFF" ? "Aaj weekly off hai" : `Aaj ${timerCalendar(workingCalendar)?.ranges.find((r) => r.startsAt <= Date.now() && r.endsAt > Date.now())?.reason || "holiday"} ki chhutti hai`} — shift start nahi ho sakti. Special working day ke liye Admin se baat karein.`
+    ? `${nonWorkingGate.kind === "WEEKLY_OFF" ? "Today is the weekly off" : `Today is a holiday (${timerCalendar(workingCalendar)?.ranges.find((r) => r.startsAt <= Date.now() && r.endsAt > Date.now())?.reason || "holiday"})`} — you can't start a shift. For a special working day, contact your Admin.`
     : null;
 
   useEffect(() => {

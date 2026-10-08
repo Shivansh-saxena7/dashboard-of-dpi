@@ -14,6 +14,7 @@ import toast from "react-hot-toast";
 import { Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import PageHeader from "@/components/PageHeader";
+import LegacyLookup from "@/components/LegacyLookup";
 import {
   detectLegacyMobileColumn,
   isHeaderlessFirstRow,
@@ -221,7 +222,7 @@ export default function LegacyNumbersPage() {
       <PageHeader
         eyebrow="Leads"
         title="Legacy Numbers"
-        description="Employees ki purani sheets ke numbers ka register. File browser mein hi padhi jaati hai — server ko sirf normalized mobile aur tab ka naam jaata hai; koi aur column nahi."
+        description="Register of mobile numbers from employees' old sheets. The file is read in your browser — only the normalized mobile number and the tab name are sent to the server; no other column."
       />
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-md p-5 space-y-4">
@@ -264,7 +265,7 @@ export default function LegacyNumbersPage() {
                           <input type="checkbox" checked={tab.include} onChange={(e) => updateTab(i, { include: e.target.checked })} />
                           {tab.name}
                         </label>
-                        <span className="block text-[11px] text-slate-400">header: {tab.hasHeader ? "haan" : "nahi"} (auto)</span>
+                        <span className="block text-[11px] text-slate-400">header row: {tab.hasHeader ? "yes" : "no"} (auto)</span>
                       </td>
                       <td className="py-2 pr-3">{dataRows(tab).length}</td>
                       <td className="py-2 pr-3">
@@ -274,7 +275,7 @@ export default function LegacyNumbersPage() {
                         </select>
                         {tab.mobileCol >= 0 && (
                           <span className={`block text-[11px] ${tab.mobileCol === tab.autoMobileCol ? "text-emerald-700" : "text-slate-500"}`}>
-                            {tab.mobileCol === tab.autoMobileCol ? "auto-picked ✓" : "manual"} · {Math.round(stats.fillRate * 100)}% bhara · {Math.round(stats.phoneShare * 100)}% number jaise
+                            {tab.mobileCol === tab.autoMobileCol ? "auto-picked ✓" : "manual"} · {Math.round(stats.fillRate * 100)}% filled · {Math.round(stats.phoneShare * 100)}% look like numbers
                           </span>
                         )}
                       </td>
@@ -324,6 +325,8 @@ export default function LegacyNumbersPage() {
           </>
         )}
       </div>
+
+      <LegacyLookup />
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-md p-5">
         <p className="text-sm font-bold text-slate-800 mb-1">Uploads</p>

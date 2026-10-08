@@ -93,7 +93,7 @@ export default function PersonalVisitsReportPage() {
       <PageHeader
         eyebrow="Leads"
         title="Personal Lead Visits"
-        description="Personal (self-added) leads jinki First Visit lead banne ke 72 ghante ke andar log hui. Naam/mobile nahi dikhaya jaata — sirf lead id, employee aur timing."
+        description="Personal (self-added) leads whose first visit was logged within 72 hours of the lead being created. Names and mobile numbers are not shown — only lead ID, employee and timing."
       />
 
       {loading ? (

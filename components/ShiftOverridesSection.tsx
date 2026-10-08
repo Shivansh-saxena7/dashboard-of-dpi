@@ -112,7 +112,7 @@ export default function ShiftOverridesSection() {
       <div>
         <p className="text-sm font-bold text-slate-800">Allow shift on…</p>
         <p className="text-xs text-slate-500 mt-0.5">
-          Weekly off ya Holiday par Start Shift band rehta hai. Special working day ke liye yahan se ek employee ya sabko allow karein.
+          Start Shift is blocked on the weekly off and on holidays. For a special working day, allow one employee or everyone here.
         </p>
       </div>
 

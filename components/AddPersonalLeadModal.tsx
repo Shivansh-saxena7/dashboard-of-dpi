@@ -80,7 +80,7 @@ export default function AddPersonalLeadModal({ onClose, onCreated, initialMobile
       // register. Whose it is is never shown. With the older server, data is
       // always a lead id, so this branch simply never runs.
       if (!data) {
-        toast.error("Yeh number pehle se system ya purane client record mein hai. Admin/Coordinator se baat karein.");
+        toast.error("This number is already in the system or in an old client record. Please contact your Admin/Coordinator.");
         return;
       }
 

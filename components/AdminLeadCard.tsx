@@ -467,6 +467,10 @@ function AdminLeadCard({
         )}
         {/* Step 8: weekly off / Admin pause. recycleCutoff is already null for
             paused, on-leave, personal and terminal leads, so those never get it. */}
+{/* Legacy Phase 3 (2026-10-08): lead made from an old client register. */}
+        {lead.source === "Legacy" && (
+          <span className="text-[11px] px-2.5 py-1 font-bold rounded-full bg-amber-50 text-amber-800 border border-amber-100">📒 Legacy</span>
+        )}
         <TimerPausedBadge clockRunning={Boolean(recycleCutoff)} />
       </div>
 

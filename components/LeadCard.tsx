@@ -343,6 +343,10 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
         )}
 
         {/* Step 8: weekly off / Admin pause — only on leads whose recycle or SLA clock is running. */}
+{/* Legacy Phase 3 (2026-10-08): lead made from an old client register. */}
+        {lead.source === "Legacy" && (
+          <span className="text-[11px] px-2.5 py-1 font-bold rounded-full bg-amber-50 text-amber-800 border border-amber-100">📒 Legacy</span>
+        )}
         <TimerPausedBadge clockRunning={Boolean(recycleCutoff) || (slaStatus === "WITHIN_SLA" && Boolean(lead.sla_deadline))} />
 
         {lead.call_count > 0 && (
