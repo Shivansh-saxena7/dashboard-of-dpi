@@ -32,6 +32,10 @@ export interface LeadDetailLead {
   pauseNote: string | null;
   pauseVerifiedByName: string | null;
   pauseVerifiedAt: string | null;
+  // Personal lead v2 (2026-10-08): a first visit on a personal lead less
+  // than 2h after it was created needs a note (log_site_visit_atomic).
+  isPersonalLead?: boolean;
+  createdAt?: string | null;
 }
 
 interface LeadNote {
@@ -70,6 +74,9 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
   const [submitting, setSubmitting] = useState(false);
 
   const [visitPromptOpen, setVisitPromptOpen] = useState(false);
+  const [visitNote, setVisitNote] = useState("");
+  const visitNoteRequired =
+    Boolean(lead.isPersonalLead) && Boolean(lead.createdAt) && Date.now() - Date.parse(lead.createdAt as string) < 2 * 60 * 60 * 1000;
   const [bookingConfirmOpen, setBookingConfirmOpen] = useState(false);
   const [moving, setMoving] = useState(false);
 
@@ -244,16 +251,27 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
 
       const points = visitType === "VISIT" ? LEAD_POINTS.VISIT : LEAD_POINTS.REVISIT;
 
+      if (visitType === "VISIT" && visitNoteRequired && visitNote.trim().length < 10) {
+        toast.error("Is personal lead ke liye visit ke baare mein chhota note likhein (kam se kam 10 characters).");
+        return;
+      }
+
       const { error } = await supabase.rpc("log_site_visit_atomic", {
         p_lead_id: lead.id,
         p_event_type: visitType,
-        p_points: points
+        p_points: points,
+        ...(visitType === "VISIT" && visitNote.trim() ? { p_note: visitNote.trim() } : {})
       });
 
       if (error) {
-        toast.error(error.message || "Could not log this visit.");
+        toast.error(
+          error.message?.includes("PERSONAL_LEAD_NOTE_REQUIRED")
+            ? "Is personal lead ke liye visit ke baare mein chhota note likhein (kam se kam 10 characters)."
+            : error.message || "Could not log this visit."
+        );
         return;
       }
+      setVisitNote("");
 
       toast.success(visitType === "VISIT" ? "First visit logged." : "Revisit logged.");
       setVisitPromptOpen(false);
@@ -483,6 +501,21 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
               {visitPromptOpen ? (
                 <div>
                   <p className="text-xs text-slate-500 mb-2">Pehli Visit hai ya Revisit?</p>
+                  {visitNoteRequired && (
+                    <div className="mb-2">
+                      <p className="text-[11px] text-violet-700 mb-1">
+                        🔖 Ye personal lead abhi-abhi bani hai — First Visit ke liye chhota note zaroori hai (Coordinator ko dikhega).
+                      </p>
+                      <textarea
+                        value={visitNote}
+                        onChange={(e) => setVisitNote(e.target.value)}
+                        rows={2}
+                        maxLength={300}
+                        placeholder="e.g. Client mere saath site par aaye the"
+                        className="w-full rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-violet-200"
+                      />
+                    </div>
+                  )}
                   <div className="flex gap-2">
                     <button
                       disabled={moving}

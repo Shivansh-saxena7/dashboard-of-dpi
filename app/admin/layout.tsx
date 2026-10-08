@@ -32,7 +32,8 @@ const menuSections=[
       { name:"Teams", href:"/admin/teams", icon:"👥" },
       { name:"Project Rules", href:"/admin/project-rules", icon:"📐" },
       { name:"Project Assets", href:"/admin/project-assets", icon:"🗂️" },
-      { name:"Meta Datasets", href:"/admin/meta-datasets", icon:"📡" }
+      { name:"Meta Datasets", href:"/admin/meta-datasets", icon:"📡" },
+      { name:"Personal Lead Visits", href:"/admin/personal-visits", icon:"🔖" }
     ]
   },
   {

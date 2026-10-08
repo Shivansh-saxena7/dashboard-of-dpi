@@ -994,7 +994,9 @@ export default function LeadList({ employeeId }: LeadListProps) {
             pauseReason: selectedLead.lead_history[0]?.pause_reason ?? null,
             pauseNote: selectedLead.lead_history[0]?.pause_note ?? null,
             pauseVerifiedByName: selectedLead.lead_history[0]?.pause_verified_by?.name ?? null,
-            pauseVerifiedAt: selectedLead.lead_history[0]?.pause_verified_at ?? null
+            pauseVerifiedAt: selectedLead.lead_history[0]?.pause_verified_at ?? null,
+            isPersonalLead: Boolean(selectedLead.is_personal_lead),
+            createdAt: selectedLead.created_at ?? null
           }}
           onClose={() => {
             // Scroll-preserve on detail-close (2026-10-01) — same gap

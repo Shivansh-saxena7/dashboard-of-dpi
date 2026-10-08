@@ -39,6 +39,17 @@ const ALL_STATUSES = Object.keys(LEAD_STATUS_DISPLAY);
 // needs to differ.
 const noopReserveTeam = () => {};
 
+// Personal lead v2 helpers (Verify tab).
+function shortDateTime(iso: string): string {
+  return new Date(iso).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+}
+function gapLabel(fromIso: string, toIso: string): string {
+  const minutes = Math.max(0, Math.round((Date.parse(toIso) - Date.parse(fromIso)) / 60000));
+  if (minutes < 60) return `${minutes} min`;
+  const hours = minutes / 60;
+  return hours < 48 ? `${Math.round(hours * 10) / 10} ghante` : `${Math.round(hours / 24)} din`;
+}
+
 interface SiteVisitRow {
   id: string;
   event_type: string;
@@ -50,7 +61,10 @@ interface SiteVisitRow {
   employees: { name: string } | null;
   verifier: { name: string } | null;
   denier: { name: string } | null;
-  leads: { name: string; project: string | null } | null;
+  leads: { name: string; project: string | null; is_personal_lead: boolean | null; created_at: string | null } | null;
+  // Personal lead v2 (2026-10-08): note the employee had to add when a
+  // personal lead's first visit was logged < 2h after creating it.
+  note: string | null;
 }
 
 interface SnoozeLogRow {
@@ -455,11 +469,11 @@ export default function CoordinatorDashboard() {
       .from("site_visits")
       .select(
         `
-        id, event_type, created_at, verified_at, denied_at, deny_reason, employee_id,
+        id, event_type, created_at, verified_at, denied_at, deny_reason, employee_id, note,
         employees!site_visits_employee_id_fkey ( name ),
         verifier:employees!site_visits_verified_by_fkey ( name ),
         denier:employees!site_visits_denied_by_fkey ( name ),
-        leads ( name, project )
+        leads ( name, project, is_personal_lead, created_at )
         `
       )
       .order("created_at", { ascending: false });
@@ -1884,6 +1898,24 @@ export default function CoordinatorDashboard() {
                           {employeeTeamMap.get(visit.employee_id) && ` (${teamNameMap.get(employeeTeamMap.get(visit.employee_id)!) || ""})`}
                           {" · "}{daysAgoLabel(visit.created_at)}
                         </p>
+
+                        {/* Personal lead v2 (2026-10-08): the employee added this lead
+                            themselves — show when it was created and how soon the visit
+                            was logged, plus the note required for a visit < 2h after. */}
+                        {visit.leads?.is_personal_lead && (
+                          <div className="mt-1.5 rounded-lg bg-violet-50 border border-violet-100 px-2.5 py-1.5 text-[11px] text-violet-800 space-y-0.5">
+                            <p>
+                              <span className="font-bold">🔖 Personal lead</span>
+                              {visit.leads.created_at && (
+                                <>
+                                  {" · "}created {shortDateTime(visit.leads.created_at)}
+                                  {" · "}visit logged <span className="font-bold">{gapLabel(visit.leads.created_at, visit.created_at)}</span> after
+                                </>
+                              )}
+                            </p>
+                            {visit.note && <p>📝 &ldquo;{visit.note}&rdquo;</p>}
+                          </div>
+                        )}
 
                         {status === "Verified" && (
                           <p className="text-[11px] text-emerald-700 mt-1">
