@@ -266,6 +266,33 @@ export function timersPausedDisplay(cal: WorkingCalendar | null | undefined, at:
   return { kind: status.kind, reason: status.reason, until: status.until, untilLabel: formatPauseUntil(status.until) };
 }
 
+// Start Shift on a non-working day (2026-10-08, decided). With the switch
+// ON, the weekly off and Admin HOLIDAY ranges block Start Shift unless
+// Admin granted an override for that date (a special working day). A
+// TIMER_PAUSE range does NOT block — it only pauses timers, work goes on.
+// OFF / no calendar = never blocked, the pre-switch behaviour.
+export type ShiftStartBlock =
+  | { blocked: false }
+  | { blocked: true; kind: NonWorkingKind; until: Date; message: string };
+
+export function shiftStartBlock(
+  cal: WorkingCalendar | null | undefined,
+  at: TimeInput,
+  opts: { hasOverride: boolean }
+): ShiftStartBlock {
+  const workingCal = timerCalendar(cal);
+  if (!workingCal || opts.hasOverride) return { blocked: false };
+  const status = nonWorkingStatusAt(workingCal, at);
+  if (!status.isNonWorking) return { blocked: false };
+  if (status.kind === "TIMER_PAUSE") return { blocked: false };
+  const until = formatPauseUntil(status.until);
+  const message =
+    status.kind === "WEEKLY_OFF"
+      ? `Aaj weekly off hai — shift start nahi ho sakti. Special working day ke liye Admin se override lein.`
+      : `Aaj ${status.reason || "holiday"} ki wajah se non-working day hai (till ${until}) — shift start nahi ho sakti.`;
+  return { blocked: true, kind: status.kind, until: status.until, message };
+}
+
 // Is `at` non-working, and if so why and until when (the next working
 // moment, following back-to-back weekly-off days and ranges)? For the
 // "Timers paused till <date>" banner and for pausing sweeps/notifications.

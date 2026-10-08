@@ -26,7 +26,7 @@ function loadLib(file) {
   new Function("module", "exports", "require", outputText)(mod, mod.exports, requireLib);
   return mod.exports;
 }
-const { workingAdd, workingElapsedMs, nonWorkingStatusAt, loadJobWorkingCalendar, isNotificationWindowOpen, timerMsUntil, timersPausedDisplay, formatPauseUntil, DAY_MS } = loadLib("workingCalendar.ts");
+const { workingAdd, workingElapsedMs, nonWorkingStatusAt, loadJobWorkingCalendar, isNotificationWindowOpen, timerMsUntil, timersPausedDisplay, formatPauseUntil, shiftStartBlock, DAY_MS } = loadLib("workingCalendar.ts");
 const { calculateSLAStatus, getRecycleCutoff } = loadLib("calculateSLAStatus.ts");
 const { recyclingTomorrowCutoff } = loadLib("recyclingTomorrow.ts");
 
@@ -159,6 +159,17 @@ async function main() {
     ["B4 banner ON, Mon working = nothing", timersPausedDisplay(tuesdayOff, ist("2026-10-12T10:00")), null],
     ["B5 banner OFF, Tue = nothing (old behaviour)", timersPausedDisplay(switchOff, ist("2026-10-13T10:00")), null],
     ["B6 holiday ending at midnight reads as end of last day", formatPauseUntil(ist("2026-10-15T00:00")), "end of Wed, 14 Oct"],
+    // Weekly-off Start Shift gate (2026-10-08).
+    ["G1 Tue 10:45, switch ON = blocked (weekly off)", (() => { const g = shiftStartBlock(tuesdayOff, ist("2026-10-13T10:45"), { hasOverride: false }); return g.blocked ? g.kind : "allowed"; })(), "WEEKLY_OFF"],
+    ["G2 Mon 10:45, switch ON = allowed", shiftStartBlock(tuesdayOff, ist("2026-10-12T10:45"), { hasOverride: false }).blocked, false],
+    ["G3 Tue, switch OFF = allowed (old behaviour)", shiftStartBlock(switchOff, ist("2026-10-13T10:45"), { hasOverride: false }).blocked, false],
+    ["G4 Tue, Admin override = allowed", shiftStartBlock(tuesdayOff, ist("2026-10-13T10:45"), { hasOverride: true }).blocked, false],
+    ["G5 Admin TIMER_PAUSE (Fri 13:00) = allowed, only timers pause", shiftStartBlock(bothOn, ist("2026-10-16T13:00"), { hasOverride: false }).blocked, false],
+    ["G6 Admin HOLIDAY Wed = blocked", (() => { const g = shiftStartBlock(holidayOn, ist("2026-10-14T10:45"), { hasOverride: false }); return g.blocked ? g.kind : "allowed"; })(), "HOLIDAY"],
+    ["G7 no calendar (load failed / fail-open path) = allowed", shiftStartBlock(null, ist("2026-10-13T10:45"), { hasOverride: false }).blocked, false],
+    ["G9 Admin HOLIDAY + override = allowed", shiftStartBlock(holidayOn, ist("2026-10-14T10:45"), { hasOverride: true }).blocked, false],
+    ["G10 holiday message names the reason", (() => { const g = shiftStartBlock(holidayOn, ist("2026-10-14T10:45"), { hasOverride: false }); return g.blocked ? g.message : ""; })(), "Aaj TEST holiday ki wajah se non-working day hai (till end of Wed, 14 Oct) — shift start nahi ho sakti."],
+    ["G8 weekly-off message", (() => { const g = shiftStartBlock(tuesdayOff, ist("2026-10-13T10:45"), { hasOverride: false }); return g.blocked ? g.message : ""; })(), "Aaj weekly off hai — shift start nahi ho sakti. Special working day ke liye Admin se override lein."],
     ["E1 sweep early exit ON, Tue 10:00 = weekly off until Wed 00:00", (() => { const st = nonWorkingStatusAt(tuesdayOff, ist("2026-10-13T10:00")); return st.isNonWorking ? st.until.getTime() : -1; })(), ist("2026-10-14T00:00")]
   );
 

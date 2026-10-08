@@ -7,6 +7,9 @@ import { calculateGeofenceStatus } from "../../../lib/calculateGeofenceStatus.ts
 import { calculateStartShiftWindow } from "../../../lib/calculateStartShiftWindow.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { resolveCallingEmployeeId } from "../_shared/auth.ts";
+import { loadJobWorkingCalendar, shiftStartBlock } from "../../../lib/workingCalendar.ts";
+import { logAnomaly } from "../../../lib/logAnomaly.ts";
+
 
 // Records a successful Start Shift for the CALLING employee (resolved
 // from their own verified session JWT — see _shared/auth.ts — never
@@ -142,6 +145,46 @@ serve(withMonitoring("start-shift", async (req) => {
         alreadyStarted: true,
         shiftStartAt: existing.shift_start_at
       });
+    }
+
+    // Non-working-day gate (2026-10-08). Only with the working-days switch
+    // ON: on the weekly off (lead_engine_settings.sla_weekly_off_day — never
+    // hardcoded) or an Admin HOLIDAY range (not a TIMER_PAUSE — see
+    // shiftStartBlock) Start Shift is refused unless Admin granted an
+    // override for today (shift_day_overrides: this employee, or everyone). If the
+    // calendar can't be loaded the shift is ALLOWED (fail-open — an infra
+    // glitch must never stop everyone working; the sweep already rests on
+    // non-working days) and a warning is logged.
+    const calendarLoad = await loadJobWorkingCalendar(
+      supabase,
+      async () => settings.working_days_timers_enabled === true,
+      (message, context) => logAnomaly(supabase, { source: "start-shift:working-calendar", severity: "warning", message, context })
+    );
+    if (calendarLoad.skipTimerWork) {
+      await logAnomaly(supabase, {
+        source: "start-shift:working-calendar",
+        severity: "warning",
+        message: "Working calendar failed to load with the switch ON; weekly-off check skipped, shift allowed",
+        context: { error: calendarLoad.error, employee_id }
+      });
+    } else {
+      const gate = shiftStartBlock(calendarLoad.calendar, Date.now(), { hasOverride: false });
+      if (gate.blocked) {
+        const { data: override, error: overrideError } = await supabase
+          .from("shift_day_overrides")
+          .select("id")
+          .eq("work_date", today)
+          .is("cancelled_at", null)
+          .or(`employee_id.is.null,employee_id.eq.${employee_id}`)
+          .limit(1)
+          .maybeSingle();
+        if (overrideError) {
+          return respond({ success: false, step: "CHECK_SHIFT_OVERRIDE", error: overrideError.message }, 500);
+        }
+        if (!override) {
+          return respond({ success: false, step: "NON_WORKING_DAY", kind: gate.kind, until: gate.until, message: gate.message });
+        }
+      }
     }
 
     const now = new Date();

@@ -14,6 +14,8 @@ import {
   EndShiftWindowResult
 } from "@/lib/calculateEndShiftWindow";
 import { calculateGeofenceStatus } from "@/lib/calculateGeofenceStatus";
+import { useWorkingCalendar } from "@/lib/useWorkingCalendar";
+import { shiftStartBlock, timerCalendar } from "@/lib/workingCalendar";
 
 interface StartShiftCardProps {
   employeeId: string;
@@ -95,6 +97,33 @@ export default function StartShiftCard({ employeeId, compact = false }: StartShi
   const [isFieldEmployee, setIsFieldEmployee] = useState(false);
   const [geoDistanceMeters, setGeoDistanceMeters] = useState<number | null>(null);
   const [geoAccuracyMeters, setGeoAccuracyMeters] = useState<number | null>(null);
+
+  // Non-working-day gate (2026-10-08): same shiftStartBlock rule the
+  // start-shift Edge Function enforces (weekly off + Admin HOLIDAY, switch
+  // ON). An Admin override for today (this employee or everyone) unlocks
+  // the button. The server stays authoritative — its message is toasted.
+  const workingCalendar = useWorkingCalendar();
+  const [hasShiftOverride, setHasShiftOverride] = useState(false);
+  const calendarSaysBlocked = shiftStartBlock(workingCalendar, Date.now(), { hasOverride: false }).blocked;
+
+  useEffect(() => {
+    if (!calendarSaysBlocked || !employeeId) return;
+    const todayIst = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    supabase
+      .from("shift_day_overrides")
+      .select("id")
+      .eq("work_date", todayIst)
+      .is("cancelled_at", null)
+      .or(`employee_id.is.null,employee_id.eq.${employeeId}`)
+      .limit(1)
+      .then(({ data }) => setHasShiftOverride(Boolean(data && data.length > 0)));
+  }, [calendarSaysBlocked, employeeId]);
+
+  const nonWorkingGate = shiftStartBlock(workingCalendar, Date.now(), { hasOverride: hasShiftOverride });
+  const nonWorkingDayLabel = nonWorkingGate.blocked ? (nonWorkingGate.kind === "WEEKLY_OFF" ? "🗓️ Weekly off" : "🎉 Holiday") : null;
+  const nonWorkingDayNote = nonWorkingGate.blocked
+    ? `${nonWorkingGate.kind === "WEEKLY_OFF" ? "Aaj weekly off hai" : `Aaj ${timerCalendar(workingCalendar)?.ranges.find((r) => r.startsAt <= Date.now() && r.endsAt > Date.now())?.reason || "holiday"} ki chhutti hai`} — shift start nahi ho sakti. Special working day ke liye Admin se baat karein.`
+    : null;
 
   useEffect(() => {
     checkTodaysShift();
@@ -433,11 +462,12 @@ export default function StartShiftCard({ employeeId, compact = false }: StartShi
   const started = Boolean(shiftStartAt);
   const ended = Boolean(shiftEndAt);
 
-  const canStart = !config || !startWindow ? false : startWindow.allowed && geoStatus !== "outside";
+  const canStart = !config || !startWindow ? false : startWindow.allowed && geoStatus !== "outside" && !nonWorkingGate.blocked;
   const canEnd = !config || !endWindow ? false : endWindow.allowed;
 
-  const startBlockedReason =
-    geoStatus === "outside"
+  const startBlockedReason = nonWorkingDayNote
+    ? nonWorkingDayNote
+    : geoStatus === "outside"
       ? `You are ${geoDistanceMeters}m from the office — must be within ${config?.geofence_radius_meters}m to start your shift.${
           geoAccuracyMeters !== null && geoAccuracyMeters > 50
             ? ` Location accuracy is ±${geoAccuracyMeters}m — if you're actually at the office, check that Precise/Exact Location is enabled for this site.`
@@ -487,7 +517,7 @@ export default function StartShiftCard({ employeeId, compact = false }: StartShi
             }`}
           >
             {starting ? <Loader2 className="animate-spin" size={11} /> : <MapPin size={11} />}
-            {starting ? "Starting..." : "Start"}
+            {starting ? "Starting..." : nonWorkingDayLabel ?? "Start"}
           </motion.button>
         )}
       </motion.div>
@@ -626,13 +656,13 @@ export default function StartShiftCard({ employeeId, compact = false }: StartShi
               ) : (
                 <MapPin size={16} />
               )}
-              {starting ? "Starting..." : "Start Shift"}
+              {starting ? "Starting..." : nonWorkingDayLabel ?? "Start Shift"}
             </motion.button>
 
             {!canStart && startBlockedReason && (
               <p
                 className={`basis-full text-[11px] rounded-lg px-2.5 py-1.5 ${
-                  geoStatus === "outside" ? "text-red-700 bg-red-50" : "text-amber-700 bg-amber-50"
+                  nonWorkingDayNote ? "text-slate-600 bg-slate-100" : geoStatus === "outside" ? "text-red-700 bg-red-50" : "text-amber-700 bg-amber-50"
                 }`}
               >
                 {startBlockedReason}

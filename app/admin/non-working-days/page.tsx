@@ -14,6 +14,7 @@ import toast from "react-hot-toast";
 import { Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import PageHeader from "@/components/PageHeader";
+import ShiftOverridesSection from "@/components/ShiftOverridesSection";
 import { useWorkingCalendar } from "@/lib/useWorkingCalendar";
 import { formatPauseUntil } from "@/lib/workingCalendar";
 
@@ -372,6 +373,8 @@ export default function NonWorkingDaysPage() {
           </div>
         )}
       </div>
+
+      <ShiftOverridesSection />
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-md p-5">
         <p className="text-sm font-bold text-slate-800 mb-3">Audit log</p>
