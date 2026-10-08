@@ -14,20 +14,32 @@ import toast from "react-hot-toast";
 import { Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import PageHeader from "@/components/PageHeader";
-import { cleanLegacyText, guessLegacyColumn, guessLegacyMobileColumnByContent, isHeaderlessFirstRow, isLegacyVisitDone, normalizeLegacyMobile, type LegacyMobileKind } from "@/lib/legacyNumbers";
+import {
+  autoMapLegacyTab,
+  cleanLegacyText,
+  isHeaderlessFirstRow,
+  isLegacyVisitDone,
+  normalizeLegacyMobile,
+  profileLegacyColumns,
+  type LegacyColumnProfile,
+  type LegacyMobileKind,
+  type LegacyTabAutoMap
+} from "@/lib/legacyNumbers";
 
 interface Tab {
   name: string;
   hasHeader: boolean;
-  headerless: boolean;      // detected: first row is data — header option locked off
+  headerless: boolean;      // first row holds a phone-like value: it is data, header option locked off
   headers: string[];        // labels from the first row (header tabs only) — never data values
   matrix: string[][];       // all non-empty rows (kept in the browser only)
+  width: number;
   include: boolean;
   mobileCol: number;
   projectCol: number;
   statusCol: number;
   visitCol: number;
   wholeTabVisit: boolean;
+  auto: LegacyTabAutoMap;   // what the content-based auto-mapping picked (for "auto-picked ✓")
 }
 
 interface ServerPreview {
@@ -75,27 +87,48 @@ function buildTab(name: string, matrix: string[][]): Tab | null {
   const nonEmpty = matrix.filter((r) => r.some((c) => c.trim()));
   if (nonEmpty.length === 0) return null;
   const first = nonEmpty[0];
-  const headerless = isHeaderlessFirstRow(first);
-  const hasHeader = !headerless;
   const width = Math.min(MAX_COLS, Math.max(...nonEmpty.map((r) => r.length)));
-  const headers = hasHeader ? Array.from({ length: width }, (_, i) => (first[i] || "").trim()) : Array.from({ length: width }, () => "");
-  const guess = (f: "mobile" | "project" | "status" | "visit") => (hasHeader ? guessLegacyColumn(headers, f) : -1);
+  const auto = autoMapLegacyTab(name, nonEmpty);
+  const hasHeader = auto.hasHeader;
+  const headers = Array.from({ length: width }, (_, i) => (hasHeader ? (first[i] || "").trim() : ""));
   return {
     name,
     hasHeader,
-    headerless,
+    headerless: isHeaderlessFirstRow(first),
     headers,
     matrix: nonEmpty,
+    width,
     include: true,
-    mobileCol: guess("mobile") >= 0 ? guess("mobile") : guessLegacyMobileColumnByContent(hasHeader ? nonEmpty.slice(1) : nonEmpty),
-    projectCol: guess("project"),
-    statusCol: guess("status"),
-    visitCol: guess("visit"),
-    wholeTabVisit: /visit/i.test(name)
+    mobileCol: auto.mobileCol,
+    projectCol: auto.projectCol,
+    statusCol: auto.statusCol,
+    visitCol: auto.visitCol,
+    wholeTabVisit: auto.wholeTabVisit,
+    auto
   };
 }
 
 const dataRows = (tab: Tab) => (tab.hasHeader ? tab.matrix.slice(1) : tab.matrix);
+
+// Profiles follow the CURRENT header choice (the Admin can override it).
+const profilesFor = (tab: Tab): LegacyColumnProfile[] =>
+  tab.hasHeader === tab.auto.hasHeader ? tab.auto.profiles : profileLegacyColumns(dataRows(tab), tab.width);
+
+// "auto-picked ✓ · 83% bhara · 6 alag values: Hot, Not interested, …" —
+// values only for safe (category-like) columns, never for the mobile
+// column or anything that looks like names / emails / notes / numbers.
+function columnNote(tab: Tab, key: "mobileCol" | "projectCol" | "statusCol" | "visitCol"): string | null {
+  const col = tab[key];
+  if (col < 0) return null;
+  const p = profilesFor(tab)[col];
+  if (!p) return null;
+  const autoKey = tab.auto[key];
+  const how = autoKey === col && tab.hasHeader === tab.auto.hasHeader ? "auto-picked ✓" : "manual";
+  const fill = `${Math.round(p.fillRate * 100)}% bhara`;
+  if (key === "mobileCol") return `${how} · ${fill} · ${Math.round(p.phoneShare * 100)}% values number jaise`;
+  const values = p.safeToShow && p.topValues.length ? `: ${p.topValues.map((t) => t.value).join(", ")}` : " (values nahi dikhaye — naam/notes jaise lagte hain)";
+  return `${how} · ${fill} · ${p.distinct} alag values${values}`;
+}
 const colLabel = (tab: Tab, i: number) => (tab.hasHeader && tab.headers[i] ? `${tab.headers[i]} (col ${i + 1})` : `Col ${i + 1}`);
 
 export default function LegacyNumbersPage() {
@@ -272,24 +305,36 @@ export default function LegacyNumbersPage() {
                     disabled={tab.headerless}
                     onChange={(e) => updateTab(i, { hasHeader: e.target.checked })}
                   />
-                  First row is a header {tab.headerless && "(no — first row is data)"}
+                  header: {tab.hasHeader ? "haan" : "nahi"}{" "}
+                  {tab.hasHeader === tab.auto.hasHeader ? "(auto)" : "(aapne badla)"}
+                  {tab.headerless && " — pehli row mein number hai, isliye data hai"}
                 </label>
               </div>
               {tab.include && (
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
-                  {(["mobileCol", "projectCol", "statusCol", "visitCol"] as const).map((key) => (
-                    <label key={key} className="space-y-1">
-                      <span className="text-slate-500">{{ mobileCol: "Mobile *", projectCol: "Project", statusCol: "Status", visitCol: "Visit" }[key]}</span>
-                      <select value={tab[key]} onChange={(e) => updateTab(i, { [key]: Number(e.target.value) } as Partial<Tab>)} className={`w-full ${select}`}>
-                        <option value={-1}>— none —</option>
-                        {colOptions(tab)}
-                      </select>
-                    </label>
-                  ))}
-                  <label className="flex items-end gap-1.5 pb-2 text-slate-600">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                  {(["mobileCol", "projectCol", "statusCol", "visitCol"] as const).map((key) => {
+                    const note = columnNote(tab, key);
+                    return (
+                      <label key={key} className="space-y-1">
+                        <span className="text-slate-500">{{ mobileCol: "Mobile *", projectCol: "Project", statusCol: "Status", visitCol: "Visit" }[key]}</span>
+                        <select value={tab[key]} onChange={(e) => updateTab(i, { [key]: Number(e.target.value) } as Partial<Tab>)} className={`w-full ${select}`}>
+                          <option value={-1}>— none —</option>
+                          {colOptions(tab)}
+                        </select>
+                        {note && <span className={`block text-[11px] ${note.startsWith("auto") ? "text-emerald-700" : "text-slate-500"}`}>{note}</span>}
+                      </label>
+                    );
+                  })}
+                  <label className="flex items-center gap-1.5 text-slate-600">
                     <input type="checkbox" checked={tab.wholeTabVisit} onChange={(e) => updateTab(i, { wholeTabVisit: e.target.checked })} />
-                    Whole tab = visit done
+                    Whole tab = visit done {tab.auto.wholeTabVisit && tab.wholeTabVisit && <span className="text-emerald-700">(auto ✓)</span>}
                   </label>
+                </div>
+              )}
+              {tab.include && tab.auto.flags.length > 0 && (
+                <div className="rounded-lg bg-amber-50 border border-amber-100 px-2.5 py-1.5 text-[11px] text-amber-800 space-y-0.5">
+                  <p className="font-bold">⚠️ Kuch sandehaspad hai — check karein</p>
+                  {tab.auto.flags.map((f) => <p key={f}>• {f}</p>)}
                 </div>
               )}
               {stats && (
