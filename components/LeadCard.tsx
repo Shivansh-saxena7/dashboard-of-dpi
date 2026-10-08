@@ -84,6 +84,16 @@ const RECYCLE_REASON_LABEL: Record<RecycleCutoffReason, string> = {
   NOT_INTERESTED_COOLDOWN: "Not Interested cooldown"
 };
 
+// "Last activity 3h ago" on the card's meta line.
+function formatAgo(msAgo: number): string {
+  const minutes = Math.max(0, Math.floor(msAgo / 60000));
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 function formatCountdown(msRemaining: number): string {
   const totalMinutes = Math.max(0, Math.floor(msRemaining / 60000));
   const hours = Math.floor(totalMinutes / 60);
@@ -178,14 +188,14 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
   } else if (slaStatus === "COOLDOWN" && recycleCutoff) {
     slaBadge = {
       label: `${formatDaysHoursLeft(recycleCutoff.cutoffAt.getTime() - now.getTime())} — ${RECYCLE_REASON_LABEL[recycleCutoff.reason]}`,
-      className: "bg-slate-100 text-slate-500"
+      className: "bg-slate-100 text-slate-700"
     };
   } else if (slaStatus === "COOLDOWN") {
-    slaBadge = { label: "Cooling down", className: "bg-slate-100 text-slate-500" };
+    slaBadge = { label: "Cooling down", className: "bg-slate-100 text-slate-700" };
   } else if ((slaStatus === "RECYCLE_READY" || slaStatus === "JUNK_ELIGIBLE") && recycleCutoff) {
-    slaBadge = { label: `Recycling now — ${RECYCLE_REASON_LABEL[recycleCutoff.reason]}`, className: "bg-amber-50 text-amber-600" };
+    slaBadge = { label: `Recycling now — ${RECYCLE_REASON_LABEL[recycleCutoff.reason]}`, className: "bg-amber-50 text-amber-800" };
   } else if (slaStatus === "RECYCLE_READY" || slaStatus === "JUNK_ELIGIBLE") {
-    slaBadge = { label: "Awaiting follow-up", className: "bg-amber-50 text-amber-600" };
+    slaBadge = { label: "Awaiting follow-up", className: "bg-amber-50 text-amber-800" };
   } else if (slaStatus === "PAUSED" && lead.paused_until) {
     const untilLabel = new Date(lead.paused_until).toLocaleDateString([], { month: "short", day: "numeric" });
     slaBadge =
@@ -197,17 +207,15 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
   } else if (slaStatus === "FOLLOWUP_INACTIVITY_WARNING" && recycleCutoff) {
     slaBadge = {
       label: `${formatDaysHoursLeft(recycleCutoff.cutoffAt.getTime() - now.getTime())} — ${RECYCLE_REASON_LABEL[recycleCutoff.reason]}`,
-      className: "bg-amber-50 text-amber-600"
+      className: "bg-amber-50 text-amber-800"
     };
   } else if (slaStatus === "FOLLOWUP_INACTIVITY_WARNING") {
-    slaBadge = { label: "Needs follow-up", className: "bg-amber-50 text-amber-600" };
+    slaBadge = { label: "Needs follow-up", className: "bg-amber-50 text-amber-800" };
   } else if (slaStatus === "FOLLOWUP_INACTIVITY_RECYCLE_READY" && recycleCutoff) {
     slaBadge = { label: `Recycling now — ${RECYCLE_REASON_LABEL[recycleCutoff.reason]}`, className: "bg-red-100 text-red-700", pulse: true };
   } else if (slaStatus === "FOLLOWUP_INACTIVITY_RECYCLE_READY") {
     slaBadge = { label: "Going stale", className: "bg-red-100 text-red-700", pulse: true };
   }
-
-  const initial = lead.name?.charAt(0)?.toUpperCase() || "?";
 
   // Fire-and-forget: logs the first-ever call-click timestamp via
   // log_call_click_atomic (no-ops after the first click, see the
@@ -253,75 +261,32 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
           : "bg-white border border-slate-100"
       }`}
     >
+      {/* Card layout (2026-10-08 redesign, presentation only): mobile +
+          project bold on top, name under it; status + timer row; one quiet
+          meta line; then every badge in one wrapping group. */}
       <div className="flex items-start gap-3">
         {/* Position-in-current-list number — "aaj maine kitne pe call
-            kiya" at a glance. Reuses the `index` prop that already
-            existed here (previously only fed the entrance-animation
-            delay above) — no new data, purely a visual count of the
-            current filtered/sorted view, not a permanent lead ID. */}
-        <div className="shrink-0 w-5 pt-1.5 text-center text-[11px] font-bold text-slate-400">
+            kiya" at a glance. A visual count of the current
+            filtered/sorted view, not a permanent lead ID. */}
+        <div className="shrink-0 w-5 pt-1 text-center text-[11px] font-bold text-slate-400">
           {index + 1}
-        </div>
-
-        <div className="shrink-0 h-11 w-11 rounded-2xl bg-gradient-to-br from-yellow-400 to-amber-500 shadow-[0_4px_12px_rgba(217,119,6,0.35)] flex items-center justify-center text-slate-900 font-bold text-sm">
-          {initial}
         </div>
 
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="text-[15px] font-bold text-slate-800 truncate">{lead.name}</p>
-              <p className="text-xs text-slate-500 mt-0.5">{lead.mobile}</p>
-              {lead.project && (
-                <p className="text-xs text-slate-500 truncate">{lead.project}</p>
-              )}
-            </div>
-
-            <div className="shrink-0 flex flex-col items-end gap-1">
-              <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${priorityDisplay.badgeClassName}`}>
-                {priorityDisplay.label}
-              </span>
-              {/* Dedicated badge instead of the generic source pill
-                  below (2026-09-23) — source='Personal' would already
-                  render there, but a plain indigo pill reading
-                  "Personal" looks identical to any other source string
-                  (Facebook/Website/etc.) and doesn't meet the "turant
-                  pata chale, bilkul mix nahi dikhni chahiye"
-                  requirement on its own. Suppressing the generic
-                  source badge here specifically avoids showing
-                  "Personal" twice on the same card. */}
-              {lead.is_personal_lead ? (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 border border-violet-200">
-                  🔒 Personal
-                </span>
-              ) : (
-                lead.source && (
-                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">
-                    {lead.source}
-                  </span>
-                )
-              )}
-              {lead.catcher_name && (
-                <span
-                  className="max-w-[140px] truncate text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700"
-                  title={`Catcher: ${lead.catcher_name}`}
-                >
-                  🎣 {lead.catcher_name}
-                </span>
-              )}
-            </div>
+            <p className="text-[17px] sm:text-lg font-extrabold text-slate-900 tracking-wide tabular-nums">{lead.mobile}</p>
+            <span className={`shrink-0 text-[10px] font-bold px-2 py-1 rounded-full ${priorityDisplay.badgeClassName}`}>
+              {priorityDisplay.label}
+            </span>
           </div>
+          {lead.project && (
+            <p className="text-[15px] font-bold text-slate-800 truncate mt-0.5">{lead.project}</p>
+          )}
+          <p className="text-sm text-slate-600 truncate mt-0.5">{lead.name}</p>
         </div>
       </div>
 
-      {(lead.recycle_count > 0 || lead.recycle_reason || (lead.siblings && lead.siblings.length > 0)) && (
-        <div className="flex items-center gap-1.5 mt-3 min-w-0">
-          <RecycledBadge reason={lead.recycle_reason} fromStage={lead.recycled_from_stage} fromStatus={lead.recycled_from_status} count={lead.recycle_count} />
-          <ExistingClientBadge siblings={lead.siblings} />
-        </div>
-      )}
-
-      <div className="flex items-center flex-wrap gap-1.5 mt-3.5">
+      <div className="flex items-center flex-wrap gap-1.5 mt-3">
         <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${statusDisplay.badgeClassName}`}>
           {statusDisplay.label}
         </span>
@@ -341,32 +306,50 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
             {slaBadge.label}
           </span>
         )}
+      </div>
 
-        {/* Step 8: weekly off / Admin pause — only on leads whose recycle or SLA clock is running. */}
-{/* Legacy Phase 3 (2026-10-08): lead made from an old client register. */}
+      <p className="text-[11.5px] text-slate-500 mt-2 leading-relaxed">
+        {[
+          lead.last_activity_at ? `Last activity ${formatAgo(now.getTime() - new Date(lead.last_activity_at).getTime())}` : null,
+          lead.assigned_at
+            ? `Assigned ${new Date(lead.assigned_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`
+            : null,
+          lead.call_count > 0 ? `${lead.call_count} ${lead.call_count === 1 ? "call" : "calls"}` : "No calls yet",
+          !lead.is_personal_lead && lead.source ? lead.source : null
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+      </p>
+
+      {/* Every tag in one group that wraps neatly on a phone. Personal gets
+          its own badge (and the plain source text above is skipped for it)
+          so it never reads like just another source. TimerPausedBadge hides
+          itself when it doesn't apply; empty:hidden drops the row then. */}
+      <div className="flex items-center flex-wrap gap-1.5 mt-2.5 min-w-0 empty:hidden">
+        {lead.is_personal_lead && (
+          <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-violet-100 text-violet-800 border border-violet-200">
+            🔒 Personal
+          </span>
+        )}
+        {/* Legacy Phase 3 (2026-10-08): lead made from an old client register. */}
         {lead.source === "Legacy" && (
           <span className="text-[11px] px-2.5 py-1 font-bold rounded-full bg-amber-50 text-amber-800 border border-amber-100">📒 Legacy</span>
         )}
-        <TimerPausedBadge clockRunning={Boolean(recycleCutoff) || (slaStatus === "WITHIN_SLA" && Boolean(lead.sla_deadline))} />
-
-        {lead.call_count > 0 && (
-          <span className="text-[11px] font-medium text-slate-400 px-1">
-            Called {lead.call_count}x
+        {lead.catcher_name && (
+          <span
+            className="max-w-[160px] truncate text-[11px] font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-800"
+            title={`Catcher: ${lead.catcher_name}`}
+          >
+            🎣 {lead.catcher_name}
           </span>
         )}
+        {(lead.recycle_count > 0 || lead.recycle_reason) && (
+          <RecycledBadge reason={lead.recycle_reason} fromStage={lead.recycled_from_stage} fromStatus={lead.recycled_from_status} count={lead.recycle_count} />
+        )}
+        <ExistingClientBadge siblings={lead.siblings} />
+        {/* Step 8: weekly off / Admin pause — only on leads whose recycle or SLA clock is running. */}
+        <TimerPausedBadge clockRunning={Boolean(recycleCutoff) || (slaStatus === "WITHIN_SLA" && Boolean(lead.sla_deadline))} />
       </div>
-
-      {lead.assigned_at && (
-        <p className="text-[11px] text-slate-400 mt-2.5">
-          Assigned{" "}
-          {new Date(lead.assigned_at).toLocaleString([], {
-            month: "short",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit"
-          })}
-        </p>
-      )}
 
       {lead.assigned_by_type === "TEAM_LEADER" && (
         <div className="flex items-start gap-1.5 mt-2 rounded-xl bg-amber-50 border border-amber-100 px-2.5 py-2">

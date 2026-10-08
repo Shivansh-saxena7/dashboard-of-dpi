@@ -27,7 +27,7 @@ function ExtraValue({ value }: { value: string }) {
   );
 }
 
-export default function LeadExtraDataSection({ leadId }: { leadId: string }) {
+export default function LeadExtraDataSection({ leadId, className }: { leadId: string; className?: string }) {
   // Tagged with the lead it belongs to, so a stale result never shows
   // under a different lead.
   const [loaded, setLoaded] = useState<{ leadId: string; items: ExtraDataItem[] } | null>(null);
@@ -51,7 +51,7 @@ export default function LeadExtraDataSection({ leadId }: { leadId: string }) {
   if (items.length === 0) return null;
 
   return (
-    <div>
+    <div className={className}>
       <p className="text-[10.5px] uppercase tracking-[0.25em] text-slate-400 font-bold mb-3">More details</p>
       <div className="rounded-xl border border-slate-100 bg-white divide-y divide-slate-100">
         {items.map((item) => (

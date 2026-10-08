@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase";
 import { ENDED_REASON_TEXT } from "@/lib/endedReasonDisplay";
 import { assignedByLabel } from "@/lib/assignedByDisplay";
 import { isLeadTerminal } from "@/lib/isLeadTerminal";
+import LeadExtraDataSection from "./LeadExtraDataSection";
 
 interface AdminLeadHistoryModalProps {
   leadId: string;
@@ -355,6 +356,7 @@ export default function AdminLeadHistoryModal({ leadId, leadName, leadType, lead
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-6">
+          <LeadExtraDataSection leadId={leadId} className="mb-6" />
 
           {loading ? (
             <p className="text-sm text-slate-400">Loading...</p>
