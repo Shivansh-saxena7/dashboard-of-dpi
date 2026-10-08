@@ -25,6 +25,36 @@ import { isNotificationWindowOpen, loadJobWorkingCalendar, nonWorkingStatusAt, t
 const BACKLOG_RECYCLE_CAP_PER_SWEEP = 10;
 const CAPPED_RECYCLE_STATUSES = new Set(["FOLLOWUP_INACTIVITY_RECYCLE_READY", "DATA_MAX_ATTEMPTS_REACHED"]);
 
+// SLA_BREACHED cap (2026-10-08). A batch assigned together shares one SLA
+// deadline, so it breaches together: on 08 Oct 12:30 one sweep moved 143
+// untouched NEW leads at once (153 more share 09 Oct 12:30). At most this
+// many SLA_BREACHED recycles per sweep, OLDEST DEADLINE FIRST (see
+// orderSlaCandidatesByDeadline); the rest stay SLA_BREACHED and go in the
+// next sweeps — nothing is dropped, nothing else is written for them.
+// Separate counter from the backlog cap above; RECYCLE_READY stays
+// uncapped. Counts attempts, same reason as the backlog cap.
+const SLA_BREACHED_RECYCLE_CAP_PER_SWEEP = 30;
+
+// Puts the leads that can only take the SLA path (LEAD, NEW, Leads stage,
+// no activity since assignment) in sla_deadline order, oldest first —
+// WITHOUT moving any other lead: they are re-sorted only among their own
+// positions, so every other path sees exactly the same visit order as
+// before.
+function orderSlaCandidatesByDeadline(order) {
+  const isSlaCandidate = (lead) => {
+    const h = lead.lead_history[0];
+    return lead.lead_type !== "DATA" && lead.status === "NEW" && Boolean(lead.sla_deadline) &&
+      (!lead.board_stage || lead.board_stage === "LEADS") &&
+      !(h?.last_activity_at && h?.assigned_at && new Date(h.last_activity_at).getTime() > new Date(h.assigned_at).getTime());
+  };
+  const slots = [];
+  order.forEach((lead, index) => { if (isSlaCandidate(lead)) slots.push(index); });
+  const byDeadline = slots.map((i) => order[i]).sort((a, b) => new Date(a.sla_deadline).getTime() - new Date(b.sla_deadline).getTime());
+  const result = [...order];
+  slots.forEach((slot, k) => { result[slot] = byDeadline[k]; });
+  return result;
+}
+
 // Scheduled sweep (pg_cron, every 15 min — modeled on
 // mark-missed-posts). No CORS, no caller-identity resolution: this
 // is a system job, never invoked from the browser, same posture as
@@ -533,6 +563,7 @@ serve(withMonitoring("recycle-stale-leads", async () => {
     }
 
     let cappedRecycleAttempts = 0;
+    let slaBreachedRecycleAttempts = 0;
 
     // Oldest-activity first, so the capped backlog drains longest-
     // stuck leads first (null last_activity_at last). Only changes the
@@ -541,7 +572,7 @@ serve(withMonitoring("recycle-stale-leads", async () => {
       const at = lead.lead_history[0]?.last_activity_at;
       return at ? new Date(at).getTime() : Number.POSITIVE_INFINITY;
     };
-    const sweepOrder = [...(leads || [])].sort((a, b) => activityTime(a) - activityTime(b));
+    const sweepOrder = orderSlaCandidatesByDeadline([...(leads || [])].sort((a, b) => activityTime(a) - activityTime(b)));
 
     for (const lead of sweepOrder) {
 
@@ -1009,6 +1040,13 @@ serve(withMonitoring("recycle-stale-leads", async () => {
           }
           cappedRecycleAttempts++;
         }
+        if (slaStatus === "SLA_BREACHED") {
+          if (slaBreachedRecycleAttempts >= SLA_BREACHED_RECYCLE_CAP_PER_SWEEP) {
+            diagnostics.push({ leadId: lead.id, action: "SKIPPED", reason: "SLA_BREACHED_CAP_REACHED", slaStatus });
+            continue;
+          }
+          slaBreachedRecycleAttempts++;
+        }
 
         const { error: projectRecycleError } = await supabase.rpc("recycle_lead_atomic", {
           p_lead_id: lead.id,
@@ -1123,6 +1161,13 @@ serve(withMonitoring("recycle-stale-leads", async () => {
           continue;
         }
         cappedRecycleAttempts++;
+      }
+      if (slaStatus === "SLA_BREACHED") {
+        if (slaBreachedRecycleAttempts >= SLA_BREACHED_RECYCLE_CAP_PER_SWEEP) {
+          diagnostics.push({ leadId: lead.id, action: "SKIPPED", reason: "SLA_BREACHED_CAP_REACHED", slaStatus });
+          continue;
+        }
+        slaBreachedRecycleAttempts++;
       }
 
       const { error: recycleError } = await supabase.rpc("recycle_lead_atomic", {
