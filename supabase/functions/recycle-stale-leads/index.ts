@@ -9,6 +9,11 @@ import { isLeadTerminal } from "../../../lib/isLeadTerminal.ts";
 import { fetchAllRows } from "../../../lib/fetchAllRows.ts";
 import { logAnomaly } from "../../../lib/logAnomaly.ts";
 import { isNotificationWindowOpen, loadJobWorkingCalendar, nonWorkingStatusAt, timerCalendar, timerMsUntil } from "../../../lib/workingCalendar.ts";
+import { isWithinRecycleHours } from "../../../lib/recycleHours.ts";
+
+// Minutes after sla_office_end_time that recycled leads may still be
+// handed out (Option A Phase 1, 2026-10-08). 0 = none.
+const RECYCLE_ELIGIBILITY_GRACE_MINUTES = 0;
 
 // Backlog-recycle cap (2026-10-03). Follow-up-inactivity / Data-max-
 // attempts recycles were silently failing on every sweep since
@@ -253,7 +258,22 @@ serve(withMonitoring("recycle-stale-leads", async () => {
       );
     }
 
-    const shiftStartedEmployeeIds = new Set((todaysAttendance || []).map((row) => row.employee_id));
+    // Option A Phase 1 (2026-10-08): outside recycle hours (before
+    // first_half_start_time, or after sla_office_end_time + grace — see
+    // lib/recycleHours.ts) nobody is eligible to RECEIVE a recycled lead,
+    // even with a shift still open from earlier (nobody ends shifts).
+    // Every recycle path then skips with a *_NO_ELIGIBLE_EMPLOYEE
+    // diagnostic and the lead simply waits for the morning; warnings,
+    // junking and the attendance nudge are unaffected.
+    const withinRecycleHours = isWithinRecycleHours(
+      Date.now(),
+      settings.first_half_start_time,
+      settings.sla_office_end_time,
+      RECYCLE_ELIGIBILITY_GRACE_MINUTES
+    );
+    const shiftStartedEmployeeIds = withinRecycleHours
+      ? new Set((todaysAttendance || []).map((row) => row.employee_id))
+      : new Set();
 
     // Employee Leave/Holiday gap (2026-08-23) — fetched once per sweep
     // (not per-lead) into a Set, same "fetch once, look up in memory"
@@ -1234,6 +1254,7 @@ serve(withMonitoring("recycle-stale-leads", async () => {
         success: true,
         recycledCount,
         cappedRecycleAttempts,
+        withinRecycleHours,
         junkedCount,
         warnedCount,
         totalChecked: (leads || []).length,

@@ -29,6 +29,7 @@ function loadLib(file) {
 const { workingAdd, workingElapsedMs, nonWorkingStatusAt, loadJobWorkingCalendar, isNotificationWindowOpen, timerMsUntil, timersPausedDisplay, formatPauseUntil, shiftStartBlock, DAY_MS } = loadLib("workingCalendar.ts");
 const { calculateSLAStatus, getRecycleCutoff } = loadLib("calculateSLAStatus.ts");
 const { recyclingTomorrowCutoff } = loadLib("recyclingTomorrow.ts");
+const { isWithinRecycleHours } = loadLib("recycleHours.ts");
 
 const HOUR = 60 * 60 * 1000;
 const ist = (s) => new Date(`${s}+05:30`).getTime();
@@ -170,6 +171,20 @@ async function main() {
     ["G9 Admin HOLIDAY + override = allowed", shiftStartBlock(holidayOn, ist("2026-10-14T10:45"), { hasOverride: true }).blocked, false],
     ["G10 holiday message names the reason", (() => { const g = shiftStartBlock(holidayOn, ist("2026-10-14T10:45"), { hasOverride: false }); return g.blocked ? g.message : ""; })(), "Aaj TEST holiday ki wajah se non-working day hai (till end of Wed, 14 Oct) — shift start nahi ho sakti."],
     ["G8 weekly-off message", (() => { const g = shiftStartBlock(tuesdayOff, ist("2026-10-13T10:45"), { hasOverride: false }); return g.blocked ? g.message : ""; })(), "Aaj weekly off hai — shift start nahi ho sakti. Special working day ke liye Admin se override lein."],
+    // Recycle hours (Option A Phase 1): 10:30 (first_half_start_time) to
+    // 18:30 (sla_office_end_time) + grace, read from settings.
+    ["H1 Thu 14:00 = recycles allowed", isWithinRecycleHours(ist("2026-10-08T14:00"), "10:30:00", "18:30:00", 0), true],
+    ["H2 Thu 10:30 exactly = allowed (first shift window opens)", isWithinRecycleHours(ist("2026-10-08T10:30"), "10:30:00", "18:30:00", 0), true],
+    ["H3 Thu 18:29 = allowed", isWithinRecycleHours(ist("2026-10-08T18:29"), "10:30:00", "18:30:00", 0), true],
+    ["H4 Thu 18:30 = none (office closed)", isWithinRecycleHours(ist("2026-10-08T18:30"), "10:30:00", "18:30:00", 0), false],
+    ["H5 Thu 22:00 = none", isWithinRecycleHours(ist("2026-10-08T22:00"), "10:30:00", "18:30:00", 0), false],
+    ["H6 Fri 00:30 (yesterday's open shift still counts by UTC date) = none", isWithinRecycleHours(ist("2026-10-09T00:30"), "10:30:00", "18:30:00", 0), false],
+    ["H7 Fri 05:15 = none", isWithinRecycleHours(ist("2026-10-09T05:15"), "10:30:00", "18:30:00", 0), false],
+    ["H8 Fri 10:15 = none (before any shift can start)", isWithinRecycleHours(ist("2026-10-09T10:15"), "10:30:00", "18:30:00", 0), false],
+    ["H9 grace 30 min: 18:45 = allowed", isWithinRecycleHours(ist("2026-10-08T18:45"), "10:30:00", "18:30:00", 30), true],
+    ["H10 grace 30 min: 19:00 = none", isWithinRecycleHours(ist("2026-10-08T19:00"), "10:30:00", "18:30:00", 30), false],
+    ["H11 Admin moves office end to 19:30: 19:00 = allowed", isWithinRecycleHours(ist("2026-10-08T19:00"), "10:30:00", "19:30:00", 0), true],
+    ["H12 Admin moves day start to 09:30: 10:00 = allowed", isWithinRecycleHours(ist("2026-10-08T10:00"), "09:30:00", "18:30:00", 0), true],
     ["E1 sweep early exit ON, Tue 10:00 = weekly off until Wed 00:00", (() => { const st = nonWorkingStatusAt(tuesdayOff, ist("2026-10-13T10:00")); return st.isNonWorking ? st.until.getTime() : -1; })(), ist("2026-10-14T00:00")]
   );
 
