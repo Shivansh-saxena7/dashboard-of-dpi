@@ -75,6 +75,15 @@ export default function AddPersonalLeadModal({ onClose, onCreated, initialMobile
         return;
       }
 
+      // Legacy Phase 2 (2026-10-08): the server answers NULL (no lead id)
+      // when the number is already in the system or in someone's old client
+      // register. Whose it is is never shown. With the older server, data is
+      // always a lead id, so this branch simply never runs.
+      if (!data) {
+        toast.error("Yeh number pehle se system ya purane client record mein hai. Admin/Coordinator se baat karein.");
+        return;
+      }
+
       toast.success("Personal lead added — no SLA timer on this one.");
       onCreated(data as string);
       onClose();
