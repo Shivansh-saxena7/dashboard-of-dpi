@@ -3,6 +3,7 @@
 import toast from "react-hot-toast";
 import type { useRouter } from "next/navigation";
 import { FocusReminderItem, formatTimeLeft, loadFocusReminderItems, markFocusRemindersRead } from "@/lib/focusReminders";
+import { notificationStyle } from "@/lib/notificationSystem";
 
 type Router = ReturnType<typeof useRouter>;
 
@@ -15,6 +16,13 @@ const KIND_LABEL: Record<FocusReminderItem["kind"], string> = {
   VISIT_LOCK: "Visit lock ends in",
   SNOOZE: "Snooze ends in"
 };
+
+// Same colours/icons as the notification list (lib/notificationSystem.ts).
+const KIND_STYLE = {
+  RECYCLE: notificationStyle("RECYCLE_TOMORROW"),
+  VISIT_LOCK: notificationStyle("PAUSE_EXPIRY_WARNING"),
+  SNOOZE: notificationStyle("PAUSE_EXPIRY_WARNING")
+} as const;
 
 // One grouped, persistent toast for focus reminders (2026-10-05), using
 // the app's existing react-hot-toast. Re-rendering with the same id updates
@@ -51,7 +59,7 @@ export async function showFocusReminderToast(employeeId: string, router: Router,
   toast.custom(
     (t) => (
       <div
-        className={`w-[340px] max-w-[calc(100vw-2rem)] rounded-2xl bg-white shadow-2xl border-2 border-rose-300 p-4 transition-opacity ${t.visible ? "opacity-100" : "opacity-0"}`}
+        className={`w-[340px] max-w-[calc(100vw-2rem)] rounded-2xl bg-white shadow-2xl border-2 border-amber-300 p-4 transition-opacity ${t.visible ? "opacity-100" : "opacity-0"}`}
       >
         <div className="flex items-start justify-between gap-3 mb-3">
           <p className="text-sm font-bold text-slate-800">
@@ -67,10 +75,13 @@ export async function showFocusReminderToast(employeeId: string, router: Router,
             <button
               key={item.leadId}
               onClick={() => openLead(item)}
-              className="w-full flex items-center justify-between gap-3 rounded-xl bg-rose-50 hover:bg-rose-100 px-3 py-2 text-left transition"
+              className={`w-full flex items-center justify-between gap-3 rounded-xl border px-3 py-2 text-left transition hover:brightness-95 ${KIND_STYLE[item.kind].chipClass}`}
             >
-              <span className="text-sm font-semibold text-slate-800 truncate">{item.name}</span>
-              <span className="shrink-0 text-xs font-bold text-rose-700">
+              <span className="text-sm font-semibold text-slate-800 truncate">
+                <span aria-hidden="true" className="mr-1.5">{KIND_STYLE[item.kind].icon}</span>
+                {item.name}
+              </span>
+              <span className="shrink-0 text-xs font-bold">
                 {KIND_LABEL[item.kind]} {formatTimeLeft(item.msLeft)}
               </span>
             </button>
@@ -86,7 +97,7 @@ export async function showFocusReminderToast(employeeId: string, router: Router,
               toast.dismiss(TOAST_ID);
               router.push("/leads?filter=recycling-tomorrow");
             }}
-            className="mt-3 w-full h-10 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold transition"
+            className="mt-3 w-full h-10 rounded-xl bg-amber-700 hover:bg-amber-800 text-white text-sm font-semibold transition"
           >
             Open Recycling Tomorrow ({recycleCount})
           </button>

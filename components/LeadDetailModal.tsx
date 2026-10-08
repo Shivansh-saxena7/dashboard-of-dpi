@@ -13,6 +13,7 @@ import { AssignedBySource } from "@/lib/assignedByDisplay";
 import { buildWhatsAppLink } from "@/lib/buildWhatsAppLink";
 import LeadProjectAssetsSection from "./LeadProjectAssetsSection";
 import CostSheetSection from "./CostSheetSection";
+import LeadExtraDataSection from "./LeadExtraDataSection";
 
 export interface LeadDetailLead {
   id: string;
@@ -887,6 +888,8 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
               </motion.button>
             </div>
           )}
+
+          <LeadExtraDataSection leadId={lead.id} />
 
           <LeadProjectAssetsSection leadId={lead.id} leadMobile={lead.mobile} leadProject={lead.project} />
 

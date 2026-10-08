@@ -7,13 +7,12 @@ import {
   Bell,
   X,
   CalendarDays,
-  Sparkles,
   Clock3,
   Phone,
   ArrowUpRight,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { classifyNotificationSystem, notificationTypeLabel, hasCallAction, NotificationSystem } from "@/lib/notificationSystem";
+import { classifyNotificationSystem, hasCallAction, notificationStyle, NotificationSystem } from "@/lib/notificationSystem";
 
 type Notification = {
   id: string | number;
@@ -465,26 +464,12 @@ export default function NotificationModal({
 
                       <div className="flex gap-4">
 
+                        {/* Colour-coded by notification group (lib/notificationSystem.ts). */}
                         <div
-                          className="
-                          h-12
-                          w-12
-
-                          rounded-2xl
-
-                          bg-blue-100
-
-                          flex
-                          items-center
-                          justify-center
-                          "
+                          className={`h-12 w-12 shrink-0 rounded-2xl flex items-center justify-center text-2xl ${notificationStyle(item.type).iconBoxClass}`}
+                          aria-hidden="true"
                         >
-
-                          <Sparkles
-                            size={22}
-                            className="text-blue-600"
-                          />
-
+                          {notificationStyle(item.type).icon}
                         </div>
 
                         <div>
@@ -540,28 +525,11 @@ export default function NotificationModal({
                     >
 
                       <div
-                        className="
-                        inline-flex
-                        items-center
-                        gap-2
-
-                        rounded-full
-
-                        bg-blue-50
-
-                        px-4
-                        py-2
-
-                        text-xs
-                        font-semibold
-                        text-blue-700
-                        "
+                        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold ${notificationStyle(item.type).chipClass}`}
+                        title={notificationStyle(item.type).groupLabel}
                       >
-
-                        <Bell size={14} />
-
-                        {notificationTypeLabel(item.type).toUpperCase()}
-
+                        <span aria-hidden="true">{notificationStyle(item.type).icon}</span>
+                        {notificationStyle(item.type).label}
                       </div>
 
                       <div
