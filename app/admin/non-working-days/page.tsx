@@ -37,8 +37,20 @@ interface AuditRow {
   affected_paused_leads: number | null;
   affected_sla_leads: number | null;
   note: string | null;
+  revert_summary: RevertSummary | null;
   after: { starts_at?: string; ends_at?: string; reason?: string } | null;
   actor: { name: string | null } | null;
+}
+
+// What a cancel puts back (Option A, 2026-10-08) — from the shift log.
+interface RevertSummary {
+  range_started: boolean;
+  sla_revert: number;
+  pause_revert: number;
+  skip_touched: number;
+  skip_original_passed: number;
+  skip_value_changed: number;
+  skip_range_started: number;
 }
 
 interface Preview {
@@ -85,6 +97,7 @@ export default function NonWorkingDaysPage() {
   const [note, setNote] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState(false);
+  const [cancelPreview, setCancelPreview] = useState<{ period: Period; revert: RevertSummary } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -92,7 +105,7 @@ export default function NonWorkingDaysPage() {
       supabase.from("non_working_periods").select("id, starts_at, ends_at, reason, kind, created_at, cancelled_at").order("starts_at", { ascending: false }).limit(100),
       supabase
         .from("non_working_periods_audit")
-        .select("id, action, acted_at, working_days, affected_paused_leads, affected_sla_leads, note, after, actor:employees!non_working_periods_audit_actor_id_fkey(name)")
+        .select("id, action, acted_at, working_days, affected_paused_leads, affected_sla_leads, note, revert_summary, after, actor:employees!non_working_periods_audit_actor_id_fkey(name)")
         .order("acted_at", { ascending: false })
         .limit(50)
     ]);
@@ -168,11 +181,25 @@ export default function NonWorkingDaysPage() {
     load();
   }
 
-  async function cancelPeriod(p: Period) {
-    if (!window.confirm(`Cancel "${p.reason}"? Timers will run again for this time. Dates already pushed forward stay as they are.`)) return;
-    const { error } = await supabase.rpc("save_non_working_period", { p_action: "CANCEL", p_period_id: p.id, p_confirm: true });
+  // Cancel = preview first (what moves back, what is skipped and why),
+  // then an explicit confirm.
+  async function previewCancel(p: Period) {
+    setBusy(true);
+    const { data, error } = await supabase.rpc("save_non_working_period", { p_action: "CANCEL", p_period_id: p.id, p_confirm: false });
+    setBusy(false);
     if (error) return toast.error(error.message.replace("save_non_working_period: ", ""));
-    toast.success("Range cancelled.");
+    setCancelPreview({ period: p, revert: (data as { revert: RevertSummary }).revert });
+  }
+
+  async function confirmCancel() {
+    if (!cancelPreview) return;
+    setBusy(true);
+    const { data, error } = await supabase.rpc("save_non_working_period", { p_action: "CANCEL", p_period_id: cancelPreview.period.id, p_confirm: true });
+    setBusy(false);
+    if (error) return toast.error(error.message.replace("save_non_working_period: ", ""));
+    const r = (data as { revert: RevertSummary }).revert;
+    toast.success(`Range cancelled. ${r.sla_revert} SLA deadline(s) and ${r.pause_revert} Visit-lock/Snooze date(s) moved back.`);
+    setCancelPreview(null);
     load();
   }
 
@@ -262,7 +289,9 @@ export default function NonWorkingDaysPage() {
             <p>{preview.working_days} working day(s) of timers paused.</p>
             <p>{preview.paused_leads} Visit-lock / Snooze end date(s) will move forward.</p>
             <p>{preview.sla_leads} NEW lead SLA deadline(s) will move forward.</p>
-            <p className="text-xs text-sky-700">Cancelling the range later does not move these dates back.</p>
+            <p className="text-xs text-sky-700">
+              Cancel karne par (range shuru hone se pehle) ye dates wapas aa jayengi — sirf wo nahi jo is beech contacted/touched hui hon ya jinka original time nikal chuka ho. Range shuru hone ke baad cancel par kuch wapas nahi hota.
+            </p>
           </div>
         )}
 
@@ -285,6 +314,30 @@ export default function NonWorkingDaysPage() {
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-md p-5">
         <p className="text-sm font-bold text-slate-800 mb-3">Ranges</p>
+        {cancelPreview && (
+          <div className="mb-3 rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-900 space-y-1">
+            <p className="font-bold">Cancel &quot;{cancelPreview.period.reason}&quot;? — preview, nothing changed yet</p>
+            {cancelPreview.revert.range_started ? (
+              <p>Range shuru ho chuki hai — koi date wapas nahi aayegi (wo time sach mein non-working tha). Aage ke liye timers phir se chalenge.</p>
+            ) : (
+              <>
+                <p>Wapas aayengi: {cancelPreview.revert.sla_revert} NEW-lead SLA deadline(s) aur {cancelPreview.revert.pause_revert} Visit-lock/Snooze date(s).</p>
+                <p>
+                  Skip hongi: {cancelPreview.revert.skip_touched} contacted/touched lead(s), {cancelPreview.revert.skip_original_passed} jinka original time nikal chuka,{" "}
+                  {cancelPreview.revert.skip_value_changed} jinki date baad mein haath se badli.
+                </p>
+              </>
+            )}
+            <div className="flex gap-2 pt-2">
+              <button onClick={confirmCancel} disabled={busy} className="h-9 px-4 rounded-xl bg-red-600 text-white text-xs font-bold disabled:opacity-60">
+                {busy ? <Loader2 size={14} className="animate-spin" /> : "Confirm cancel"}
+              </button>
+              <button onClick={() => setCancelPreview(null)} className="h-9 px-4 rounded-xl bg-white text-slate-600 text-xs font-bold border border-slate-200">
+                Keep range
+              </button>
+            </div>
+          </div>
+        )}
         {loading ? (
           <Loader2 size={18} className="animate-spin text-slate-400" />
         ) : periods.length === 0 ? (
@@ -309,7 +362,7 @@ export default function NonWorkingDaysPage() {
                     {open && (
                       <>
                         <button onClick={() => startEdit(p)} className="h-8 px-3 rounded-lg bg-slate-100 text-slate-600 text-xs font-bold">Extend</button>
-                        <button onClick={() => cancelPeriod(p)} className="h-8 px-3 rounded-lg bg-red-50 text-red-600 text-xs font-bold">Cancel</button>
+                        <button onClick={() => previewCancel(p)} disabled={busy} className="h-8 px-3 rounded-lg bg-red-50 text-red-600 text-xs font-bold disabled:opacity-60">Cancel</button>
                       </>
                     )}
                   </div>
@@ -334,7 +387,7 @@ export default function NonWorkingDaysPage() {
                   <th className="py-1.5 pr-3 font-semibold">Action</th>
                   <th className="py-1.5 pr-3 font-semibold">Range</th>
                   <th className="py-1.5 pr-3 font-semibold">Working days</th>
-                  <th className="py-1.5 pr-3 font-semibold">Leads moved (pause / SLA)</th>
+                  <th className="py-1.5 pr-3 font-semibold">Leads moved / moved back (pause / SLA)</th>
                 </tr>
               </thead>
               <tbody>
@@ -348,7 +401,16 @@ export default function NonWorkingDaysPage() {
                       {a.note ? <span className="block text-slate-400">{a.note}</span> : null}
                     </td>
                     <td className="py-1.5 pr-3">{a.working_days ?? "—"}</td>
-                    <td className="py-1.5 pr-3">{a.affected_paused_leads ?? 0} / {a.affected_sla_leads ?? 0}</td>
+                    <td className="py-1.5 pr-3">
+                      {a.affected_paused_leads ?? 0} / {a.affected_sla_leads ?? 0}
+                      {a.action === "CANCEL" && a.revert_summary && (
+                        <span className="block text-slate-400">
+                          {a.revert_summary.range_started
+                            ? "range had started — nothing moved back"
+                            : `moved back; skipped ${a.revert_summary.skip_touched} touched, ${a.revert_summary.skip_original_passed} passed, ${a.revert_summary.skip_value_changed} changed`}
+                        </span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
