@@ -1,13 +1,13 @@
 "use client";
 
-// Legacy Numbers (2026-10-08, Phase 1). Admin uploads an employee's old
-// sheet (.xlsx / .csv); it is parsed IN THE BROWSER. Per tab the Admin
-// picks the mobile / project / status / visit columns (headerless tabs by
-// column number only — their first row is data and is never shown). Only
-// normalized mobile + project + status + visit-done are sent to
-// save_legacy_numbers (preview first, then confirm). Client names, emails
-// and notes never leave this page, and no cell values are displayed —
-// only counts.
+// Legacy Numbers (2026-10-08). Admin uploads an employee's old sheet
+// (.xlsx / .csv); it is parsed IN THE BROWSER. Only each tab's MOBILE
+// column is read (auto-detected for header and headerless tabs; the Admin
+// can change it). Only the normalized mobile + the tab name (plus the
+// employee and file name) are sent to save_legacy_numbers — preview first,
+// then confirm. No other column is read, shown or sent, and no cell values
+// are displayed — only counts. project / status / visit_done are left
+// empty on the server (the RPC treats missing fields as null / false).
 
 import { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
@@ -15,37 +15,27 @@ import { Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import PageHeader from "@/components/PageHeader";
 import {
-  autoMapLegacyTab,
-  cleanLegacyText,
+  detectLegacyMobileColumn,
   isHeaderlessFirstRow,
-  isLegacyVisitDone,
+  legacyMobileColumnStats,
   normalizeLegacyMobile,
-  profileLegacyColumns,
-  type LegacyColumnProfile,
-  type LegacyMobileKind,
-  type LegacyTabAutoMap
+  type LegacyMobileKind
 } from "@/lib/legacyNumbers";
 
 interface Tab {
   name: string;
-  hasHeader: boolean;
-  headerless: boolean;      // first row holds a phone-like value: it is data, header option locked off
+  hasHeader: boolean;       // auto-detected (first row holding a number is always data)
   headers: string[];        // labels from the first row (header tabs only) — never data values
   matrix: string[][];       // all non-empty rows (kept in the browser only)
   width: number;
   include: boolean;
   mobileCol: number;
-  projectCol: number;
-  statusCol: number;
-  visitCol: number;
-  wholeTabVisit: boolean;
-  auto: LegacyTabAutoMap;   // what the content-based auto-mapping picked (for "auto-picked ✓")
+  autoMobileCol: number;
 }
 
 interface ServerPreview {
   received: number;
   rejected_invalid: number;
-  text_rejected_rows: number;
   unique_valid: number;
   merged_duplicates_in_upload: number;
   already_for_this_employee: number;
@@ -64,7 +54,6 @@ interface Batch {
   rows_updated: number;
   rows_removed: number;
   rows_rejected: number;
-  rows_text_rejected: number;
   created_at: string;
   employee: { name: string | null } | null;
   creator: { name: string | null } | null;
@@ -86,49 +75,22 @@ const cellText = (v: unknown): string => {
 function buildTab(name: string, matrix: string[][]): Tab | null {
   const nonEmpty = matrix.filter((r) => r.some((c) => c.trim()));
   if (nonEmpty.length === 0) return null;
-  const first = nonEmpty[0];
   const width = Math.min(MAX_COLS, Math.max(...nonEmpty.map((r) => r.length)));
-  const auto = autoMapLegacyTab(name, nonEmpty);
-  const hasHeader = auto.hasHeader;
-  const headers = Array.from({ length: width }, (_, i) => (hasHeader ? (first[i] || "").trim() : ""));
+  const { hasHeader, mobileCol } = detectLegacyMobileColumn(nonEmpty);
+  const headerOk = hasHeader && !isHeaderlessFirstRow(nonEmpty[0]);
   return {
     name,
-    hasHeader,
-    headerless: isHeaderlessFirstRow(first),
-    headers,
+    hasHeader: headerOk,
+    headers: Array.from({ length: width }, (_, i) => (headerOk ? (nonEmpty[0][i] || "").trim() : "")),
     matrix: nonEmpty,
     width,
     include: true,
-    mobileCol: auto.mobileCol,
-    projectCol: auto.projectCol,
-    statusCol: auto.statusCol,
-    visitCol: auto.visitCol,
-    wholeTabVisit: auto.wholeTabVisit,
-    auto
+    mobileCol,
+    autoMobileCol: mobileCol
   };
 }
 
 const dataRows = (tab: Tab) => (tab.hasHeader ? tab.matrix.slice(1) : tab.matrix);
-
-// Profiles follow the CURRENT header choice (the Admin can override it).
-const profilesFor = (tab: Tab): LegacyColumnProfile[] =>
-  tab.hasHeader === tab.auto.hasHeader ? tab.auto.profiles : profileLegacyColumns(dataRows(tab), tab.width);
-
-// "auto-picked ✓ · 83% bhara · 6 alag values: Hot, Not interested, …" —
-// values only for safe (category-like) columns, never for the mobile
-// column or anything that looks like names / emails / notes / numbers.
-function columnNote(tab: Tab, key: "mobileCol" | "projectCol" | "statusCol" | "visitCol"): string | null {
-  const col = tab[key];
-  if (col < 0) return null;
-  const p = profilesFor(tab)[col];
-  if (!p) return null;
-  const autoKey = tab.auto[key];
-  const how = autoKey === col && tab.hasHeader === tab.auto.hasHeader ? "auto-picked ✓" : "manual";
-  const fill = `${Math.round(p.fillRate * 100)}% bhara`;
-  if (key === "mobileCol") return `${how} · ${fill} · ${Math.round(p.phoneShare * 100)}% values number jaise`;
-  const values = p.safeToShow && p.topValues.length ? `: ${p.topValues.map((t) => t.value).join(", ")}` : " (values nahi dikhaye — naam/notes jaise lagte hain)";
-  return `${how} · ${fill} · ${p.distinct} alag values${values}`;
-}
 const colLabel = (tab: Tab, i: number) => (tab.hasHeader && tab.headers[i] ? `${tab.headers[i]} (col ${i + 1})` : `Col ${i + 1}`);
 
 export default function LegacyNumbersPage() {
@@ -148,7 +110,7 @@ export default function LegacyNumbersPage() {
       supabase.from("employees").select("id, name").eq("is_active", true).order("name"),
       supabase
         .from("legacy_import_batches")
-        .select("id, mode, source_file, rows_received, rows_inserted, rows_updated, rows_removed, rows_rejected, rows_text_rejected, created_at, employee:employees!legacy_import_batches_employee_id_fkey(name), creator:employees!legacy_import_batches_created_by_fkey(name)")
+        .select("id, mode, source_file, rows_received, rows_inserted, rows_updated, rows_removed, rows_rejected, created_at, employee:employees!legacy_import_batches_employee_id_fkey(name), creator:employees!legacy_import_batches_created_by_fkey(name)")
         .order("created_at", { ascending: false })
         .limit(50),
       supabase.from("legacy_numbers").select("id", { count: "exact", head: true })
@@ -170,8 +132,7 @@ export default function LegacyNumbersPage() {
       const parsed: Tab[] = [];
       if (/\.csv$/i.test(file.name)) {
         const Papa = (await import("papaparse")).default;
-        const text = await file.text();
-        const result = Papa.parse<string[]>(text, { skipEmptyLines: true });
+        const result = Papa.parse<string[]>(await file.text(), { skipEmptyLines: true });
         const tab = buildTab("CSV", (result.data as string[][]).map((r) => r.map((c) => String(c ?? ""))));
         if (tab) parsed.push(tab);
       } else {
@@ -181,8 +142,7 @@ export default function LegacyNumbersPage() {
         wb.eachSheet((ws) => {
           const matrix: string[][] = [];
           ws.eachRow({ includeEmpty: false }, (row) => {
-            const values = (row.values as unknown[]).slice(1, MAX_COLS + 1).map(cellText);
-            matrix.push(values);
+            matrix.push((row.values as unknown[]).slice(1, MAX_COLS + 1).map(cellText));
           });
           const tab = buildTab(ws.name, matrix);
           if (tab) parsed.push(tab);
@@ -202,46 +162,40 @@ export default function LegacyNumbersPage() {
     setTabs((prev) => prev.map((t, k) => (k === i ? { ...t, ...patch } : t)));
   }
 
-  // Per-tab counts + the payload (normalized fields only).
+  // Per-tab counts + the payload: normalized mobile + tab name only.
   const built = useMemo(() => {
-    const perTab: { name: string; counts: Record<LegacyMobileKind, number>; rows: number }[] = [];
-    const payload: { mobile: string; project: string | null; status: string | null; visit_done: boolean; source_tab: string }[] = [];
+    const perTab = new Map<string, Record<LegacyMobileKind, number>>();
+    const payload: { mobile: string; source_tab: string }[] = [];
     const seen = new Set<string>();
-    let duplicatesInFile = 0;
-    let textRejectedRows = 0;
+    let repeats = 0;
     for (const tab of tabs) {
       if (!tab.include || tab.mobileCol < 0) continue;
       const counts = { blank: 0, valid: 0, normalized_spaces: 0, normalized_plus91: 0, normalized_leading0: 0, multiple: 0, bad: 0 } as Record<LegacyMobileKind, number>;
       for (const row of dataRows(tab)) {
         const { kind, numbers } = normalizeLegacyMobile(row[tab.mobileCol]);
         counts[kind]++;
-        const project = cleanLegacyText(tab.projectCol >= 0 ? row[tab.projectCol] : null);
-        const status = cleanLegacyText(tab.statusCol >= 0 ? row[tab.statusCol] : null);
-        if (numbers.length && (project.rejected || status.rejected)) textRejectedRows++;
         for (const mobile of numbers) {
-          if (seen.has(mobile)) duplicatesInFile++;
+          if (seen.has(mobile)) repeats++;
           seen.add(mobile);
-          payload.push({
-            mobile,
-            project: project.text,
-            status: status.text,
-            visit_done: tab.wholeTabVisit || (tab.visitCol >= 0 && isLegacyVisitDone(row[tab.visitCol])),
-            source_tab: tab.name
-          });
+          payload.push({ mobile, source_tab: tab.name.slice(0, 60) });
         }
       }
-      perTab.push({ name: tab.name, counts, rows: dataRows(tab).length });
+      perTab.set(tab.name, counts);
     }
-    return { perTab, payload, duplicatesInFile, unique: seen.size, textRejectedRows };
+    return { perTab, payload, repeats, unique: seen.size };
   }, [tabs]);
+
+  async function callRpc(confirm: boolean) {
+    return supabase.rpc("save_legacy_numbers", {
+      p_employee_id: employeeId, p_mode: mode, p_source_file: fileName, p_rows: built.payload, p_confirm: confirm
+    });
+  }
 
   async function runPreview() {
     if (!employeeId) return toast.error("Choose the employee whose sheet this is.");
-    if (built.payload.length === 0) return toast.error("No numbers to send — pick a mobile column for at least one tab.");
+    if (built.payload.length === 0) return toast.error("No numbers to send — check the mobile column of at least one tab.");
     setBusy(true);
-    const { data, error } = await supabase.rpc("save_legacy_numbers", {
-      p_employee_id: employeeId, p_mode: mode, p_source_file: fileName, p_rows: built.payload, p_confirm: false
-    });
+    const { data, error } = await callRpc(false);
     setBusy(false);
     if (error) return toast.error(error.message.replace("save_legacy_numbers: ", ""));
     setPreview(data as ServerPreview);
@@ -249,9 +203,7 @@ export default function LegacyNumbersPage() {
 
   async function confirmSave() {
     setBusy(true);
-    const { data, error } = await supabase.rpc("save_legacy_numbers", {
-      p_employee_id: employeeId, p_mode: mode, p_source_file: fileName, p_rows: built.payload, p_confirm: true
-    });
+    const { data, error } = await callRpc(true);
     setBusy(false);
     if (error) return toast.error(error.message.replace("save_legacy_numbers: ", ""));
     const r = data as { inserted: number; updated: number; removed: number };
@@ -263,14 +215,13 @@ export default function LegacyNumbersPage() {
   }
 
   const select = "h-9 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs outline-none";
-  const colOptions = (tab: Tab) => tab.headers.map((_, i) => <option key={i} value={i}>{colLabel(tab, i)}</option>);
 
   return (
     <div className="max-w-5xl space-y-5">
       <PageHeader
         eyebrow="Leads"
         title="Legacy Numbers"
-        description="Employees ki purani sheets ke numbers ka register. File browser mein hi padhi jaati hai — server ko sirf normalized mobile, project, status aur visit-done jaata hai; client ka naam/email/notes kabhi nahi."
+        description="Employees ki purani sheets ke numbers ka register. File browser mein hi padhi jaati hai — server ko sirf normalized mobile aur tab ka naam jaata hai; koi aur column nahi."
       />
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-md p-5 space-y-4">
@@ -289,78 +240,75 @@ export default function LegacyNumbersPage() {
         </div>
         {parsing && <Loader2 size={16} className="animate-spin text-slate-400" />}
 
-        {tabs.map((tab, i) => {
-          const stats = built.perTab.find((p) => p.name === tab.name);
-          return (
-            <div key={tab.name + i} className="rounded-xl border border-slate-100 p-3 space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                  <input type="checkbox" checked={tab.include} onChange={(e) => updateTab(i, { include: e.target.checked })} />
-                  {tab.name} <span className="text-xs font-normal text-slate-400">· {dataRows(tab).length} rows</span>
-                </label>
-                <label className={`flex items-center gap-1.5 text-xs ${tab.headerless ? "text-slate-400" : "text-slate-600"}`}>
-                  <input
-                    type="checkbox"
-                    checked={tab.hasHeader}
-                    disabled={tab.headerless}
-                    onChange={(e) => updateTab(i, { hasHeader: e.target.checked })}
-                  />
-                  header: {tab.hasHeader ? "haan" : "nahi"}{" "}
-                  {tab.hasHeader === tab.auto.hasHeader ? "(auto)" : "(aapne badla)"}
-                  {tab.headerless && " — pehli row mein number hai, isliye data hai"}
-                </label>
-              </div>
-              {tab.include && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs">
-                  {(["mobileCol", "projectCol", "statusCol", "visitCol"] as const).map((key) => {
-                    const note = columnNote(tab, key);
-                    return (
-                      <label key={key} className="space-y-1">
-                        <span className="text-slate-500">{{ mobileCol: "Mobile *", projectCol: "Project", statusCol: "Status", visitCol: "Visit" }[key]}</span>
-                        <select value={tab[key]} onChange={(e) => updateTab(i, { [key]: Number(e.target.value) } as Partial<Tab>)} className={`w-full ${select}`}>
+        {tabs.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-slate-400">
+                  <th className="py-1.5 pr-3 font-semibold">Tab</th>
+                  <th className="py-1.5 pr-3 font-semibold">Rows</th>
+                  <th className="py-1.5 pr-3 font-semibold">Mobile column</th>
+                  <th className="py-1.5 pr-3 font-semibold">Valid / fixed / bad</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tabs.map((tab, i) => {
+                  const counts = built.perTab.get(tab.name);
+                  const stats = legacyMobileColumnStats(dataRows(tab), tab.mobileCol);
+                  const fixed = counts ? counts.normalized_spaces + counts.normalized_plus91 + counts.normalized_leading0 + counts.multiple : 0;
+                  const bad = counts ? counts.bad + counts.blank : 0;
+                  return (
+                    <tr key={tab.name + i} className={`border-t border-slate-100 align-top ${tab.include ? "text-slate-700" : "text-slate-400"}`}>
+                      <td className="py-2 pr-3">
+                        <label className="flex items-center gap-2 font-semibold">
+                          <input type="checkbox" checked={tab.include} onChange={(e) => updateTab(i, { include: e.target.checked })} />
+                          {tab.name}
+                        </label>
+                        <span className="block text-[11px] text-slate-400">header: {tab.hasHeader ? "haan" : "nahi"} (auto)</span>
+                      </td>
+                      <td className="py-2 pr-3">{dataRows(tab).length}</td>
+                      <td className="py-2 pr-3">
+                        <select value={tab.mobileCol} disabled={!tab.include} onChange={(e) => updateTab(i, { mobileCol: Number(e.target.value) })} className={select}>
                           <option value={-1}>— none —</option>
-                          {colOptions(tab)}
+                          {Array.from({ length: tab.width }, (_, c) => <option key={c} value={c}>{colLabel(tab, c)}</option>)}
                         </select>
-                        {note && <span className={`block text-[11px] ${note.startsWith("auto") ? "text-emerald-700" : "text-slate-500"}`}>{note}</span>}
-                      </label>
-                    );
-                  })}
-                  <label className="flex items-center gap-1.5 text-slate-600">
-                    <input type="checkbox" checked={tab.wholeTabVisit} onChange={(e) => updateTab(i, { wholeTabVisit: e.target.checked })} />
-                    Whole tab = visit done {tab.auto.wholeTabVisit && tab.wholeTabVisit && <span className="text-emerald-700">(auto ✓)</span>}
-                  </label>
-                </div>
-              )}
-              {tab.include && tab.auto.flags.length > 0 && (
-                <div className="rounded-lg bg-amber-50 border border-amber-100 px-2.5 py-1.5 text-[11px] text-amber-800 space-y-0.5">
-                  <p className="font-bold">⚠️ Kuch sandehaspad hai — check karein</p>
-                  {tab.auto.flags.map((f) => <p key={f}>• {f}</p>)}
-                </div>
-              )}
-              {stats && (
-                <p className="text-[11px] text-slate-500">
-                  valid {stats.counts.valid} · fixed: spaces {stats.counts.normalized_spaces}, +91 {stats.counts.normalized_plus91}, leading 0 {stats.counts.normalized_leading0} · multiple in one cell {stats.counts.multiple} · blank {stats.counts.blank} · bad {stats.counts.bad}
-                </p>
-              )}
-            </div>
-          );
-        })}
+                        {tab.mobileCol >= 0 && (
+                          <span className={`block text-[11px] ${tab.mobileCol === tab.autoMobileCol ? "text-emerald-700" : "text-slate-500"}`}>
+                            {tab.mobileCol === tab.autoMobileCol ? "auto-picked ✓" : "manual"} · {Math.round(stats.fillRate * 100)}% bhara · {Math.round(stats.phoneShare * 100)}% number jaise
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2 pr-3">
+                        {counts && tab.include ? (
+                          <>
+                            {counts.valid} / {fixed} / {bad}
+                            <span className="block text-[11px] text-slate-400">
+                              fixed = spaces {counts.normalized_spaces}, +91 {counts.normalized_plus91}, leading 0 {counts.normalized_leading0}, multiple {counts.multiple} · bad = blank {counts.blank}, wrong {counts.bad}
+                            </span>
+                          </>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {tabs.length > 0 && (
           <>
             <div className="flex flex-wrap items-center gap-4 text-xs text-slate-600">
-              <span>Numbers to send: <b>{built.payload.length}</b> ({built.unique} unique, {built.duplicatesInFile} repeated in this file)</span>
-              <span>
-                Project/status text dropped (over 60 chars or holds a number): <b>{built.textRejectedRows}</b> rows — the numbers are still kept
-              </span>
+              <span>Numbers to send: <b>{built.payload.length}</b> ({built.unique} unique, {built.repeats} repeated in this file)</span>
               <label className="flex items-center gap-1.5"><input type="radio" checked={mode === "ADD"} onChange={() => { setMode("ADD"); setPreview(null); }} /> Add to this employee&apos;s register</label>
               <label className="flex items-center gap-1.5"><input type="radio" checked={mode === "REPLACE"} onChange={() => { setMode("REPLACE"); setPreview(null); }} /> Replace this employee&apos;s register</label>
             </div>
             {preview && (
               <div className="rounded-xl bg-sky-50 border border-sky-100 p-3 text-sm text-sky-900 space-y-0.5">
                 <p className="font-bold">Preview — nothing saved yet</p>
-                <p>{preview.unique_valid} unique valid numbers ({preview.merged_duplicates_in_upload} repeats merged, {preview.rejected_invalid} rejected as invalid).</p>
-                <p>Project/status text rejected: {built.textRejectedRows} rows (not sent){preview.text_rejected_rows ? ` · server also rejected ${preview.text_rejected_rows}` : ""}.</p>
+                <p>{preview.unique_valid} unique valid numbers ({preview.merged_duplicates_in_upload} repeats merged, {preview.rejected_invalid} bad numbers).</p>
                 <p>Already in this employee&apos;s register: {preview.already_for_this_employee} (they have {preview.employee_existing_rows} now){mode === "REPLACE" ? ` · will be removed: ${preview.would_remove}` : ""}.</p>
                 <p>Also in another employee&apos;s register: {preview.in_other_employees_register} · already an active lead in the system: {preview.match_active_lead}.</p>
               </div>
@@ -391,7 +339,7 @@ export default function LegacyNumbersPage() {
                   <th className="py-1.5 pr-3 font-semibold">Employee</th>
                   <th className="py-1.5 pr-3 font-semibold">File</th>
                   <th className="py-1.5 pr-3 font-semibold">Mode</th>
-                  <th className="py-1.5 pr-3 font-semibold">Received / added / updated / removed / rejected / text dropped</th>
+                  <th className="py-1.5 pr-3 font-semibold">Received / added / updated / removed / bad</th>
                   <th className="py-1.5 pr-3 font-semibold">By</th>
                 </tr>
               </thead>
@@ -402,7 +350,7 @@ export default function LegacyNumbersPage() {
                     <td className="py-1.5 pr-3">{b.employee?.name || "—"}</td>
                     <td className="py-1.5 pr-3">{b.source_file || "—"}</td>
                     <td className="py-1.5 pr-3 font-semibold">{b.mode}</td>
-                    <td className="py-1.5 pr-3">{b.rows_received} / {b.rows_inserted} / {b.rows_updated} / {b.rows_removed} / {b.rows_rejected} / {b.rows_text_rejected}</td>
+                    <td className="py-1.5 pr-3">{b.rows_received} / {b.rows_inserted} / {b.rows_updated} / {b.rows_removed} / {b.rows_rejected}</td>
                     <td className="py-1.5 pr-3">{b.creator?.name || "—"}</td>
                   </tr>
                 ))}

@@ -30,17 +30,12 @@ const { workingAdd, workingElapsedMs, nonWorkingStatusAt, loadJobWorkingCalendar
 const { calculateSLAStatus, getRecycleCutoff } = loadLib("calculateSLAStatus.ts");
 const { recyclingTomorrowCutoff } = loadLib("recyclingTomorrow.ts");
 const { isWithinRecycleHours } = loadLib("recycleHours.ts");
-const { normalizeLegacyMobile, isHeaderlessFirstRow, guessLegacyColumn, isLegacyVisitDone, guessLegacyMobileColumnByContent, cleanLegacyText } = loadLib("legacyNumbers.ts");
-const { autoMapLegacyTab, detectLegacyHeaderRow } = loadLib("legacyNumbers.ts");
-// Fake tabs for the auto-mapping tests — fake names, 90000xxxxx numbers.
+const { normalizeLegacyMobile, isHeaderlessFirstRow, guessLegacyMobileColumnByContent, detectLegacyHeaderRow, detectLegacyMobileColumn, legacyMobileColumnStats } = loadLib("legacyNumbers.ts");
+// Fake tabs for the legacy tests — fake names, 90000xxxxx numbers.
 const fakeNames = ["Aman Kumar", "Bina Devi", "Chetan Rao", "Divya Jain", "Esha Gupta", "Farhan Ali", "Gita Roy", "Hari Om", "Isha Sen", "Jai Singh"];
-const fakeNotes = (i) => `fake note ${"abcdefghij"[i]} client asked about the east facing unit near the club house`;
 const fakeTabA = [["name", "number", "project", "status", "feedback"],
-  ...fakeNames.map((n, i) => [n, `900000000${i}`, ["Neotown", "Mayfair", "Neotown"][i % 3], ["Hot", "Not interested", "np"][i % 3], fakeNotes(i)])];
-const fakeTabB = fakeNames.map((n, i) => [n, `900000001${i}`, ["Neotown", "Mayfair"][i % 2], "VISITED CLINT", ["warm", "cold", "hot"][i % 3]]);
-const fakeTabD = [["name", "number", "status", "stage"],
-  ...fakeNames.map((n, i) => [n, `900000002${i}`, ["Hot", "Cold"][i % 2], ["Visit", "Follow"][i % 2]])];
-const legacyText = (v) => { const r = cleanLegacyText(v); return `${r.rejected ? "rejected" : "ok"}:${r.text ?? ""}`; };
+  ...fakeNames.map((n, i) => [n, `900000000${i}`, ["Neotown", "Mayfair"][i % 2], ["Hot", "np"][i % 2], `fake note ${i} about the unit`])];
+const fakeTabB = fakeNames.map((n, i) => [n, ["Neotown", "Mayfair"][i % 2], i === 3 ? "" : `+91 90000 001${i}`, "VISITED CLINT"]);
 const legacy = (raw) => { const r = normalizeLegacyMobile(raw); return `${r.kind}:${r.numbers.join("+")}`; };
 
 const HOUR = 60 * 60 * 1000;
@@ -209,30 +204,16 @@ async function main() {
     ["N9 starts with 5 (not a mobile)", legacy("5000000008"), "bad:"],
     ["N10 first row with a phone-like value = headerless", isHeaderlessFirstRow(["someone", "9000000009", "x"]), true],
     ["N11 real header row", isHeaderlessFirstRow(["name", "number", "project", "status", "feedback 1", "Column7"]), false],
-    ["N12 guess mobile column", guessLegacyColumn(["name", "number", "project"], "mobile"), 1],
-    ["N13 guess project column", guessLegacyColumn(["NAME", "NUMBER", "PROJECT NAME"], "project"), 2],
     ["N15 headerless tab: mobile column found by content", guessLegacyMobileColumnByContent([["a", "9000000001", "p"], ["b", "+91 9000000002", "p"], ["c", "", "p"]]), 1],
     ["N16 long text column next to numbers: numbers win", guessLegacyMobileColumnByContent([["a long remark without digits", "9000000001"], ["another long remark here", "9000000002"]]), 1],
-    ["T1 text guard: 61 chars rejected", legacyText("x".repeat(61)), "rejected:"],
-    ["T2 text guard: holds a phone number rejected", legacyText("call back on 90000 00099 later"), "rejected:"],
-    ["T3 text guard: normal text trimmed", legacyText("  visit done  "), "ok:visit done"],
-    ["T4 text guard: exactly 60 chars + 9 digits allowed", legacyText("y".repeat(51) + "123456789"), "ok:" + "y".repeat(51) + "123456789"],
-    ["T5 text guard: blank is not a rejection", legacyText("   "), "ok:"],
-    // Auto-mapping (fake tabs, fake names, 90000xxxxx numbers).
-    ["A1 header tab: header found, mobile/project/status picked", (() => { const m = autoMapLegacyTab("Follow up", fakeTabA); return [m.hasHeader, m.mobileCol, m.projectCol, m.statusCol].join(","); })(), "true,1,2,3"],
-    ["A2 status column shows its values (safe)", (() => { const m = autoMapLegacyTab("Follow up", fakeTabA); return m.profiles[3].topValues.map((t) => t.value).sort().join("|"); })(), "Hot|Not interested|np"],
-    ["A3 name column: values never shown", autoMapLegacyTab("Follow up", fakeTabA).profiles[0].safeToShow, false],
-    ["A4 notes column: values never shown, not picked", (() => { const m = autoMapLegacyTab("Follow up", fakeTabA); return `${m.profiles[4].safeToShow},${[m.projectCol, m.statusCol].includes(4)}`; })(), "false,false"],
-    ["A5 mobile column: values never shown", autoMapLegacyTab("Follow up", fakeTabA).profiles[1].safeToShow, false],
-    ["A6 headerless tab: no header, single-value column = visit signal, not project/status", (() => { const m = autoMapLegacyTab("Sheet29", fakeTabB); return [m.hasHeader, m.mobileCol, m.wholeTabVisit, [m.projectCol, m.statusCol].includes(3), m.flags.length > 0].join(","); })(), "false,1,true,false,true"],
-    ["A7 header row with a stray date is still a header", detectLegacyHeaderRow([["", "Name", "Mobile", "Email", "Project", "REMARK", "17/08/2026"], ["", "Fake A", "9000000001", "a@x.in", "P1", "np", ""]]), true],
-    ["A8 two status-like columns, both with status words in the header = flag", autoMapLegacyTab("x", fakeTabD).flags.some((f) => /Do status/.test(f)), true],
-    ["A8b header tab with a clear status header: no two-status flag", autoMapLegacyTab("Follow up", fakeTabA).flags.some((f) => /Do status/.test(f)), false],
-    ["A8c headerless tab: status vocabulary (warm/cold/hot) settles it, no flag", autoMapLegacyTab("Sheet29", fakeTabB).flags.some((f) => /Do status/.test(f)), false],
-    ["A8d headerless tab: status = warm/cold/hot column, project = place names", (() => { const m = autoMapLegacyTab("Sheet29", fakeTabB); return `${m.statusCol},${m.projectCol}`; })(), "4,2"],
-    ["A8e headerless tab, two equally filled non-status columns: flag", autoMapLegacyTab("x", fakeNames.map((n, i) => [n, `900000003${i}`, ["Alpha", "Beta"][i % 2], ["Gamma", "Delta", "Omega"][i % 3]])).flags.some((f) => /Do status/.test(f)), true],
-    ["A9 header by content (no header words): first cell not a number, rows below are", detectLegacyHeaderRow([["Aa", "Bb"], ["Fake A", "9000000001"], ["Fake B", "9000000002"], ["Fake C", "9000000003"]]), true],
-    ["N14 visit cell", [isLegacyVisitDone("visit done 9 sept"), isLegacyVisitDone("no"), isLegacyVisitDone("")].join(","), "true,false,false"],
+    // Mobile-only detection per tab (2026-10-08: project/status/visit mapping removed).
+    ["M1 header tab: header found, mobile = col 2", (() => { const m = detectLegacyMobileColumn(fakeTabA); return `${m.hasHeader},${m.mobileCol}`; })(), "true,1"],
+    ["M2 headerless tab (+91 numbers in col 3): no header, mobile = col 3", (() => { const m = detectLegacyMobileColumn(fakeTabB); return `${m.hasHeader},${m.mobileCol}`; })(), "false,2"],
+    ["M3 fill rate / number share of the mobile column", (() => { const s = legacyMobileColumnStats(fakeTabB, 2); return `${s.fillRate},${s.phoneShare}`; })(), "0.9,1"],
+    ["M4 no mobile column at all", detectLegacyMobileColumn([["a", "b"], ["c", "d"]]).mobileCol, -1],
+    ["M5 header row with a stray date is still a header", detectLegacyHeaderRow([["", "Name", "Mobile", "Email", "Project", "REMARK", "17/08/2026"], ["", "Fake A", "9000000001", "a@x.in", "P1", "np", ""]]), true],
+    ["M6 header by content (no header words): first cell not a number, rows below are", detectLegacyHeaderRow([["Aa", "Bb"], ["Fake A", "9000000001"], ["Fake B", "9000000002"], ["Fake C", "9000000003"]]), true],
+    ["M7 stats never include values (keys only)", Object.keys(legacyMobileColumnStats(fakeTabB, 2)).sort().join(","), "fillRate,phoneShare"],
     ["E1 sweep early exit ON, Tue 10:00 = weekly off until Wed 00:00", (() => { const st = nonWorkingStatusAt(tuesdayOff, ist("2026-10-13T10:00")); return st.isNonWorking ? st.until.getTime() : -1; })(), ist("2026-10-14T00:00")]
   );
 
