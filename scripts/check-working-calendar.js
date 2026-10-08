@@ -30,6 +30,9 @@ const { workingAdd, workingElapsedMs, nonWorkingStatusAt, loadJobWorkingCalendar
 const { calculateSLAStatus, getRecycleCutoff } = loadLib("calculateSLAStatus.ts");
 const { recyclingTomorrowCutoff } = loadLib("recyclingTomorrow.ts");
 const { isWithinRecycleHours } = loadLib("recycleHours.ts");
+const { normalizeLegacyMobile, isHeaderlessFirstRow, guessLegacyColumn, isLegacyVisitDone, guessLegacyMobileColumnByContent, cleanLegacyText } = loadLib("legacyNumbers.ts");
+const legacyText = (v) => { const r = cleanLegacyText(v); return `${r.rejected ? "rejected" : "ok"}:${r.text ?? ""}`; };
+const legacy = (raw) => { const r = normalizeLegacyMobile(raw); return `${r.kind}:${r.numbers.join("+")}`; };
 
 const HOUR = 60 * 60 * 1000;
 const ist = (s) => new Date(`${s}+05:30`).getTime();
@@ -185,6 +188,28 @@ async function main() {
     ["H10 grace 30 min: 19:00 = none", isWithinRecycleHours(ist("2026-10-08T19:00"), "10:30:00", "18:30:00", 30), false],
     ["H11 Admin moves office end to 19:30: 19:00 = allowed", isWithinRecycleHours(ist("2026-10-08T19:00"), "10:30:00", "19:30:00", 0), true],
     ["H12 Admin moves day start to 09:30: 10:00 = allowed", isWithinRecycleHours(ist("2026-10-08T10:00"), "09:30:00", "18:30:00", 0), true],
+    // Legacy numbers register (2026-10-08) — FAKE numbers only.
+    ["N1 clean 10 digits", legacy("9000000001"), "valid:9000000001"],
+    ["N2 spaces / dashes", legacy("90000 00002"), "normalized_spaces:9000000002"],
+    ["N3 +91 prefix", legacy("+91 9000000003"), "normalized_plus91:9000000003"],
+    ["N4 91 prefix no plus", legacy("919000000004"), "normalized_plus91:9000000004"],
+    ["N5 leading 0", legacy("09000000005"), "normalized_leading0:9000000005"],
+    ["N6 two numbers in one cell", legacy("9000000006 / 9000000007"), "multiple:9000000006+9000000007"],
+    ["N7 blank", legacy("   "), "blank:"],
+    ["N8 too short", legacy("12345"), "bad:"],
+    ["N9 starts with 5 (not a mobile)", legacy("5000000008"), "bad:"],
+    ["N10 first row with a phone-like value = headerless", isHeaderlessFirstRow(["someone", "9000000009", "x"]), true],
+    ["N11 real header row", isHeaderlessFirstRow(["name", "number", "project", "status", "feedback 1", "Column7"]), false],
+    ["N12 guess mobile column", guessLegacyColumn(["name", "number", "project"], "mobile"), 1],
+    ["N13 guess project column", guessLegacyColumn(["NAME", "NUMBER", "PROJECT NAME"], "project"), 2],
+    ["N15 headerless tab: mobile column found by content", guessLegacyMobileColumnByContent([["a", "9000000001", "p"], ["b", "+91 9000000002", "p"], ["c", "", "p"]]), 1],
+    ["N16 long text column next to numbers: numbers win", guessLegacyMobileColumnByContent([["a long remark without digits", "9000000001"], ["another long remark here", "9000000002"]]), 1],
+    ["T1 text guard: 61 chars rejected", legacyText("x".repeat(61)), "rejected:"],
+    ["T2 text guard: holds a phone number rejected", legacyText("call back on 90000 00099 later"), "rejected:"],
+    ["T3 text guard: normal text trimmed", legacyText("  visit done  "), "ok:visit done"],
+    ["T4 text guard: exactly 60 chars + 9 digits allowed", legacyText("y".repeat(51) + "123456789"), "ok:" + "y".repeat(51) + "123456789"],
+    ["T5 text guard: blank is not a rejection", legacyText("   "), "ok:"],
+    ["N14 visit cell", [isLegacyVisitDone("visit done 9 sept"), isLegacyVisitDone("no"), isLegacyVisitDone("")].join(","), "true,false,false"],
     ["E1 sweep early exit ON, Tue 10:00 = weekly off until Wed 00:00", (() => { const st = nonWorkingStatusAt(tuesdayOff, ist("2026-10-13T10:00")); return st.isNonWorking ? st.until.getTime() : -1; })(), ist("2026-10-14T00:00")]
   );
 
