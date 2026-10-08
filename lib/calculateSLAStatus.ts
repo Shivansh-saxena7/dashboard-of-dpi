@@ -99,7 +99,9 @@ export function calculateSLAStatus(
   // Only used when its master switch is ON; null/omitted/OFF = the
   // Follow-up inactivity clock counts plain calendar time, exactly as
   // before. ON = only working time counts (weekly off + Admin
-  // non-working ranges skipped). Cooldowns are not on it yet (Step 5).
+  // non-working ranges skipped). Since Step 5 (2026-10-08) the
+  // NOT_CONNECTED / SWITCHED_OFF / NOT_INTERESTED cooldowns count the
+  // same way.
   calendar: WorkingCalendar | null = null
 ): SLAStatus {
 
@@ -312,14 +314,25 @@ export function calculateSLAStatus(
       return "COOLDOWN";
     }
 
-    const cooldownDays = RECYCLE_COOLDOWN_DAYS[lead.status as keyof typeof RECYCLE_COOLDOWN_DAYS];
-    const cooldownEnd = new Date(lastOutcomeAt);
-    cooldownEnd.setDate(cooldownEnd.getDate() + cooldownDays);
+    const cooldownEnd = cooldownEndAt(lastOutcomeAt, RECYCLE_COOLDOWN_DAYS[lead.status as keyof typeof RECYCLE_COOLDOWN_DAYS], calendar);
 
     return now >= cooldownEnd ? "RECYCLE_READY" : "COOLDOWN";
   }
 
   return "NOT_APPLICABLE";
+}
+
+// Cooldown end (NOT_CONNECTED / SWITCHED_OFF 3 days, NOT_INTERESTED 7)
+// — the one place both calculateSLAStatus and getRecycleCutoff take it
+// from, so the badge and the sweep always agree. Working calendar ON =
+// working days (weekly off + Admin ranges skipped, Step 5, 2026-10-08);
+// OFF / no calendar = calendar days, exactly as before.
+function cooldownEndAt(lastOutcomeAt: string, days: number, calendar: WorkingCalendar | null): Date {
+  const workingCal = timerCalendar(calendar);
+  if (workingCal) return workingAdd(workingCal, lastOutcomeAt, days * DAY_MS);
+  const end = new Date(lastOutcomeAt);
+  end.setDate(end.getDate() + days);
+  return end;
 }
 
 export type RecycleCutoffReason =
@@ -399,8 +412,7 @@ export function getRecycleCutoff(
     (lead.status === "NOT_CONNECTED" || lead.status === "SWITCHED_OFF" || lead.status === "NOT_INTERESTED") &&
     lastOutcomeAt
   ) {
-    const cutoffAt = new Date(lastOutcomeAt);
-    cutoffAt.setDate(cutoffAt.getDate() + RECYCLE_COOLDOWN_DAYS[lead.status as keyof typeof RECYCLE_COOLDOWN_DAYS]);
+    const cutoffAt = cooldownEndAt(lastOutcomeAt, RECYCLE_COOLDOWN_DAYS[lead.status as keyof typeof RECYCLE_COOLDOWN_DAYS], calendar);
     const reason: RecycleCutoffReason =
       lead.status === "NOT_CONNECTED" ? "NOT_CONNECTED_COOLDOWN" :
       lead.status === "SWITCHED_OFF" ? "SWITCHED_OFF_COOLDOWN" : "NOT_INTERESTED_COOLDOWN";
