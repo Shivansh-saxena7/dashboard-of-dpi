@@ -8,6 +8,7 @@ import { Search, ChevronDown } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import LeadCard from "./LeadCard";
 import LeadDetailModal from "./LeadDetailModal";
+import LeadCardSkeleton from "./LeadCardSkeleton";
 import AddPersonalLeadModal from "./AddPersonalLeadModal";
 import QuickDialModal from "./QuickDialModal";
 import SLABreachHistoryCard from "./SLABreachHistoryCard";
@@ -721,11 +722,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
   );
 
   if (loading) {
-    return (
-      <div className="mx-4 mt-6 text-center text-sm text-slate-400">
-        Loading your leads...
-      </div>
-    );
+    return <LeadCardSkeleton />;
   }
 
   const selectedLead = leads.find((lead) => lead.id === selectedLeadId);
@@ -953,15 +950,12 @@ export default function LeadList({ employeeId }: LeadListProps) {
           <div className="text-5xl mb-3">
             {BOARD_STAGES.find((t) => t.stage === activeTab)?.emoji || "📋"}
           </div>
-          <h2 className="text-lg font-semibold text-gray-700">No leads here</h2>
-          <p className="text-sm text-gray-500 mt-1">
-            {activeTab === "LEADS"
-              ? "New leads assigned to you will show up here."
-              : "Move leads here from the Lead Detail screen as you work them."}
-          </p>
+          {/* Per-tab empty state (2026-10-09). */}
+          <h2 className="text-lg font-semibold text-slate-800">{(EMPTY_STATE[activeTab as BoardStage] || EMPTY_STATE.LEADS).title}</h2>
+          <p className="text-sm text-slate-600 mt-1 max-w-xs">{(EMPTY_STATE[activeTab as BoardStage] || EMPTY_STATE.LEADS).text}</p>
         </div>
       ) : (
-        <div className="mx-4 mt-4 space-y-3 pb-6">
+        <div className="mt-4 mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 items-start gap-4 mx-auto w-[calc(100%-2rem)] max-w-[1400px] rounded-[24px] bg-[linear-gradient(180deg,#f3f6fb_0%,#e9eef6_100%)] p-3 sm:p-4">
           {cardLeads.map((cardLead, index) => (
             <LeadCard
               key={cardLead.id}
@@ -1080,3 +1074,11 @@ export default function LeadList({ employeeId }: LeadListProps) {
     </>
   );
 }
+
+// Per-tab empty state (2026-10-09).
+const EMPTY_STATE: Record<BoardStage, { title: string; text: string }> = {
+  LEADS: { title: "No new leads right now", text: "New leads assigned to you will show up here as soon as they arrive." },
+  FOLLOW_UP: { title: "No follow-ups due", text: "Nice work. Leads you move to Follow-up from the lead screen will appear here." },
+  VISIT: { title: "No visits lined up", text: "Leads you move to Visit after fixing a site visit will appear here." },
+  BOOKING: { title: "No bookings yet", text: "Leads that reach Booking will appear here. Keep going!" }
+};

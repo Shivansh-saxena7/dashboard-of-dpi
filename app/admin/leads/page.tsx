@@ -1172,7 +1172,7 @@ export default function AdminLeadsPage() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 items-start gap-4 w-full max-w-[1400px] mx-auto rounded-[24px] bg-[linear-gradient(180deg,#f3f6fb_0%,#e9eef6_100%)] p-3 sm:p-4">
           {cardLeads.map((cardLead, index) => (
             <AdminLeadCard
               key={cardLead.id}

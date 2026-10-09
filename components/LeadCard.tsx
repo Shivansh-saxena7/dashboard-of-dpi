@@ -1,8 +1,8 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useState } from "react";
 import { motion } from "framer-motion";
-import { Phone, Timer, Repeat, MessageCircle, Zap } from "lucide-react";
+import { Phone, Timer, Repeat, Zap, PencilLine, ChevronDown } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { calculateSLAStatus, getRecycleCutoff, RecycleCutoffReason } from "@/lib/calculateSLAStatus";
 import { useWorkingCalendar } from "@/lib/useWorkingCalendar";
@@ -13,8 +13,13 @@ import { AssignedBySource } from "@/lib/assignedByDisplay";
 import { buildWhatsAppLink } from "@/lib/buildWhatsAppLink";
 import { rememberCalledCard } from "@/lib/lastCalledLead";
 import type { LeadSibling } from "@/lib/useLeadSiblings";
-import ExistingClientBadge from "./ExistingClientBadge";
-import RecycledBadge from "./RecycledBadge";
+import { recycledFromText } from "@/lib/recycleReasonDisplay";
+import { leadCardFont } from "@/lib/leadCardFont";
+import { BUTTON_BG, CALL_BUTTON, cardSurface, CALL, GLASS_BOX, NAME_COLOR, DOT, formatAssignedExact, formatExactTime, clockParts, GOLD, HAIRLINE, HEADER_GLASS, ICON_BUTTON, INK, MUTED, NEUTRAL_TAG, PASS, PassTone, SIZE, sourceDot, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
+import LeadCardMore, { ExpandSection } from "./LeadCardMore";
+import WhatsAppIcon from "./WhatsAppIcon";
+import LastLogPanel from "./LastLogPanel";
+import toast from "react-hot-toast";
 import TimerPausedBadge from "./TimerPausedBadge";
 
 interface LeadCardLead {
@@ -129,6 +134,7 @@ function formatCountdown(msRemaining: number): string {
 // itself is already a stable object reference between renders unless
 // its actual data changed, straight from the Supabase response.
 function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) {
+  const [expanded, setExpanded] = useState(false);
   // Working calendar (Step 4) — same one the recycle sweep counts with,
   // so the badge/countdown matches when the lead actually recycles.
   const workingCalendar = useWorkingCalendar();
@@ -172,8 +178,6 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
     workingCalendar
   );
 
-  const statusDisplay = LEAD_STATUS_DISPLAY[lead.status];
-  const priorityDisplay = LEAD_PRIORITY_DISPLAY[lead.priority];
 
   let slaBadge: { label: string; className: string; pulse?: boolean } | null = null;
 
@@ -246,168 +250,340 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
       });
   }
 
+  // ---- Design C "Pass" presentation (2026-10-09). Everything below only
+  // reads values computed above (slaStatus, recycleCutoff, slaBadge) and the
+  // lead's own fields — no new SLA / recycle rule, no new query.
+  const overdue = Boolean(slaBadge?.pulse); // SLA breached / going stale / recycling now
+  const stage = lead.board_stage || "LEADS";
+  const quiet = slaStatus === "PAUSED" || slaStatus === "COOLDOWN" || Boolean(lead.is_personal_lead);
+  const tone: PassTone = overdue ? "OVERDUE" : quiet ? "QUIET" : stage !== "LEADS" || slaStatus !== "WITHIN_SLA" ? "FOLLOW_UP" : "NEW";
+  const look = PASS[tone];
+  const source = lead.is_personal_lead ? null : lead.source;
+  const statusLabel = (LEAD_STATUS_DISPLAY[lead.status]?.label || lead.status).toUpperCase();
+
+  // Display-only cue: status still NEW but the lead has been worked (calls,
+  // or activity after assignment) — the system already treats it as
+  // contacted (follow-up clock), so say so on the card.
+  const contacted =
+    lead.status === "NEW" &&
+    (lead.call_count > 0 ||
+      Boolean(lead.last_activity_at && lead.assigned_at && new Date(lead.last_activity_at).getTime() > new Date(lead.assigned_at).getTime()));
+
+  // Header clock: the existing badge text, split into label + value.
+  let clock: { label: string; value: string; sub?: string } | null = null;
+  if (slaBadge) {
+    const [main, reason] = slaBadge.label.split(" — ");
+    if (slaStatus === "WITHIN_SLA") clock = { label: "FIRST CALL", value: main.replace(/ left$/, ""), sub: "left" };
+    else if (slaStatus === "SLA_BREACHED")
+      clock = {
+        label: "OVERDUE",
+        value: lead.sla_deadline ? formatCountdown(now.getTime() - new Date(lead.sla_deadline).getTime()).replace(/ left$/, "") : "Now",
+        sub: "past SLA"
+      };
+    else if (overdue) clock = { label: "OVERDUE", value: main.replace(/^Recycling now$/, "Now"), sub: reason || "recycling now" };
+    else if (slaStatus === "PAUSED") {
+      // "🔒 Locked until Oct 16" / "😴 Snoozed until Oct 16" / "⏳ Pending verification"
+      const words = main.split(" ");
+      clock =
+        lead.pause_reason === "VISIT_PENDING_VERIFICATION"
+          ? { label: "VISIT", value: "Pending", sub: "verification" }
+          : { label: `${(words[1] || "Paused").toUpperCase()} UNTIL`, value: main.replace(/^\S+\s\S+\suntil\s/, "") };
+    } else if (recycleCutoff) {
+      // countdown to the recycle — same value the old badge showed
+      clock = { label: slaStatus === "COOLDOWN" ? "COOLDOWN" : "FOLLOW-UP", value: main.replace(/ left$/, ""), sub: "until recycle" };
+    } else clock = { label: slaStatus === "COOLDOWN" ? "COOLDOWN" : "FOLLOW-UP", value: main };
+  }
+  const recycleReason = recycleCutoff ? RECYCLE_REASON_LABEL[recycleCutoff.reason] : null;
+  const recycleTitle = recycleCutoff ? `Recycles at ${formatExactTime(recycleCutoff.cutoffAt.toISOString())}${recycleReason ? ` — ${recycleReason}` : ""}` : undefined;
+  const recycleMsLeft = recycleCutoff ? recycleCutoff.cutoffAt.getTime() - now.getTime() : null;
+  // No other clock running (e.g. follow-up within its window): the recycle
+  // countdown becomes the header clock, as in the Pass design.
+  const recycleInClock = !clock && recycleMsLeft !== null && recycleMsLeft > 0;
+  if (recycleInClock && recycleMsLeft !== null) {
+    clock = { label: stage !== "LEADS" ? "FOLLOW-UP" : "RECYCLES IN", value: formatDaysHoursLeft(recycleMsLeft).replace(/ left$/, ""), sub: "until recycle" };
+  }
+
+  // Facts row values.
+  const assignedValue = lead.assigned_at
+    ? `${formatAssignedExact(lead.assigned_at)} · ${formatAgo(now.getTime() - new Date(lead.assigned_at).getTime())}`
+    : "—";
+  const callsValue = lead.call_count > 0 ? `${lead.call_count} ${lead.call_count === 1 ? "call" : "calls"}` : "None yet";
+  const lastActivityValue = lead.last_activity_at ? formatAgo(now.getTime() - new Date(lead.last_activity_at).getTime()) : "—";
+
+  // Same text as RecycledBadge (which this replaces on this card only).
+  const recycledFrom = lead.recycle_reason ? recycledFromText(lead.recycled_from_stage, lead.recycled_from_status, false) : null;
+  const recycledText =
+    lead.recycle_reason || lead.recycle_count > 0
+      ? `Recycled${lead.recycle_count > 0 ? ` ${lead.recycle_count}×` : ""}${recycledFrom ? ` · from ${recycledFrom}` : ""}`
+      : null;
+  const showRecycleChip = Boolean(recycleCutoff) && recycleMsLeft !== null && recycleMsLeft > 0 && !overdue && !recycleInClock;
+  const timersRunning = Boolean(recycleCutoff) || (slaStatus === "WITHIN_SLA" && Boolean(lead.sla_deadline));
+  const clockTitle = [clock ? `${clock.label} ${clock.value}` : null, clock?.sub, recycleTitle].filter(Boolean).join(" · ") || undefined;
+  // Header chip text; words drop on a narrow card (full label in the tooltip).
+  const chip = clockParts(clock);
+  const dot = (color: string) => <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color }} aria-hidden="true" />;
+
   return (
     <motion.div
       id={`lead-card-${lead.id}`}
-      initial={{ opacity: 0, y: 16 }}
+      initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, delay: Math.min(index, 8) * 0.05 }}
-      whileHover={{ y: -3 }}
-      whileTap={{ scale: 0.99 }}
+      transition={{ duration: 0.3, delay: Math.min(index, 8) * 0.04 }}
       onClick={() => onOpen(lead.id)}
-      className={`rounded-[22px] shadow-[0_4px_20px_rgba(15,23,42,0.06)] hover:shadow-[0_10px_30px_rgba(15,23,42,0.1)] transition-shadow p-4 sm:p-5 cursor-pointer ${
-        lead.is_personal_lead
-          ? "bg-violet-50/40 border-2 border-violet-200"
-          : "bg-white border border-slate-100"
-      }`}
+      style={cardSurface(tone)}
+      className={`${leadCardFont.className} @container relative w-full min-w-0 scroll-mt-28 overflow-hidden rounded-[18px] border cursor-pointer shadow-[var(--card-shadow)] transition-[transform,box-shadow] duration-200 hover:-translate-y-px hover:shadow-[var(--card-shadow-hover)] focus-within:ring-2 focus-within:ring-slate-300 motion-reduce:transition-none motion-reduce:hover:translate-y-0`}
     >
-      {/* Card layout (2026-10-08 redesign, presentation only): mobile +
-          project bold on top, name under it; status + timer row; one quiet
-          meta line; then every badge in one wrapping group. */}
-      <div className="flex items-start gap-3">
-        {/* Position-in-current-list number — "aaj maine kitne pe call
-            kiya" at a glance. A visual count of the current
-            filtered/sorted view, not a permanent lead ID. */}
-        <div className="shrink-0 w-5 pt-1 text-center text-[11px] font-bold text-slate-400">
-          {index + 1}
-        </div>
-
-        <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-2">
-            <p className="text-[17px] sm:text-lg font-extrabold text-slate-900 tracking-wide tabular-nums">{lead.mobile}</p>
-            <span className={`shrink-0 text-[10px] font-bold px-2 py-1 rounded-full ${priorityDisplay.badgeClassName}`}>
-              {priorityDisplay.label}
+      {/* 3px accent line + slim header: position, source, temperature, status | clock chip */}
+      <div className="h-[3px]" style={{ background: look.line }} aria-hidden="true" />
+      <div className={`flex items-center justify-between gap-2 px-3.5 py-1.5 ${HEADER_GLASS}`} style={{ background: look.header }}>
+        <div data-header-tags className="flex min-w-0 flex-wrap @[340px]:flex-nowrap items-center gap-1 @[360px]:gap-1.5 overflow-hidden [&>span:not(:first-child)]:shrink-0 @max-[420px]:[&>span]:px-1.5">
+          {/* Position in the current list — a visual count, not a lead ID. */}
+          <span className="text-[11px] font-bold tabular-nums" style={{ color: MUTED }}>#{index + 1}</span>
+          {source && (
+            <span className={`${TAG} min-w-0 max-w-[120px] shrink!`} style={NEUTRAL_TAG} title={source}>
+              {dot(sourceDot(source))}
+              <span className="hidden truncate @[420px]:inline">{source}</span>
             </span>
-          </div>
-          {lead.project && (
-            <p className="text-[15px] font-bold text-slate-800 truncate mt-0.5">{lead.project}</p>
           )}
-          <p className="text-sm text-slate-600 truncate mt-0.5">{lead.name}</p>
+          {/* Lead temperature (priority) — always shown, as on the old card. HOT/WARM tinted, COLD neutral. */}
+          {lead.priority === "hot" ? (
+            <span className={TAG} style={TINT_TAG.hot}>HOT</span>
+          ) : lead.priority === "warm" ? (
+            <span className={TAG} style={TINT_TAG.warm}>WARM</span>
+          ) : (
+            <span className={TAG} style={NEUTRAL_TAG}>
+              <span className="hidden @[360px]:inline-flex">{dot(DOT.blueGrey)}</span>
+              {(LEAD_PRIORITY_DISPLAY[lead.priority]?.label || lead.priority).toUpperCase()}
+            </span>
+          )}
+          <span className={`${TAG} tracking-[.04em]`} style={statusPillStyle(lead.status)}>{statusLabel}</span>
+        </div>
+        {clock && (
+          <span
+            title={clockTitle}
+            className={`inline-flex h-[24px] shrink-0 items-center gap-1 rounded-full bg-white px-2 @[360px]:gap-1.5 @[360px]:px-2.5 tabular-nums ${overdue ? "motion-safe:animate-pulse" : ""}`}
+            style={{ color: look.accent, boxShadow: `inset 0 0 0 1px ${HAIRLINE}, 0 1px 2px rgba(15,23,42,.05)` }}
+          >
+            <Timer size={12} strokeWidth={2} aria-hidden="true" />
+            <span className="text-[12px] font-extrabold whitespace-nowrap">
+              {chip?.lead && <span className="hidden @[420px]:inline">{chip.lead}</span>}
+              {chip?.main}
+              {chip?.tail && <span className="hidden @[360px]:inline">{chip.tail}</span>}
+            </span>
+          </span>
+        )}
+      </div>
+
+      {/* Body — one left edge (px-3.5), 8px rhythm */}
+      <div className="flex flex-col gap-2 px-3.5 pt-2.5 pb-3">
+        {/* Identity + last log: side by side on a wide card, stacked (log as a slim strip) on a narrow one. */}
+        <div className="flex flex-col gap-2 @[380px]:flex-row @[380px]:items-start @[380px]:gap-3">
+          <div className="min-w-0 flex-1">
+            <p title={lead.name} className={`${SIZE.name} font-extrabold tracking-[-0.015em] break-words line-clamp-2`} style={{ color: NAME_COLOR }}>{lead.name}</p>
+            {/* Tap the number to copy it (Call button unchanged). */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigator.clipboard?.writeText(lead.mobile).then(() => toast.success("Number copied"), () => {});
+              }}
+              title="Tap to copy"
+              className={`mt-0.5 block ${SIZE.number} font-bold tabular-nums cursor-copy rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300`}
+              style={{ color: "#1e293b" }}
+            >
+              {lead.mobile}
+            </button>
+            {lead.project && <p className={`mt-0.5 ${SIZE.project} font-bold truncate`} style={{ color: look.project }}>{lead.project}</p>}
+          </div>
+          <LastLogPanel
+            lookupKey="lead_history_id"
+            id={lead.leadHistoryId}
+            version={lead.last_activity_at}
+            called={lead.call_count > 0}
+            resultLabel={lead.status !== "NEW" ? LEAD_STATUS_DISPLAY[lead.status]?.label : null}
+            className="@[380px]:w-[46%] @[380px]:max-w-[230px] @[380px]:shrink-0"
+          />
+        </div>
+
+        {/* Facts row: label small muted, value bold. Assigned = exact time · how long ago. */}
+        <dl className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-4 rounded-[12px] px-3 py-2" style={GLASS_BOX}>
+          <div className="min-w-0">
+            <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Assigned</dt>
+            <dd className={`${SIZE.factValue} font-bold tabular-nums`} style={{ color: INK }} title={assignedValue}>
+              {lead.assigned_at ? (
+                <>
+                  <span className="whitespace-nowrap">{formatAssignedExact(lead.assigned_at)}</span>{" "}
+                  <span className="whitespace-nowrap font-semibold" style={{ color: TEXT2 }}>· {formatAgo(now.getTime() - new Date(lead.assigned_at).getTime())}</span>
+                </>
+              ) : (
+                "—"
+              )}
+            </dd>
+          </div>
+          <div className="min-w-0">
+            <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Calls</dt>
+            <dd className={`${SIZE.factValue} font-bold tabular-nums truncate`} style={{ color: INK }}>{callsValue}</dd>
+          </div>
+          <div className="min-w-0">
+            <dt className={`${SIZE.factLabel} font-bold truncate`} style={{ color: MUTED }}>Last activity</dt>
+            <dd className={`${SIZE.factValue} font-bold tabular-nums truncate`} style={{ color: INK }}>{lastActivityValue}</dd>
+          </div>
+        </dl>
+
+        {/* Tags: neutral pill + dot; only Call first / recycle-soon tinted. Empty row collapses. */}
+        <div className="flex flex-wrap items-center gap-1.5 min-w-0 [&:not(:has(>:not(:empty)))]:hidden">
+          {overdue && <span className={TAG} style={TINT_TAG.callFirst}>Call first</span>}
+          {contacted && (
+            <span className={TAG} style={NEUTRAL_TAG} title="Called or worked since assignment — on the follow-up clock now">
+              {dot(DOT.teal)}
+              Contacted
+            </span>
+          )}
+          {showRecycleChip && recycleMsLeft !== null && (
+            <span title={recycleTitle} className={`${TAG} tabular-nums`} style={recycleMsLeft < 12 * 3600000 ? TINT_TAG.recycleSoon : NEUTRAL_TAG}>
+              <Timer size={11} strokeWidth={2} aria-hidden="true" />
+              Recycles in {formatDaysHoursLeft(recycleMsLeft).replace(/ left$/, "")}
+            </span>
+          )}
+          {lead.is_personal_lead && (
+            <span className={TAG} style={NEUTRAL_TAG}>
+              {dot(DOT.slate)}
+              Personal
+            </span>
+          )}
+          {lead.source === "Legacy" && (
+            <span className={TAG} style={NEUTRAL_TAG}>
+              {dot(DOT.gold)}
+              Legacy
+            </span>
+          )}
+          {recycledText && (
+            <span title={recycledText} className={`${TAG} max-w-full`} style={NEUTRAL_TAG}>
+              {dot(DOT.slate)}
+              <span className="truncate">{recycledText}</span>
+            </span>
+          )}
+          {lead.siblings && lead.siblings.length > 0 && (
+            <span className={TAG} style={NEUTRAL_TAG}>
+              {dot(DOT.gold)}
+              Existing client
+            </span>
+          )}
+          {lead.catcher_name && (
+            <span title={`Catcher: ${lead.catcher_name}`} className={`${TAG} max-w-[170px]`} style={NEUTRAL_TAG}>
+              {dot(DOT.slate)}
+              <span className="truncate">Catcher: {lead.catcher_name}</span>
+            </span>
+          )}
+          {/* Step 8: weekly off / Admin pause — only on leads whose recycle or SLA clock is running.
+              Shared badge, restyled here to the neutral pill (its sky ⏸ icon stays). */}
+          <span className="inline-flex empty:hidden [&>span]:inline-flex [&>span]:h-[22px] [&>span]:items-center [&>span]:text-[11px] [&>span]:bg-[#f3f6fa]! [&>span]:text-[#475569]! [&>span]:shadow-[inset_0_0_0_1px_#e8edf3]">
+            <TimerPausedBadge size="sm" clockRunning={timersRunning} />
+          </span>
+        </div>
+
+        {lead.assigned_by_type === "TEAM_LEADER" && (
+          <div className="flex items-start gap-1.5 rounded-[12px] px-3 py-2" style={GLASS_BOX}>
+            <Repeat size={12} strokeWidth={2} className="shrink-0 mt-0.5" style={{ color: GOLD }} />
+            <p className="text-[12px] leading-snug font-semibold" style={{ color: TEXT2 }}>
+              {lead.assigned_by?.name || "Your Team Leader"} reassigned this lead to you
+              {lead.reassign_note && (
+                <>
+                  {" "}— <span className="font-extrabold" style={{ color: INK }}>{lead.reassign_note}</span>
+                </>
+              )}
+            </p>
+          </div>
+        )}
+
+        {/* Perforated tear line, then the action stub */}
+        <div className="border-t border-dashed" style={{ borderColor: HAIRLINE }} aria-hidden="true" />
+        <div className="flex items-center gap-2">
+          <motion.a
+            href={`tel:${lead.mobile}`}
+            onClick={handleCallClick}
+            whileTap={{ scale: 0.98 }}
+            style={CALL}
+            className={`${CALL_BUTTON} ${SIZE.button}`}
+          >
+            <Phone size={16} strokeWidth={2} />
+            Call now
+          </motion.a>
+          <a
+            href={buildWhatsAppLink(lead.mobile)}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={handleWhatsAppClick}
+            aria-label="WhatsApp"
+            title="WhatsApp"
+            className={ICON_BUTTON}
+            style={BUTTON_BG.whatsapp}
+          >
+            <WhatsAppIcon size={20} />
+          </a>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpen(lead.id);
+            }}
+            aria-label="Update status"
+            title="Update status"
+            className={ICON_BUTTON}
+            style={look.update}
+          >
+            <PencilLine size={17} strokeWidth={2} />
+          </button>
+          {/* Quick Dial (2026-09-23) — dials a NEW number, unrelated to this lead;
+              after the call it offers "Add as personal lead" (LeadList.tsx). */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onQuickDial();
+            }}
+            aria-label="Quick dial a new number"
+            title="Quick dial a new number (you can add it as a personal lead)"
+            className={ICON_BUTTON}
+            style={BUTTON_BG.quickDial}
+          >
+            <Zap size={17} strokeWidth={2} />
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded((v) => !v);
+            }}
+            aria-label={expanded ? "Hide details" : "Show details"}
+            aria-expanded={expanded}
+            title={expanded ? "Hide details" : "Show details"}
+            className={ICON_BUTTON}
+            style={expanded ? BUTTON_BG.chevronOpen : BUTTON_BG.chevronClosed}
+          >
+            <ChevronDown size={18} strokeWidth={2} className={`transition-transform motion-reduce:transition-none ${expanded ? "rotate-180" : ""}`} />
+          </button>
         </div>
       </div>
 
-      <div className="flex items-center flex-wrap gap-1.5 mt-3">
-        <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${statusDisplay.badgeClassName}`}>
-          {statusDisplay.label}
-        </span>
-
-        {slaBadge && (
-          <span
-            title={
-              recycleCutoff
-                ? `Exact time: ${recycleCutoff.cutoffAt.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`
-                : undefined
-            }
-            className={`flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full ${slaBadge.className} ${
-              slaBadge.pulse ? "animate-pulse" : ""
-            }`}
-          >
-            <Timer size={11} />
-            {slaBadge.label}
-          </span>
-        )}
-      </div>
-
-      <p className="text-[11.5px] text-slate-500 mt-2 leading-relaxed">
-        {[
-          lead.last_activity_at ? `Last activity ${formatAgo(now.getTime() - new Date(lead.last_activity_at).getTime())}` : null,
-          lead.assigned_at
-            ? `Assigned ${new Date(lead.assigned_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`
-            : null,
-          lead.call_count > 0 ? `${lead.call_count} ${lead.call_count === 1 ? "call" : "calls"}` : "No calls yet",
-          !lead.is_personal_lead && lead.source ? lead.source : null
-        ]
-          .filter(Boolean)
-          .join(" · ")}
-      </p>
-
-      {/* Every tag in one group that wraps neatly on a phone. Personal gets
-          its own badge (and the plain source text above is skipped for it)
-          so it never reads like just another source. TimerPausedBadge hides
-          itself when it doesn't apply; empty:hidden drops the row then. */}
-      <div className="flex items-center flex-wrap gap-1.5 mt-2.5 min-w-0 empty:hidden">
-        {lead.is_personal_lead && (
-          <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-violet-100 text-violet-800 border border-violet-200">
-            🔒 Personal
-          </span>
-        )}
-        {/* Legacy Phase 3 (2026-10-08): lead made from an old client register. */}
-        {lead.source === "Legacy" && (
-          <span className="text-[11px] px-2.5 py-1 font-bold rounded-full bg-amber-50 text-amber-800 border border-amber-100">📒 Legacy</span>
-        )}
-        {lead.catcher_name && (
-          <span
-            className="max-w-[160px] truncate text-[11px] font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-800"
-            title={`Catcher: ${lead.catcher_name}`}
-          >
-            🎣 {lead.catcher_name}
-          </span>
-        )}
-        {(lead.recycle_count > 0 || lead.recycle_reason) && (
-          <RecycledBadge reason={lead.recycle_reason} fromStage={lead.recycled_from_stage} fromStatus={lead.recycled_from_status} count={lead.recycle_count} />
-        )}
-        <ExistingClientBadge siblings={lead.siblings} />
-        {/* Step 8: weekly off / Admin pause — only on leads whose recycle or SLA clock is running. */}
-        <TimerPausedBadge clockRunning={Boolean(recycleCutoff) || (slaStatus === "WITHIN_SLA" && Boolean(lead.sla_deadline))} />
-      </div>
-
-      {lead.assigned_by_type === "TEAM_LEADER" && (
-        <div className="flex items-start gap-1.5 mt-2 rounded-xl bg-amber-50 border border-amber-100 px-2.5 py-2">
-          <Repeat size={12} className="text-amber-600 shrink-0 mt-0.5" />
-          <p className="text-[11px] text-amber-800 leading-relaxed">
-            {lead.assigned_by?.name || "Your Team Leader"} reassigned this lead to you
-            {lead.reassign_note && (
-              <>
-                {" "}— <span className="font-semibold">{lead.reassign_note}</span>
-              </>
-            )}
-          </p>
-        </div>
-      )}
-
-      <div className="mt-4 flex items-center gap-2">
-        <motion.a
-          href={`tel:${lead.mobile}`}
-          onClick={handleCallClick}
-          whileTap={{ scale: 0.98 }}
-          className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl bg-gradient-to-r from-yellow-400 to-amber-500 text-slate-900 text-sm font-bold shadow-[0_6px_16px_rgba(217,119,6,0.3)] active:shadow-[0_2px_8px_rgba(217,119,6,0.3)]"
-        >
-          <Phone size={15} />
-          Call
-        </motion.a>
-
-        <motion.a
-          href={buildWhatsAppLink(lead.mobile)}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={handleWhatsAppClick}
-          whileTap={{ scale: 0.98 }}
-          className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl bg-emerald-500 text-white text-sm font-bold shadow-[0_6px_16px_rgba(16,185,129,0.3)] active:shadow-[0_2px_8px_rgba(16,185,129,0.3)]"
-        >
-          <MessageCircle size={15} />
-          WhatsApp
-        </motion.a>
-
-        {/* Quick Dial (2026-09-23) — deliberately unrelated to this
-            card's own lead/number (Call above still dials THIS lead,
-            unchanged) — a fixed-width icon button, not flex-1 like
-            Call/WhatsApp, since it's an occasional secondary action on
-            every card, not equal-weight with the two primary ones.
-            stopPropagation for the same reason Call/WhatsApp's own
-            handlers do — the whole card has its own onClick that
-            opens the detail modal. */}
-        <motion.button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onQuickDial();
-          }}
-          whileTap={{ scale: 0.94 }}
-          title="Quick Dial a new number"
-          className="shrink-0 w-11 h-11 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 flex items-center justify-center"
-        >
-          <Zap size={16} />
-        </motion.button>
+      <div className="px-3.5 empty:hidden">
+        <ExpandSection open={expanded}>
+          <div className="mb-3.5 rounded-[14px] px-3 pb-3" style={{ background: "rgba(255,255,255,.8)", boxShadow: `inset 0 0 0 1px ${HAIRLINE}` }}>
+            <LeadCardMore
+              leadId={lead.id}
+              leadHistoryId={lead.leadHistoryId}
+              status={lead.status}
+              boardStage={lead.board_stage}
+              contacted={contacted}
+              accent={look.accent}
+              times={[
+                ...(lead.assigned_at ? [{ label: "Assigned", value: formatExactTime(lead.assigned_at) }] : []),
+                ...(lead.last_activity_at ? [{ label: "Last activity", value: formatExactTime(lead.last_activity_at) }] : []),
+                ...(recycleCutoff ? [{ label: "Recycles at", value: formatExactTime(recycleCutoff.cutoffAt.toISOString()) }] : [])
+              ]}
+            />
+          </div>
+        </ExpandSection>
       </div>
     </motion.div>
   );

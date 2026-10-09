@@ -2,7 +2,7 @@
 
 import { memo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Check, History } from "lucide-react";
+import { Check, History, ChevronDown, Timer } from "lucide-react";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
@@ -12,6 +12,11 @@ import { isLeadTerminal } from "@/lib/isLeadTerminal";
 import { useWorkingCalendar } from "@/lib/useWorkingCalendar";
 import { DAY_MS, timerCalendar, workingElapsedMs } from "@/lib/workingCalendar";
 import AdminLeadHistoryModal from "./AdminLeadHistoryModal";
+import LeadCardMore, { ExpandSection } from "./LeadCardMore";
+import LastLogPanel from "./LastLogPanel";
+import toast from "react-hot-toast";
+import { leadCardFont } from "@/lib/leadCardFont";
+import { BUTTON_BG, CALL_BUTTON, cardSurface, CALL, GLASS_BOX, NAME_COLOR, clockParts, DOT, formatAgo, formatAssignedExact, formatExactTime, HAIRLINE, HEADER_GLASS, ICON_BUTTON, INK, MUTED, NEUTRAL_TAG, PASS, PassTone, SIZE, sourceDot, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
 import ExistingClientBadge from "./ExistingClientBadge";
 import RecycledBadge from "./RecycledBadge";
 import TimerPausedBadge from "./TimerPausedBadge";
@@ -172,6 +177,7 @@ function AdminLeadCard({
   const workingCalendar = useWorkingCalendar();
 
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [reassignOpen, setReassignOpen] = useState(false);
   const [reassignEmployeeId, setReassignEmployeeId] = useState("");
   const [reassignReason, setReassignReason] = useState("");
@@ -286,313 +292,369 @@ function AdminLeadCard({
       : null;
   const recycleCutoffMsRemaining = recycleCutoff ? recycleCutoff.cutoffAt.getTime() - Date.now() : 0;
 
+  // ---- Design C "Pass", restrained palette (2026-10-09). Only reads the
+  // values computed above (isTerminal, isPaused, isStale, isGoingStale,
+  // recycleCutoff, showOnLeaveBadge) — every condition is the old card's.
+  // Look shared with the employee card via lib/leadCardLook.ts.
+  const recyclingNow = Boolean(isGoingStale || (!isStale && recycleCutoff && recycleCutoffMsRemaining <= 0));
+  const tone: PassTone = recyclingNow
+    ? "OVERDUE"
+    : isTerminal || isPaused || lead.isPersonalLead
+    ? "QUIET"
+    : lead.leadType !== "DATA" && lead.boardStage !== "LEADS"
+    ? "FOLLOW_UP"
+    : "NEW";
+  const look = PASS[tone];
+  const nowMs = new Date().getTime();
+  const dot = (color: string) => <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color }} aria-hidden="true" />;
+  const untilDate = lead.pausedUntil ? new Date(lead.pausedUntil).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "";
+
+  // Header clock — the same states the old badges showed.
+  type Clock = { label: string; value: string; sub?: string };
+  const pauseClock: Clock | null = !isPaused
+    ? null
+    : lead.pauseReason === "VISIT_LOCK"
+    ? { label: "LOCKED UNTIL", value: untilDate }
+    : lead.pauseReason === "VISIT_PENDING_VERIFICATION"
+    ? { label: "VISIT", value: "Pending" }
+    : { label: "SNOOZED UNTIL", value: untilDate };
+  const recycleLeft = recycleCutoff && recycleCutoffMsRemaining > 0 ? formatDaysHoursLeft(recycleCutoffMsRemaining).replace(/ left$/, "") : null;
+  const staleClock: Clock | null = isStale
+    ? isGoingStale
+      ? { label: "OVERDUE", value: "Now", sub: recycleCutoff ? RECYCLE_REASON_LABEL[recycleCutoff.reason] : "Going stale" }
+      : recycleLeft
+      ? { label: "FOLLOW-UP", value: recycleLeft, sub: "until recycle" }
+      : { label: "FOLLOW-UP", value: "Needs follow-up" }
+    : recycleCutoff
+    ? recycleCutoffMsRemaining <= 0
+      ? { label: "OVERDUE", value: "Now", sub: RECYCLE_REASON_LABEL[recycleCutoff.reason] }
+      : { label: "COOLDOWN", value: recycleLeft as string, sub: "until recycle" }
+    : null;
+  // Old card could show a pause badge and a stale/cooldown badge together:
+  // the clock shows the stale/cooldown one, the pause becomes a tag.
+  const clock = staleClock || pauseClock;
+  const pauseAsTag = staleClock && pauseClock ? pauseClock : null;
+  const chip = clockParts(clock);
+  const recycleReason = recycleCutoff ? RECYCLE_REASON_LABEL[recycleCutoff.reason] : null;
+  const recycleTitle = recycleCutoff ? `Recycles at ${formatExactTime(recycleCutoff.cutoffAt.toISOString())}${recycleReason ? ` — ${recycleReason}` : ""}` : undefined;
+  const clockTitle = [clock ? `${clock.label} ${clock.value}` : null, clock?.sub, recycleTitle].filter(Boolean).join(" · ") || undefined;
+
+  const callsValue = lead.callCount > 0 ? `${lead.callCount} ${lead.callCount === 1 ? "call" : "calls"}` : "None yet";
+  const lastActivityValue = lead.lastActivityAt ? formatAgo(nowMs - new Date(lead.lastActivityAt).getTime()) : "—";
+  const statusLabel = (statusDisplay?.label || lead.status).toUpperCase();
+  const FIELD = "block h-11 w-full rounded-[12px] bg-white px-3 text-[13px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-slate-300";
+  // Shared badges restyled to the neutral pill here (their own behaviour —
+  // tooltip, "N other leads" popover — is unchanged).
+  const NEUTRALIZE = "[&>span]:bg-[#f3f6fa]! [&>span]:text-[#475569]! [&>span]:border-[#e8edf3]! [&>span>button]:bg-[#f3f6fa]! [&>span>button]:text-[#475569]! [&>span>button]:border-[#e8edf3]!";
+
   return (
     <motion.div
-      initial={{ opacity: 0, y: 16 }}
+      initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, delay: Math.min(index, 10) * 0.04 }}
-      whileHover={{ y: -3 }}
-      className={`relative overflow-hidden rounded-[20px] shadow-[0_4px_20px_rgba(15,23,42,0.06)] hover:shadow-[0_10px_28px_rgba(29,78,216,0.12)] transition-shadow p-5 ${
-        lead.isPersonalLead ? "bg-violet-50/40 border-2 border-violet-200" : "bg-white border border-slate-100"
-      }`}
+      transition={{ duration: 0.3, delay: Math.min(index, 10) * 0.04 }}
+      style={cardSurface(tone)}
+      className={`${leadCardFont.className} @container relative w-full min-w-0 scroll-mt-28 overflow-hidden rounded-[18px] border shadow-[var(--card-shadow)] transition-[transform,box-shadow] duration-200 hover:-translate-y-px hover:shadow-[var(--card-shadow-hover)] focus-within:ring-2 focus-within:ring-slate-300 motion-reduce:transition-none motion-reduce:hover:translate-y-0`}
     >
-      <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-blue-600 via-cyan-400 to-blue-600" />
+      {/* 3px accent line + slim header: source, temperature, status | clock chip */}
+      <div className="h-[3px]" style={{ background: look.line }} aria-hidden="true" />
+      <div className={`flex items-center justify-between gap-2 px-3.5 py-1.5 ${HEADER_GLASS}`} style={{ background: look.header }}>
+        <div data-header-tags className="flex min-w-0 flex-wrap @[340px]:flex-nowrap items-center gap-1 @[360px]:gap-1.5 overflow-hidden [&>*]:shrink-0 @max-[420px]:[&>span]:px-1.5">
+          {/* Same dedicated-badge-over-generic-source-pill choice as LeadCard.tsx (2026-09-23). */}
+          {lead.isPersonalLead ? (
+            <span className={TAG} style={NEUTRAL_TAG}>
+              {dot(DOT.slate)}
+              Personal
+            </span>
+          ) : (
+            lead.source && (
+              <span className={`${TAG} min-w-0 max-w-[120px] shrink!`} style={NEUTRAL_TAG} title={lead.source}>
+                {dot(sourceDot(lead.source))}
+                <span className="hidden truncate @[420px]:inline">{lead.source}</span>
+              </span>
+            )
+          )}
+          {lead.priority === "hot" ? (
+            <span className={TAG} style={TINT_TAG.hot}>HOT</span>
+          ) : lead.priority === "warm" ? (
+            <span className={TAG} style={TINT_TAG.warm}>WARM</span>
+          ) : (
+            <span className={TAG} style={NEUTRAL_TAG}>
+              <span className="hidden @[360px]:inline-flex">{dot(DOT.blueGrey)}</span>
+              {(priorityDisplay?.label || lead.priority).toUpperCase()}
+            </span>
+          )}
+          <span className={`${TAG} tracking-[.04em]`} style={statusPillStyle(lead.status)}>{statusLabel}</span>
+        </div>
+        {chip && (
+          <span
+            title={clockTitle}
+            className={`inline-flex h-[24px] shrink-0 items-center gap-1 rounded-full bg-white px-2 @[360px]:gap-1.5 @[360px]:px-2.5 tabular-nums ${recyclingNow ? "motion-safe:animate-pulse" : ""}`}
+            style={{ color: look.accent, boxShadow: `inset 0 0 0 1px ${HAIRLINE}, 0 1px 2px rgba(15,23,42,.05)` }}
+          >
+            <Timer size={12} strokeWidth={2} aria-hidden="true" />
+            <span className="text-[12px] font-extrabold whitespace-nowrap">
+              {chip.lead && <span className="hidden @[420px]:inline">{chip.lead}</span>}
+              {chip.main}
+              {chip.tail && <span className="hidden @[360px]:inline">{chip.tail}</span>}
+            </span>
+          </span>
+        )}
+      </div>
 
-      <div className="flex items-start gap-3">
-        {selectable && !isTerminal && !readOnly && (
-          // Custom button, not a native <input type="checkbox"> — the
-          // native element's checkmark glyph is drawn by the browser's
-          // own widget rendering (combined with accent-color), which
-          // turned out inconsistent enough to be invisible in real
-          // testing despite the element being fully functional. This
-          // renders the check mark ourselves (a lucide icon), so its
-          // visibility is never dependent on browser/OS checkbox theming.
+      {/* Body — one left edge (px-3.5), 8px rhythm */}
+      <div className="flex flex-col gap-2 px-3.5 pt-2.5 pb-3">
+        {/* Select box + avatar sit beside the name, so the header stays one line. */}
+        {/* Identity + last log: side by side on a wide card, stacked on a narrow one. */}
+        <div className="flex flex-col gap-2 @[400px]:flex-row @[400px]:items-start @[400px]:gap-3">
+        <div className="flex min-w-0 flex-1 items-start gap-2.5">
+              {selectable && !isTerminal && !readOnly && (
+                // Custom button, not a native checkbox — the native checkmark was
+                // invisible on some browsers. 44px tap target around a 20px box.
+                <button
+                  type="button"
+                  role="checkbox"
+                  aria-checked={selected}
+                  aria-label={selected ? "Deselect lead" : "Select lead"}
+                  onClick={() => onToggleSelect?.(lead.id)}
+                  className="-m-3 p-3 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+                >
+                  <span className={`h-5 w-5 rounded border-2 flex items-center justify-center ${selected ? "bg-blue-600 border-blue-600" : "bg-white border-slate-400"}`}>
+                    {selected && <Check size={13} strokeWidth={3} className="text-white" />}
+                  </span>
+                </button>
+              )}
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[13px] font-extrabold" style={{ background: "#eef2f6", color: TEXT2, boxShadow: `inset 0 0 0 1px ${HAIRLINE}` }} aria-hidden="true">
+                {initial}
+              </span>
+          <div className="min-w-0 flex-1">
+          <p title={lead.name} className={`${SIZE.name} font-extrabold tracking-[-0.015em] break-words line-clamp-2`} style={{ color: NAME_COLOR }}>{lead.name}</p>
+          {/* Tap the number to copy it. */}
           <button
             type="button"
-            role="checkbox"
-            aria-checked={selected}
-            aria-label={selected ? "Deselect lead" : "Select lead"}
-            onClick={() => onToggleSelect?.(lead.id)}
-            // No transition-colors here (2026-09-18) — Tailwind's
-            // transition utilities default to a 150ms eased fade, which
-            // is exactly the kind of small-but-visible gap between
-            // click and checkmark the "instant" requirement rules out.
-            // The color/icon flip below is a plain synchronous class
-            // swap, so it paints in the very next frame.
-            className={`mt-1 h-5 w-5 shrink-0 rounded border-2 flex items-center justify-center ${
-              selected ? "bg-blue-600 border-blue-600" : "bg-white border-slate-400"
-            }`}
+            onClick={() => navigator.clipboard?.writeText(lead.mobile).then(() => toast.success("Number copied"), () => {})}
+            title="Tap to copy"
+            className={`mt-0.5 block ${SIZE.number} font-bold tabular-nums cursor-copy rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300`}
+            style={{ color: "#1e293b" }}
           >
-            {selected && <Check size={13} strokeWidth={3} className="text-white" />}
+            {lead.mobile}
           </button>
-        )}
-
-        <div className="shrink-0 h-11 w-11 rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 shadow-[0_4px_12px_rgba(37,99,235,0.35)] flex items-center justify-center text-white font-bold text-sm">
-          {initial}
-        </div>
-
-        <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="text-[15px] font-bold text-slate-800 truncate">{lead.name}</p>
-              <p className="text-xs text-slate-500 mt-0.5">{lead.mobile}</p>
-              {lead.project && (
-                <p className="text-xs text-slate-500 truncate">{lead.project}</p>
-              )}
-            </div>
-
-            <div className="shrink-0 flex flex-col items-end gap-1">
-              <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${priorityDisplay.badgeClassName}`}>
-                {priorityDisplay.label}
-              </span>
-              {/* Same dedicated-badge-over-generic-source-pill choice
-                  as LeadCard.tsx (2026-09-23) — see that file's own
-                  comment. */}
-              {lead.isPersonalLead ? (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 border border-violet-200">
-                  🔒 Personal
-                </span>
-              ) : (
-                lead.source && (
-                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">
-                    {lead.source}
-                  </span>
-                )
-              )}
-              {lead.catcherName && (
-                <span
-                  className="max-w-[140px] truncate text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700"
-                  title={`Catcher: ${lead.catcherName}`}
-                >
-                  🎣 Catcher: {lead.catcherName}
-                </span>
-              )}
-            </div>
+          {lead.project && <p className={`mt-0.5 ${SIZE.project} font-bold truncate`} style={{ color: look.project }}>{lead.project}</p>}
           </div>
         </div>
-      </div>
-
-      <div className="flex items-center flex-wrap gap-1.5 mt-3.5">
-        {lead.leadType === "DATA" && (
-          <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-violet-50 text-violet-700">
-            Data
-          </span>
-        )}
-
-        <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${statusDisplay.badgeClassName}`}>
-          {statusDisplay.label}
-        </span>
-
-        {/* Data has no board_stage/Visit/Booking funnel at all (Phase
-            4 — board_stage stays 'LEADS' forever on a Data row, purely
-            an unused artifact of the column's default) — showing this
-            badge next to "Data" implied a workflow that doesn't exist
-            for it, hence Lead-only. */}
-        {lead.leadType !== "DATA" && boardStageDisplay && (
-          <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-blue-50 text-blue-700">
-            {boardStageDisplay.emoji} {boardStageDisplay.label}
-          </span>
-        )}
-
-        {lead.callCount > 0 && (
-          <span className="text-[11px] font-medium text-slate-400 px-1">
-            Called {lead.callCount}x
-          </span>
-        )}
-
-        {isPaused && (
-          <span
-            className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
-              lead.pauseReason === "VISIT_LOCK"
-                ? "bg-emerald-50 text-emerald-700"
-                : lead.pauseReason === "VISIT_PENDING_VERIFICATION"
-                ? "bg-amber-50 text-amber-700"
-                : "bg-indigo-50 text-indigo-700"
-            }`}
-          >
-            {lead.pauseReason === "VISIT_LOCK"
-              ? "🔒 Locked"
-              : lead.pauseReason === "VISIT_PENDING_VERIFICATION"
-              ? "⏳ Pending verification"
-              : "😴 Snoozed"}
-            {lead.pauseReason !== "VISIT_PENDING_VERIFICATION" && (
-              <> until {new Date(lead.pausedUntil!).toLocaleDateString([], { month: "short", day: "numeric" })}</>
-            )}
-          </span>
-        )}
-
-        {isStale && (
-          <span
-            title={recycleCutoff ? `Exact time: ${recycleCutoff.cutoffAt.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}` : undefined}
-            className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
-              isGoingStale ? "bg-red-100 text-red-700 animate-pulse" : "bg-amber-50 text-amber-600"
-            }`}
-          >
-            {isGoingStale
-              ? `⚠️ Recycling now — ${recycleCutoff ? RECYCLE_REASON_LABEL[recycleCutoff.reason] : "Going stale"}`
-              : recycleCutoff
-              ? `⏳ ${formatDaysHoursLeft(recycleCutoffMsRemaining)} — ${RECYCLE_REASON_LABEL[recycleCutoff.reason]}`
-              : "⏳ Needs follow-up"}
-          </span>
-        )}
-
-        {/* Stale/Recycle-Warning filter (2026-09-16) — the Leads-stage
-            NOT_CONNECTED/SWITCHED_OFF/NOT_INTERESTED cooldown case
-            isStale above never covers (it's gated on isBeyondLeadsStage
-            only). Independent condition, own badge slot. */}
-        {!isStale && recycleCutoff && (
-          <span
-            title={`Exact time: ${recycleCutoff.cutoffAt.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`}
-            className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
-              recycleCutoffMsRemaining <= 0 ? "bg-red-100 text-red-700 animate-pulse" : "bg-slate-100 text-slate-500"
-            }`}
-          >
-            {recycleCutoffMsRemaining <= 0
-              ? `⚠️ Recycling now — ${RECYCLE_REASON_LABEL[recycleCutoff.reason]}`
-              : `⏳ ${formatDaysHoursLeft(recycleCutoffMsRemaining)} — ${RECYCLE_REASON_LABEL[recycleCutoff.reason]}`}
-          </span>
-        )}
-
-        {/* Employee Leave/Holiday gap (2026-08-23, Point A) — shown
-            instead of (never alongside) isStale/isGoingStale above,
-            since showOnLeaveBadge and isStale can't both be true
-            (isStale is gated on !isOwnerOnLeave). Compatible with
-            isPaused though — a Snooze/Visit-lock pause and an owner
-            being on leave are independent, genuinely-different reasons
-            a lead isn't moving, so both can legitimately show together. */}
-        {showOnLeaveBadge && (
-          <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-teal-50 text-teal-700">
-            🌴 Timer Paused — Owner on Leave
-          </span>
-        )}
-        {/* Step 8: weekly off / Admin pause. recycleCutoff is already null for
-            paused, on-leave, personal and terminal leads, so those never get it. */}
-{/* Legacy Phase 3 (2026-10-08): lead made from an old client register. */}
-        {lead.source === "Legacy" && (
-          <span className="text-[11px] px-2.5 py-1 font-bold rounded-full bg-amber-50 text-amber-800 border border-amber-100">📒 Legacy</span>
-        )}
-        <TimerPausedBadge clockRunning={Boolean(recycleCutoff)} />
-      </div>
-
-      {(lead.recycleCount > 0 || lead.recycleReason || (lead.siblings && lead.siblings.length > 0)) && (
-        <div className="flex items-center gap-1.5 mt-2.5 min-w-0">
-          <RecycledBadge reason={lead.recycleReason} fromStage={lead.recycledFromStage} fromStatus={lead.recycledFromStatus} count={lead.recycleCount} fullDetail />
-          <ExistingClientBadge siblings={lead.siblings} fullDetail />
+        <LastLogPanel
+          lookupKey="lead_id"
+          id={lead.id}
+          version={lead.lastActivityAt}
+          called={lead.callCount > 0}
+          resultLabel={lead.status !== "NEW" ? statusDisplay?.label : null}
+          className="@[400px]:w-[44%] @[400px]:max-w-[230px] @[400px]:shrink-0"
+        />
         </div>
-      )}
 
-      <div className="flex items-center justify-between mt-3.5 pt-3.5 border-t border-slate-100">
-        <div>
-          <p className="text-[10px] uppercase tracking-wide text-slate-400 font-bold">Owner</p>
-          {lead.ownerName ? (
-            <p className="text-sm font-semibold text-slate-700">{lead.ownerName}</p>
-          ) : (
-            <div className="mt-0.5 space-y-1">
-              {lead.pendingTeamName ? (
-                <span className="inline-block text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">
-                  Reserved for {lead.pendingTeamName}
-                </span>
+        {/* Facts row: Assigned (exact · ago) / Calls / Last activity */}
+        <dl className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-4 rounded-[12px] px-3 py-2" style={GLASS_BOX}>
+          <div className="min-w-0">
+            <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Assigned</dt>
+            <dd className={`${SIZE.factValue} font-bold tabular-nums`} style={{ color: INK }}>
+              {lead.assignedAt ? (
+                <>
+                  <span className="whitespace-nowrap">{formatAssignedExact(lead.assignedAt)}</span>{" "}
+                  <span className="whitespace-nowrap font-semibold" style={{ color: TEXT2 }}>· {formatAgo(nowMs - new Date(lead.assignedAt).getTime())}</span>
+                </>
               ) : (
-                <span className="inline-block text-[11px] font-bold px-2 py-0.5 rounded-full bg-red-50 text-red-600">
-                  Unassigned
-                </span>
+                "—"
               )}
+            </dd>
+          </div>
+          <div className="min-w-0">
+            <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Calls</dt>
+            <dd className={`${SIZE.factValue} font-bold tabular-nums`} style={{ color: INK }}>{callsValue}</dd>
+          </div>
+          <div className="min-w-0">
+            <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Last activity</dt>
+            <dd className={`${SIZE.factValue} font-bold tabular-nums`} style={{ color: INK }}>{lastActivityValue}</dd>
+          </div>
+        </dl>
 
-              {!readOnly && (
-                <select
-                  value={lead.pendingTeamId || ""}
-                  onChange={(e) => onReserveTeam(lead.id, e.target.value || null)}
-                  className="block h-7 rounded-md bg-slate-50 border border-slate-200 px-1.5 text-[10px] font-semibold text-slate-600 outline-none"
-                >
-                  <option value="">No team reserved</option>
-                  {teams.map((t) => (
-                    <option key={t.id} value={t.id}>{t.name}</option>
-                  ))}
-                </select>
-              )}
-            </div>
+        {/* Owner — name, or reserved team / Unassigned + the team-reserve select (Admin only, hidden when readOnly). */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-[12px] px-3 py-2" style={GLASS_BOX}>
+          <span className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Assigned to</span>
+          {lead.ownerName ? (
+            <span className="text-[13.5px] font-extrabold" style={{ color: INK }}>{lead.ownerName}</span>
+          ) : lead.pendingTeamName ? (
+            <span className={TAG} style={NEUTRAL_TAG}>
+              {dot(DOT.gold)}
+              Reserved for {lead.pendingTeamName}
+            </span>
+          ) : (
+            <span className={TAG} style={TINT_TAG.callFirst}>Unassigned</span>
+          )}
+          {!lead.ownerName && !readOnly && (
+            <select
+              value={lead.pendingTeamId || ""}
+              onChange={(e) => onReserveTeam(lead.id, e.target.value || null)}
+              aria-label="Reserve for a team"
+              className={FIELD}
+              style={{ boxShadow: `inset 0 0 0 1px ${HAIRLINE}`, color: INK }}
+            >
+              <option value="">No team reserved</option>
+              {teams.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
           )}
         </div>
 
-        {lead.assignedAt && (
-          <div className="text-right">
-            <p className="text-[10px] uppercase tracking-wide text-slate-400 font-bold">Assigned</p>
-            <p className="text-xs text-slate-500">
-              {new Date(lead.assignedAt).toLocaleString([], {
-                month: "short",
-                day: "numeric",
-                hour: "2-digit",
-                minute: "2-digit"
-              })}
-            </p>
-          </div>
-        )}
-      </div>
+        {/* Tags: neutral pill + dot; only Call first / recycle-soon tinted. Empty row collapses. */}
+        <div className="flex flex-wrap items-center gap-1.5 min-w-0 [&:not(:has(>:not(:empty)))]:hidden">
+          {recyclingNow && <span className={TAG} style={TINT_TAG.callFirst}>Call first</span>}
+          {lead.leadType === "DATA" && (
+            <span className={TAG} style={NEUTRAL_TAG}>
+              {dot(DOT.slate)}
+              Data
+            </span>
+          )}
+          {/* Data has no board_stage funnel (stays 'LEADS' forever), hence Lead-only. */}
+          {lead.leadType !== "DATA" && boardStageDisplay && (
+            <span className={TAG} style={NEUTRAL_TAG}>
+              {dot(look.accent)}
+              {boardStageDisplay.label}
+            </span>
+          )}
+          {lead.source === "Legacy" && (
+            <span className={TAG} style={NEUTRAL_TAG}>
+              {dot(DOT.gold)}
+              Legacy
+            </span>
+          )}
+          {lead.catcherName && (
+            <span title={`Catcher: ${lead.catcherName}`} className={`${TAG} max-w-[200px]`} style={NEUTRAL_TAG}>
+              {dot(DOT.slate)}
+              <span className="truncate">Catcher: {lead.catcherName}</span>
+            </span>
+          )}
+          {pauseAsTag && (
+            <span className={TAG} style={NEUTRAL_TAG}>
+              {dot(DOT.slate)}
+              {pauseAsTag.label === "VISIT" ? "Visit pending verification" : `${pauseAsTag.label.replace(" UNTIL", "").charAt(0)}${pauseAsTag.label.replace(" UNTIL", "").slice(1).toLowerCase()} until ${pauseAsTag.value}`}
+            </span>
+          )}
+          {/* Employee Leave/Holiday gap — never alongside isStale (it's gated on !isOwnerOnLeave). */}
+          {showOnLeaveBadge && (
+            <span className={TAG} style={NEUTRAL_TAG}>
+              {dot(DOT.teal)}
+              Timer paused — owner on leave
+            </span>
+          )}
+          {/* Recycled (full detail) + Existing client (with its "N other leads" popover) — shared badges, neutral look. */}
+          {(lead.recycleCount > 0 || lead.recycleReason) && (
+            <span className={`inline-flex min-w-0 max-w-full ${NEUTRALIZE} [&>span]:h-[22px]! [&>span]:inline-flex! [&>span]:items-center! [&>span]:text-[11px]!`}>
+              <RecycledBadge reason={lead.recycleReason} fromStage={lead.recycledFromStage} fromStatus={lead.recycledFromStatus} count={lead.recycleCount} fullDetail />
+            </span>
+          )}
+          {lead.siblings && lead.siblings.length > 0 && (
+            <span className={`inline-flex ${NEUTRALIZE} [&>span>button]:h-[22px]! [&>span>button]:text-[11px]!`}>
+              <ExistingClientBadge siblings={lead.siblings} fullDetail />
+            </span>
+          )}
+          {/* Step 8: weekly off / Admin pause. recycleCutoff is already null for paused, on-leave, personal and terminal leads. */}
+          <span className="inline-flex empty:hidden [&>span]:inline-flex [&>span]:h-[22px] [&>span]:items-center [&>span]:text-[11px] [&>span]:bg-[#f3f6fa]! [&>span]:text-[#475569]! [&>span]:shadow-[inset_0_0_0_1px_#e8edf3]">
+            <TimerPausedBadge size="sm" clockRunning={Boolean(recycleCutoff)} />
+          </span>
+        </div>
 
-      <div className="flex items-center gap-4 mt-3">
-        <button
-          onClick={() => setHistoryOpen(true)}
-          className="flex items-center gap-1.5 text-[11px] font-bold text-blue-700 hover:text-blue-900 transition"
-        >
-          <History size={12} />
-          View History
-        </button>
-
-        {lead.status === "JUNK" && !readOnly && onUnjunkReassign && !reassignOpen && (
-          <button
-            onClick={() => setReassignOpen(true)}
-            className="text-[11px] font-bold text-emerald-700 hover:text-emerald-900 transition"
-          >
-            🔁 Reassign
+        {/* Dashed divider, then the action stub: View history, JUNK Reassign (Admin only), expand */}
+        <div className="border-t border-dashed" style={{ borderColor: HAIRLINE }} aria-hidden="true" />
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => setHistoryOpen(true)} style={CALL} className={`${CALL_BUTTON} ${SIZE.button}`}>
+            <History size={16} strokeWidth={2} />
+            View history
           </button>
-        )}
-      </div>
-
-      {reassignOpen && (
-        <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
-          <p className="text-[11px] text-slate-500">Recover this JUNK lead and hand it to:</p>
-          <div className="flex items-center gap-2">
-            <select
-              value={reassignEmployeeId}
-              onChange={(e) => setReassignEmployeeId(e.target.value)}
-              className="flex-1 h-10 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs outline-none"
+          {lead.status === "JUNK" && !readOnly && onUnjunkReassign && !reassignOpen && (
+            <button
+              type="button"
+              onClick={() => setReassignOpen(true)}
+              className="shrink-0 h-11 px-3.5 rounded-[13px] text-[13px] font-extrabold transition-[filter] hover:brightness-[.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-400"
+              style={{ background: "#e9f8f5", color: "#0f766e" }}
             >
-              <option value="">Select employee...</option>
+              Reassign
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            aria-label={expanded ? "Hide details" : "Show details"}
+            aria-expanded={expanded}
+            title={expanded ? "Hide details" : "Show details"}
+            className={ICON_BUTTON}
+            style={expanded ? BUTTON_BG.chevronOpen : BUTTON_BG.chevronClosed}
+          >
+            <ChevronDown size={18} strokeWidth={2} className={`transition-transform motion-reduce:transition-none ${expanded ? "rotate-180" : ""}`} />
+          </button>
+        </div>
+
+        {reassignOpen && (
+          <div className="space-y-2 rounded-[12px] p-3" style={GLASS_BOX}>
+            <p className="text-[12.5px] font-bold" style={{ color: INK }}>Reassign this junk lead to:</p>
+            <select value={reassignEmployeeId} onChange={(e) => setReassignEmployeeId(e.target.value)} aria-label="Employee" className={FIELD} style={{ boxShadow: `inset 0 0 0 1px ${HAIRLINE}`, color: INK }}>
+              <option value="">Select an employee</option>
               {employees
                 .filter((e) => e.is_active && e.id !== lead.currentOwnerId)
                 .map((e) => (
                   <option key={e.id} value={e.id}>{e.name}</option>
                 ))}
             </select>
+            <textarea
+              value={reassignReason}
+              onChange={(e) => setReassignReason(e.target.value)}
+              placeholder="Reason (required)"
+              aria-label="Reason"
+              rows={2}
+              className="w-full rounded-[12px] bg-white px-3 py-2 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
+              style={{ boxShadow: `inset 0 0 0 1px ${HAIRLINE}`, color: INK }}
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={submitReassign}
+                disabled={reassignSubmitting || !reassignEmployeeId || !reassignReason.trim()}
+                className="h-11 px-4 rounded-[12px] text-white text-[13px] font-extrabold disabled:opacity-50"
+                style={{ background: "linear-gradient(135deg, #14b8a6 0%, #0d9488 100%)" }}
+              >
+                {reassignSubmitting ? "Reassigning..." : "Reassign"}
+              </button>
+              <button
+                onClick={() => {
+                  setReassignOpen(false);
+                  setReassignEmployeeId("");
+                  setReassignReason("");
+                }}
+                className="h-11 px-3 text-[13px] font-semibold"
+                style={{ color: TEXT2 }}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
-          <textarea
-            value={reassignReason}
-            onChange={(e) => setReassignReason(e.target.value)}
-            placeholder="Reason (mandatory)"
-            rows={2}
-            className="w-full rounded-lg bg-slate-50 border border-slate-200 px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-emerald-200"
-          />
-          <div className="flex items-center gap-2">
-            <button
-              onClick={submitReassign}
-              disabled={reassignSubmitting || !reassignEmployeeId || !reassignReason.trim()}
-              className="h-10 px-3 rounded-lg bg-emerald-600 text-white text-[11px] font-bold disabled:opacity-50"
-            >
-              {reassignSubmitting ? "..." : "Reassign"}
-            </button>
-            <button
-              onClick={() => {
-                setReassignOpen(false);
-                setReassignEmployeeId("");
-                setReassignReason("");
-              }}
-              className="h-10 px-3 text-[11px] text-slate-400"
-            >
-              Cancel
-            </button>
+        )}
+      </div>
+
+      <div className="px-3.5 empty:hidden">
+        <ExpandSection open={expanded}>
+          <div className="mb-3.5 rounded-[14px] px-3 pb-3" style={{ background: "rgba(255,255,255,.8)", boxShadow: `inset 0 0 0 1px ${HAIRLINE}` }}>
+            <LeadCardMore
+              leadId={lead.id}
+              status={lead.status}
+              boardStage={lead.boardStage}
+              accent={look.accent}
+              times={[
+                ...(lead.assignedAt ? [{ label: "Assigned", value: formatExactTime(lead.assignedAt) }] : []),
+                ...(lead.lastActivityAt ? [{ label: "Last activity", value: formatExactTime(lead.lastActivityAt) }] : []),
+                ...(recycleCutoff ? [{ label: "Recycles at", value: formatExactTime(recycleCutoff.cutoffAt.toISOString()) }] : [])
+              ]}
+            />
           </div>
-        </div>
-      )}
+        </ExpandSection>
+      </div>
 
       <AnimatePresence>
         {historyOpen && (
