@@ -933,13 +933,13 @@ export default function LeadList({ employeeId }: LeadListProps) {
         slaBreachHistory.length === 0 ? (
           <div className="flex flex-col items-center justify-center mt-16 text-center px-4">
             <div className="text-5xl mb-3">📋</div>
-            <h2 className="text-lg font-semibold text-gray-700">No history yet</h2>
-            <p className="text-sm text-gray-500 mt-1">
+            <h2 className="text-lg font-semibold text-slate-800">No history yet</h2>
+            <p className="text-sm text-slate-600 mt-1 max-w-xs">
               Leads that get reassigned away from you (by SLA breach or a Team Leader) will show up here.
             </p>
           </div>
         ) : (
-          <div className="mx-4 mt-4 space-y-3 pb-6">
+          <div className="mt-4 mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 items-start gap-4 mx-auto w-[calc(100%-2rem)] max-w-[1400px] rounded-[24px] bg-[linear-gradient(180deg,#f3f6fb_0%,#e9eef6_100%)] p-3 sm:p-4">
             {slaBreachHistory.map((entry: any, index: number) => (
               <SLABreachHistoryCard key={entry.lead_history_id} entry={entry} index={index} />
             ))}

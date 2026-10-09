@@ -118,7 +118,7 @@ export const SIZE = {
 export const ICON_BUTTON =
   "shrink-0 h-11 w-11 rounded-[13px] flex items-center justify-center transition-[filter,transform] hover:brightness-[.97] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-400";
 export const CALL_BUTTON =
-  "flex-1 min-w-0 h-11 rounded-[13px] flex items-center justify-center gap-1.5 font-extrabold whitespace-nowrap transition-[filter,transform] hover:brightness-[.96] active:scale-[.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-500";
+  "flex-1 min-w-0 h-11 rounded-[13px] flex items-center justify-center gap-1.5 font-bold whitespace-nowrap transition-[filter,transform] hover:brightness-[.96] active:scale-[.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-500";
 export const BUTTON_BG = {
   whatsapp: { background: "#e9fbf1" },
   quickDial: { background: "#f3f6fa", color: "#334155" },
@@ -188,23 +188,24 @@ export function cardSurface(tone: PassTone): CSSProperties {
 // White-glass box for facts row / last log / notes, so they read clearly on the gradient.
 export const GLASS_BOX: CSSProperties = { background: "rgba(255,255,255,.7)", boxShadow: `inset 0 0 0 1px ${HAIRLINE}` };
 
-// Lead name in ink. The Call button takes the card's own tone as a soft
-// premium gradient (a step deeper than the card tint so it still reads as
-// THE action). Text/icon contrast on the deeper end: NEW 6.8:1,
-// FOLLOW_UP 5.2:1, OVERDUE 4.9:1, QUIET 7.2:1 (AA).
+// Lead name in ink. The Call button is part of the card's own tone: a
+// light gradient from the card's tint (same family as the Update /
+// chevron buttons), a hairline border in the tone and accent-coloured
+// text/icon. Contrast (text on the darker end): NEW 5.6:1, FOLLOW_UP
+// 4.7:1, OVERDUE 5.4:1, QUIET 8.6:1 (AA).
 export const NAME_COLOR = INK;
 const CALL_TONE: Record<PassTone, { from: string; to: string; text: string; ring: string; glow: string }> = {
-  NEW: { from: "#d6e6ff", to: "#b9d2ff", text: "#1e3a8a", ring: "rgba(37,99,235,.22)", glow: "rgba(37,99,235,.30)" },
-  FOLLOW_UP: { from: "#cdf1e9", to: "#a8e2d5", text: "#0f5f55", ring: "rgba(13,148,136,.24)", glow: "rgba(13,148,136,.28)" },
-  OVERDUE: { from: "#ffdccf", to: "#ffc0ae", text: "#9a2d12", ring: "rgba(209,52,58,.22)", glow: "rgba(209,52,58,.28)" },
-  QUIET: { from: "#e4e9f0", to: "#cfd8e3", text: "#334155", ring: "rgba(100,116,139,.24)", glow: "rgba(71,85,105,.22)" }
+  NEW: { from: "#f7faff", to: "#e2ecff", text: "#1d4ed8", ring: "rgba(37,99,235,.28)", glow: "rgba(37,99,235,.22)" },
+  FOLLOW_UP: { from: "#f4fcfa", to: "#dcf3ec", text: "#0f766e", ring: "rgba(13,148,136,.30)", glow: "rgba(13,148,136,.20)" },
+  OVERDUE: { from: "#fff8f5", to: "#ffe4da", text: "#b42318", ring: "rgba(209,52,58,.28)", glow: "rgba(209,52,58,.22)" },
+  QUIET: { from: "#f9fafc", to: "#e6ebf1", text: "#334155", ring: "rgba(100,116,139,.30)", glow: "rgba(71,85,105,.18)" }
 };
 export function callStyle(tone: PassTone): CSSProperties {
   const c = CALL_TONE[tone];
   return {
-    background: `linear-gradient(135deg, ${c.from} 0%, ${c.to} 100%)`,
+    background: `linear-gradient(180deg, ${c.from} 0%, ${c.to} 100%)`,
     color: c.text,
-    boxShadow: `inset 0 1px 0 rgba(255,255,255,.7), inset 0 0 0 1px ${c.ring}, 0 8px 16px -10px ${c.glow}`
+    boxShadow: `inset 0 1px 0 rgba(255,255,255,.9), inset 0 0 0 1px ${c.ring}, 0 1px 2px rgba(15,23,42,.05), 0 6px 14px -8px ${c.glow}`
   };
 }
 
