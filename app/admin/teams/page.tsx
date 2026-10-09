@@ -8,6 +8,9 @@ import toast from "react-hot-toast";
 import DeleteModal from "../components/DeleteModal";
 
 import PageHeader from "@/components/PageHeader";
+import LastLogPanel from "@/components/LastLogPanel";
+import { leadCardFont } from "@/lib/leadCardFont";
+import { cardSurface, formatAgo, formatAssignedExact, formatExactTime, GLASS_BOX, HAIRLINE, HEADER_GLASS, INK, MUTED, NAME_COLOR, NEUTRAL_TAG, PASS, SIZE, TAG, TEXT2 } from "@/lib/leadCardLook";
 // Admin-only team management — creating teams, assigning a Team
 // Leader, and adding/removing members, all from one team-centric
 // panel (select a team, see/edit its full roster) rather than a
@@ -662,34 +665,84 @@ export default function AdminTeamsPage() {
                       ) : activityRows.length === 0 ? (
                         <p className="text-sm text-slate-400">No team-leader-driven assignments yet.</p>
                       ) : (
-                        <div className="space-y-2 max-h-[480px] overflow-y-auto">
-                          {activityRows.map((row) => (
-                            <div key={row.id} className="rounded-xl bg-slate-50 border border-slate-100 p-3">
-                              <div className="flex items-start gap-2">
-                                <Repeat size={13} className="text-blue-600 shrink-0 mt-0.5" />
-                                <div className="min-w-0 flex-1">
-                                  <p className="text-sm font-semibold text-slate-700 truncate">
-                                    {row.leads?.name || "Unknown lead"}
-                                  </p>
-                                  <p className="text-xs text-slate-500 mt-0.5">
-                                    Assigned to <span className="font-semibold">{row.employee?.name || "Unknown"}</span>
-                                    {" · "}
-                                    {new Date(row.assigned_at).toLocaleString([], {
-                                      month: "short",
-                                      day: "numeric",
-                                      hour: "2-digit",
-                                      minute: "2-digit"
-                                    })}
-                                  </p>
-                                  {row.reassign_note && (
-                                    <p className="text-xs text-slate-500 mt-1">
-                                      Reason: <span className="font-medium">{row.reassign_note}</span>
+                        <div className="@container max-h-[480px] overflow-y-auto rounded-[20px] bg-[linear-gradient(180deg,#f3f6fb_0%,#e9eef6_100%)] p-2.5">
+                          {/* Lead-card look (2026-10-09), presentation only. Columns follow the panel's own width. */}
+                          <div className="grid grid-cols-1 @[620px]:grid-cols-2 @[940px]:grid-cols-3 @[1260px]:grid-cols-4 items-start gap-3">
+                          {activityRows.map((row) => {
+                            const nowMs = new Date().getTime();
+                            const look = PASS.NEW;
+                            return (
+                            <div
+                              key={row.id}
+                              style={cardSurface("NEW")}
+                              className={`${leadCardFont.className} @container relative w-full min-w-0 overflow-hidden rounded-[18px] border shadow-[var(--card-shadow)]`}
+                            >
+                              {/* 3px accent line + slim header: what happened | how long ago */}
+                              <div className="h-[3px]" style={{ background: look.line }} aria-hidden="true" />
+                              <div className={`flex items-center justify-between gap-2 px-3.5 py-1.5 ${HEADER_GLASS}`} style={{ background: look.header }}>
+                                <span className={TAG} style={NEUTRAL_TAG}>
+                                  <Repeat size={11} strokeWidth={2} style={{ color: look.accent }} aria-hidden="true" />
+                                  Team Leader assignment
+                                </span>
+                                <span
+                                  className="inline-flex h-[24px] shrink-0 items-center rounded-full bg-white px-2.5 text-[12px] font-extrabold tabular-nums"
+                                  style={{ color: look.accent, boxShadow: `inset 0 0 0 1px ${HAIRLINE}` }}
+                                  title={formatExactTime(row.assigned_at)}
+                                >
+                                  {formatAgo(nowMs - new Date(row.assigned_at).getTime())}
+                                </span>
+                              </div>
+
+                              <div className="flex flex-col gap-2 px-3.5 pt-2.5 pb-3">
+                                {/* Identity + last log: side by side on a wide card, stacked on a narrow one. */}
+                                <div className="flex flex-col gap-2 @[400px]:flex-row @[400px]:items-start @[400px]:gap-3">
+                                  <div className="min-w-0 flex-1">
+                                    <p title={row.leads?.name || "Unknown lead"} className={`${SIZE.name} font-extrabold tracking-[-0.015em] break-words line-clamp-2`} style={{ color: NAME_COLOR }}>
+                                      {row.leads?.name || "Unknown lead"}
                                     </p>
-                                  )}
+                                    {row.leads?.mobile && (
+                                      <button
+                                        type="button"
+                                        onClick={() => navigator.clipboard?.writeText(row.leads.mobile).then(() => toast.success("Number copied"), () => {})}
+                                        title="Tap to copy"
+                                        className={`mt-0.5 block ${SIZE.number} font-bold tabular-nums cursor-copy rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300`}
+                                        style={{ color: "#1e293b" }}
+                                      >
+                                        {row.leads.mobile}
+                                      </button>
+                                    )}
+                                    {row.leads?.project && <p className={`mt-0.5 ${SIZE.project} font-bold truncate`} style={{ color: look.project }}>{row.leads.project}</p>}
+                                  </div>
+                                  {/* Latest note on this assignment (admin can read lead_notes). */}
+                                  <LastLogPanel lookupKey="lead_history_id" id={row.id} className="@[400px]:w-[44%] @[400px]:max-w-[230px] @[400px]:shrink-0" />
                                 </div>
+
+                                {/* Facts row: Assigned to / Assigned (exact · ago) */}
+                                <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 rounded-[12px] px-3 py-2" style={GLASS_BOX}>
+                                  <div className="min-w-0">
+                                    <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Assigned to</dt>
+                                    <dd className={`${SIZE.factValue} font-bold truncate`} style={{ color: INK }}>{row.employee?.name || "Unknown"}</dd>
+                                  </div>
+                                  <div className="min-w-0">
+                                    <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Assigned</dt>
+                                    <dd className={`${SIZE.factValue} font-bold tabular-nums`} style={{ color: INK }}>
+                                      <span className="whitespace-nowrap">{formatAssignedExact(row.assigned_at)}</span>{" "}
+                                      <span className="whitespace-nowrap font-semibold" style={{ color: TEXT2 }}>· {formatAgo(nowMs - new Date(row.assigned_at).getTime())}</span>
+                                    </dd>
+                                  </div>
+                                </dl>
+
+                                {row.reassign_note && (
+                                  <p className="rounded-[12px] px-3 py-2 text-[12.5px] leading-snug" style={{ ...GLASS_BOX, color: TEXT2 }}>
+                                    <span className="font-bold" style={{ color: MUTED }}>Reason: </span>
+                                    <span className="font-semibold" style={{ color: INK }}>{row.reassign_note}</span>
+                                  </p>
+                                )}
                               </div>
                             </div>
-                          ))}
+                            );
+                          })}
+                          </div>
                         </div>
                       )}
                     </div>
