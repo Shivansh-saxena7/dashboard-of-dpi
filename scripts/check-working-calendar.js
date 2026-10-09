@@ -30,6 +30,20 @@ const { workingAdd, workingElapsedMs, nonWorkingStatusAt, loadJobWorkingCalendar
 const { calculateSLAStatus, getRecycleCutoff } = loadLib("calculateSLAStatus.ts");
 const { recyclingTomorrowCutoff } = loadLib("recyclingTomorrow.ts");
 const { isWithinRecycleHours } = loadLib("recycleHours.ts");
+const { buildPreviousOwnerEndTimes, pickRecycleOwner } = loadLib("pickRecycleOwner.ts");
+const { calculateLeadAssignment } = loadLib("calculateLeadAssignment.ts");
+// Recycle previous-owner exclusion (2026-10-09): fake employees A..F, fake lead L1/L2.
+const hist = (lead, emp, at) => ({ lead_id: lead, employee_id: emp, assigned_at: at });
+const prevOf = (rows, activeAt) => buildPreviousOwnerEndTimes(rows, new Map([["L1", activeAt]])).get("L1");
+// round robin exactly as recycle-stale-leads calls it (pointer = last assigned)
+const rr = (pointer, exclusions = []) => (pool) => calculateLeadAssignment("Proj", [], pool.map((id) => ({ id })), pointer, {}, exclusions, [], null).assignedEmployeeId;
+// project-rule group rotation exactly as recycle-stale-leads does it
+const projectRotate = (lastPointer) => (pool) => { const i = pool.indexOf(lastPointer); return pool[i === -1 ? 0 : (i + 1) % pool.length] ?? null; };
+const pick = (pool, prev, assign) => { const r = pickRecycleOwner(pool, prev, assign); return `${r.employeeId}|${r.usedFallback ? "fallback" : "normal"}|x${r.excludedCount}`; };
+// A owned L1 first, B owns it now (current owner B is already out of the pool)
+const prevAB = prevOf([hist("L1", "A", "2026-10-01T05:00:00Z")], "2026-10-04T05:00:00Z");
+// A, then B, then C owned it; D owns it now
+const prevABC = prevOf([hist("L1", "A", "2026-09-01T05:00:00Z"), hist("L1", "B", "2026-09-10T05:00:00Z"), hist("L1", "C", "2026-09-20T05:00:00Z")], "2026-10-01T05:00:00Z");
 const { normalizeLegacyMobile, isHeaderlessFirstRow, guessLegacyMobileColumnByContent, detectLegacyHeaderRow, detectLegacyMobileColumn, legacyMobileColumnStats } = loadLib("legacyNumbers.ts");
 // Fake tabs for the legacy tests — fake names, 90000xxxxx numbers.
 const fakeNames = ["Aman Kumar", "Bina Devi", "Chetan Rao", "Divya Jain", "Esha Gupta", "Farhan Ali", "Gita Roy", "Hari Om", "Isha Sen", "Jai Singh"];
@@ -214,6 +228,20 @@ async function main() {
     ["M5 header row with a stray date is still a header", detectLegacyHeaderRow([["", "Name", "Mobile", "Email", "Project", "REMARK", "17/08/2026"], ["", "Fake A", "9000000001", "a@x.in", "P1", "np", ""]]), true],
     ["M6 header by content (no header words): first cell not a number, rows below are", detectLegacyHeaderRow([["Aa", "Bb"], ["Fake A", "9000000001"], ["Fake B", "9000000002"], ["Fake C", "9000000003"]]), true],
     ["M7 stats never include values (keys only)", Object.keys(legacyMobileColumnStats(fakeTabB, 2)).sort().join(","), "fillRate,phoneShare"],
+    ["P1 A->B->A: pool A,C with pointer before A -> C, not A", pick(["A", "C"], prevAB, rr("F")), "C|normal|x1"],
+    ["P2 A->B->A: pool A only + new C on shift later -> C", pick(["A", "C"], prevAB, rr("C")), "C|normal|x1"],
+    ["P3 after three owners A,B,C (D current) -> the fourth, E", pick(["A", "B", "C", "E"], prevABC, rr("A")), "E|normal|x3"],
+    ["P4 everyone eligible owned it before -> fallback to longest-ago (A)", pick(["C", "B", "A"], prevABC, rr("A")), "A|fallback|x3"],
+    ["P5 fallback skips a previous owner round robin can't use (A excluded for Proj) -> B", pick(["A", "B"], prevABC, rr(null, [{ project: "Proj", excluded_employee_id: "A" }])), "B|fallback|x2"],
+    ["P6 only one person on shift, never owned it -> same as before", pick(["E"], prevABC, rr("A")), "E|normal|x0"],
+    ["P7 only one person on shift, owned it before -> still assigned (fallback), lead not stuck", pick(["A"], prevAB, rr("A")), "A|fallback|x1"],
+    ["P8 empty pool -> nobody (skip, as before)", pick([], prevAB, rr("A")), "null|normal|x0"],
+    ["P9 no history for lead -> plain round robin, unchanged", pick(["A", "C"], undefined, rr("A")), "C|normal|x0"],
+    ["P10 project-rule group: A owned it, pointer on A's predecessor -> skips A", pick(["A", "C", "E"], prevAB, projectRotate("E")), "C|normal|x1"],
+    ["P11 project-rule group: all owned it -> longest-ago owner", pick(["B", "A"], prevABC, projectRotate("A")), "A|fallback|x2"],
+    ["P12 end time = next row's start; active row ends the last one", [...prevABC.entries()].map(([e, t]) => `${e}:${new Date(t).toISOString().slice(0, 10)}`).join(","), "A:2026-09-10,B:2026-09-20,C:2026-10-01"],
+    ["P13 same owner twice keeps the most recent end", (() => { const m = prevOf([hist("L1", "A", "2026-09-01T00:00:00Z"), hist("L1", "B", "2026-09-05T00:00:00Z"), hist("L1", "A", "2026-09-09T00:00:00Z")], "2026-09-12T00:00:00Z"); return new Date(m.get("A")).toISOString().slice(0, 10); })(), "2026-09-12"],
+    ["P14 rows of another lead don't leak in", buildPreviousOwnerEndTimes([hist("L2", "A", "2026-09-01T00:00:00Z")], new Map()).has("L1"), false],
     ["E1 sweep early exit ON, Tue 10:00 = weekly off until Wed 00:00", (() => { const st = nonWorkingStatusAt(tuesdayOff, ist("2026-10-13T10:00")); return st.isNonWorking ? st.until.getTime() : -1; })(), ist("2026-10-14T00:00")]
   );
 

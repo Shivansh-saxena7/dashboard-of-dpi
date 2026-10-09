@@ -10,6 +10,7 @@ import { fetchAllRows } from "../../../lib/fetchAllRows.ts";
 import { logAnomaly } from "../../../lib/logAnomaly.ts";
 import { isNotificationWindowOpen, loadJobWorkingCalendar, nonWorkingStatusAt, timerCalendar, timerMsUntil } from "../../../lib/workingCalendar.ts";
 import { isWithinRecycleHours } from "../../../lib/recycleHours.ts";
+import { buildPreviousOwnerEndTimes, pickRecycleOwner } from "../../../lib/pickRecycleOwner.ts";
 
 // Minutes after sla_office_end_time that recycled leads may still be
 // handed out (Option A Phase 1, 2026-10-08). 0 = none.
@@ -582,6 +583,36 @@ serve(withMonitoring("recycle-stale-leads", async () => {
       notInterestedAssignedAtByLead.set(row.lead_id, list);
     }
 
+    // Previous owners (2026-10-09) — every ended assignment of a lead still
+    // in this sweep, fetched once, so a recycle never hands a lead back to
+    // someone who already owned it (see lib/pickRecycleOwner.ts). If this
+    // fetch fails the sweep carries on with the old current-owner-only
+    // exclusion rather than stopping recycling.
+    let previousOwnersByLead = new Map<string, Map<string, number>>();
+    const { data: endedHistoryRows, error: endedHistoryError } = await fetchAllRows(
+      () =>
+        supabase
+          .from("lead_history")
+          .select("lead_id, employee_id, assigned_at", { count: "exact" })
+          .eq("is_active", false)
+          .order("id"),
+      { anomalyContext: { supabase, source: "recycle-stale-leads:previousOwners" } }
+    );
+    if (endedHistoryError) {
+      await logAnomaly(supabase, {
+        source: "recycle_prev_owner_fallback",
+        severity: "warning",
+        message: "Previous-owner list could not be loaded; this sweep excluded only the current owner",
+        context: { error: endedHistoryError.message }
+      });
+    } else {
+      previousOwnersByLead = buildPreviousOwnerEndTimes(
+        endedHistoryRows || [],
+        new Map((leads || []).map((l) => [l.id, l.lead_history[0]?.assigned_at]))
+      );
+    }
+    const prevOwnerFallbacks: { lead: string; excluded: number }[] = [];
+
     let cappedRecycleAttempts = 0;
     let slaBreachedRecycleAttempts = 0;
 
@@ -1049,9 +1080,15 @@ serve(withMonitoring("recycle-stale-leads", async () => {
         }
 
         const lastProjectPointer = projectPointers[normalizedProject] ?? null;
-        const lastIndex = groupPoolEmployees.findIndex((id) => id === lastProjectPointer);
-        const nextIndex = lastIndex === -1 ? 0 : (lastIndex + 1) % groupPoolEmployees.length;
-        const nextEmployeeId = groupPoolEmployees[nextIndex];
+        // Previous owners left out too (lib/pickRecycleOwner.ts); the
+        // project pointer rotation itself is unchanged.
+        const projectPick = pickRecycleOwner(groupPoolEmployees, previousOwnersByLead.get(lead.id), (pool) => {
+          const lastIndex = pool.findIndex((id) => id === lastProjectPointer);
+          const nextIndex = lastIndex === -1 ? 0 : (lastIndex + 1) % pool.length;
+          return pool[nextIndex] ?? null;
+        });
+        if (projectPick.usedFallback) prevOwnerFallbacks.push({ lead: lead.id.slice(0, 8), excluded: projectPick.excludedCount });
+        const nextEmployeeId = projectPick.employeeId as string;
 
         if (CAPPED_RECYCLE_STATUSES.has(slaStatus)) {
           if (cappedRecycleAttempts >= BACKLOG_RECYCLE_CAP_PER_SWEEP) {
@@ -1152,16 +1189,29 @@ serve(withMonitoring("recycle-stale-leads", async () => {
         }
       }
 
-      const result = calculateLeadAssignment(
-        lead.project,
-        [], // Project Rules already ruled out for this lead above
-        eligibleEmployees,
-        pointerEmployeeId,
-        {},
-        projectExclusions || [],
-        employeeAllowlists || [],
-        restrictedPoolPointerEmployeeId
+      // Previous owners left out too (lib/pickRecycleOwner.ts): round robin
+      // runs on the pool without them first; only if nobody is left does
+      // it fall back to the longest-ago previous owner. `result` is the
+      // calculateLeadAssignment call that produced the pick.
+      let result = { assignedEmployeeId: null, nextGlobalPointerEmployeeId: pointerEmployeeId, nextRestrictedPoolPointerEmployeeId: restrictedPoolPointerEmployeeId } as ReturnType<typeof calculateLeadAssignment>;
+      const rrPick = pickRecycleOwner(
+        eligibleEmployees.map((employee) => employee.id),
+        previousOwnersByLead.get(lead.id),
+        (poolIds) => {
+          result = calculateLeadAssignment(
+            lead.project,
+            [], // Project Rules already ruled out for this lead above
+            eligibleEmployees.filter((employee) => poolIds.includes(employee.id)),
+            pointerEmployeeId,
+            {},
+            projectExclusions || [],
+            employeeAllowlists || [],
+            restrictedPoolPointerEmployeeId
+          );
+          return result.assignedEmployeeId;
+        }
       );
+      if (rrPick.usedFallback) prevOwnerFallbacks.push({ lead: lead.id.slice(0, 8), excluded: rrPick.excludedCount });
 
       if (!result.assignedEmployeeId) {
         // Nobody eligible right now — leave it, retry next sweep.
@@ -1231,6 +1281,18 @@ serve(withMonitoring("recycle-stale-leads", async () => {
         });
       }
 
+    }
+
+    // Previous-owner fallback (2026-10-09): every eligible person had
+    // already owned the lead, so it went to the longest-ago owner. One
+    // anomaly row per sweep, not per lead.
+    if (prevOwnerFallbacks.length > 0) {
+      await logAnomaly(supabase, {
+        source: "recycle_prev_owner_fallback",
+        severity: "warning",
+        message: `${prevOwnerFallbacks.length} recycled lead(s) went back to a previous owner (nobody new was eligible)`,
+        context: { leads: prevOwnerFallbacks.slice(0, 20) }
+      });
     }
 
     // Silent-failure guard (2026-10-03) — RECYCLE_FAILED/JUNK_FAILED
