@@ -13,6 +13,8 @@ import { MemberAttendanceStatus } from "./TeamMemberCard";
 import RecycledBadge from "./RecycledBadge";
 import TimerPausedBadge from "./TimerPausedBadge";
 import { getRecycleCutoff } from "@/lib/calculateSLAStatus";
+import { leadCardFont } from "@/lib/leadCardFont";
+import { CALL_BUTTON, callStyle, cardSurface, formatAgo, formatAssignedExact, GLASS_BOX, HAIRLINE, HEADER_GLASS, INK, MUTED, NAME_COLOR, NEUTRAL_TAG, PASS, PassTone, SIZE, statusPillStyle, TAG, TEXT2 } from "@/lib/leadCardLook";
 interface TeamMemberDetailModalProps {
   member: { id: string; name: string };
   teamLeaderId: string;
@@ -37,6 +39,9 @@ interface MemberLead {
   recycledFromStage: string | null;
   // Step 8: recycle/SLA clock running (for the "Timer paused" badge).
   clockRunning: boolean;
+  // Display only (already fetched): facts row.
+  assignedAt: string | null;
+  lastActivityAt: string | null;
 }
 
 interface TeamNote {
@@ -160,6 +165,8 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
           recycleReason: activeHistory?.recycle_reason ?? null,
           recycledFromStatus: activeHistory?.recycled_from_status ?? null,
           recycledFromStage: activeHistory?.recycled_from_stage ?? null,
+          assignedAt: activeHistory?.assigned_at ?? null,
+          lastActivityAt: activeHistory?.last_activity_at ?? null,
           // Same rule as the employee/admin cards: a recycle cutoff exists
           // (null for paused/locked/personal/terminal leads), or a NEW
           // lead's SLA deadline is still ahead and the lead isn't paused.
@@ -327,96 +334,153 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
             ) : leads.length === 0 ? (
               <p className="text-sm text-slate-400">No leads assigned.</p>
             ) : (
-              <div className="space-y-2">
+              <div className="grid grid-cols-1 items-start gap-3 rounded-[20px] bg-[linear-gradient(180deg,#f3f6fb_0%,#e9eef6_100%)] p-2.5">
                 {leads.map((lead) => {
                   const statusDisplay = LEAD_STATUS_DISPLAY[lead.status as keyof typeof LEAD_STATUS_DISPLAY];
                   const boardStageDisplay = BOARD_STAGES.find((b) => b.stage === (lead.board_stage || "LEADS"));
                   const reassignOptions = teamMembers.filter((m) => m.is_active && m.id !== member.id);
                   const isReassigning = reassigningLeadId === lead.id;
+                  // Lead-card look (2026-10-09), presentation only: one tone per card.
+                  const tone: PassTone = lead.board_stage && lead.board_stage !== "LEADS" ? "FOLLOW_UP" : "NEW";
+                  const look = PASS[tone];
+                  const nowMs = new Date().getTime();
 
                   return (
-                    <div key={lead.id} className="rounded-xl bg-white border border-slate-100 p-3">
-                      <p className="text-sm font-semibold text-slate-700 flex items-center gap-1.5 flex-wrap">{lead.name} <RecycledBadge reason={lead.recycleReason} fromStage={lead.recycledFromStage} fromStatus={lead.recycledFromStatus} /></p>
-                      {lead.project && <p className="text-xs text-slate-500">{lead.project}</p>}
-                      <div className="flex items-center flex-wrap gap-1.5 mt-1.5">
+                    <div
+                      key={lead.id}
+                      style={cardSurface(tone)}
+                      className={`${leadCardFont.className} relative w-full min-w-0 overflow-hidden rounded-[18px] border shadow-[var(--card-shadow)]`}
+                    >
+                      {/* 3px accent line + slim header: status, board stage, timer paused */}
+                      <div className="h-[3px]" style={{ background: look.line }} aria-hidden="true" />
+                      <div className={`flex flex-wrap items-center gap-1.5 px-3.5 py-1.5 ${HEADER_GLASS}`} style={{ background: look.header }}>
                         {statusDisplay && (
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusDisplay.badgeClassName}`}>
-                            {statusDisplay.label}
+                          <span className={`${TAG} tracking-[.04em]`} style={statusPillStyle(lead.status)}>
+                            {statusDisplay.label.toUpperCase()}
                           </span>
                         )}
                         {boardStageDisplay && (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
-                            {boardStageDisplay.emoji} {boardStageDisplay.label}
+                          <span className={TAG} style={NEUTRAL_TAG}>
+                            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: look.accent }} aria-hidden="true" />
+                            {boardStageDisplay.label}
                           </span>
                         )}
-                        <TimerPausedBadge clockRunning={lead.clockRunning} size="sm" />
+                        <span className="inline-flex empty:hidden [&>span]:inline-flex [&>span]:h-[22px] [&>span]:items-center [&>span]:text-[11px] [&>span]:bg-[#f3f6fa]! [&>span]:text-[#475569]! [&>span]:shadow-[inset_0_0_0_1px_#e8edf3]">
+                          <TimerPausedBadge clockRunning={lead.clockRunning} size="sm" />
+                        </span>
                       </div>
 
-                      {lead.assignedByName && (
-                        <p className="text-[11px] text-slate-400 mt-1.5 font-medium">
-                          {lead.assignedByName}
-                        </p>
-                      )}
+                      <div className="flex flex-col gap-2 px-3.5 pt-2.5 pb-3">
+                        <div className="min-w-0">
+                          <p title={lead.name} className={`${SIZE.name} font-extrabold tracking-[-0.015em] break-words line-clamp-2`} style={{ color: NAME_COLOR }}>{lead.name}</p>
+                          {lead.project && <p className={`mt-0.5 ${SIZE.project} font-bold truncate`} style={{ color: look.project }}>{lead.project}</p>}
+                        </div>
 
-                      {reassignOptions.length > 0 && (
-                        <div className="mt-2 pt-2 border-t border-slate-100">
-                          {!isReassigning ? (
-                            <button
-                              onClick={() => {
-                                setReassigningLeadId(lead.id);
-                                setReassignTargetId("");
-                                setReassignNote("");
-                              }}
-                              className="flex items-center gap-1 text-[11px] font-bold text-amber-700 hover:text-amber-800 transition"
-                            >
-                              <Repeat size={11} />
-                              Reassign
-                            </button>
-                          ) : (
-                            <div className="space-y-1.5">
-                              <select
-                                value={reassignTargetId}
-                                onChange={(e) => setReassignTargetId(e.target.value)}
-                                className="w-full h-8 rounded-lg bg-slate-50 border border-slate-200 px-2 text-[11px] font-semibold text-slate-600 outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-300 transition"
-                              >
-                                <option value="">Select member...</option>
-                                {reassignOptions.map((m) => (
-                                  <option key={m.id} value={m.id}>{m.name}</option>
-                                ))}
-                              </select>
-
-                              <input
-                                type="text"
-                                value={reassignNote}
-                                onChange={(e) => setReassignNote(e.target.value)}
-                                placeholder="Reason (optional)"
-                                className="w-full h-8 rounded-lg bg-slate-50 border border-slate-200 px-2 text-[11px] text-slate-600 outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-300 transition"
-                              />
-
-                              <div className="flex items-center gap-1.5">
-                                <button
-                                  onClick={() => submitReassign(lead)}
-                                  disabled={!reassignTargetId || reassignSubmitting}
-                                  className="flex-1 h-8 rounded-lg bg-amber-500 text-white text-[11px] font-bold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-amber-600 transition"
-                                >
-                                  {reassignSubmitting ? <Loader2 className="animate-spin mx-auto" size={12} /> : "Confirm"}
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setReassigningLeadId(null);
-                                    setReassignTargetId("");
-                                    setReassignNote("");
-                                  }}
-                                  disabled={reassignSubmitting}
-                                  className="h-8 px-2 rounded-lg text-slate-400 text-[11px] font-semibold hover:text-slate-600 transition"
-                                >
-                                  Cancel
-                                </button>
-                              </div>
+                        {/* Facts row: Assigned (exact · ago) / Last activity / Assigned by */}
+                        <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1.5 rounded-[12px] px-3 py-2" style={GLASS_BOX}>
+                          <div className="min-w-0">
+                            <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Assigned</dt>
+                            <dd className={`${SIZE.factValue} font-bold tabular-nums`} style={{ color: INK }}>
+                              {lead.assignedAt ? (
+                                <>
+                                  <span className="whitespace-nowrap">{formatAssignedExact(lead.assignedAt)}</span>{" "}
+                                  <span className="whitespace-nowrap font-semibold" style={{ color: TEXT2 }}>· {formatAgo(nowMs - new Date(lead.assignedAt).getTime())}</span>
+                                </>
+                              ) : (
+                                "—"
+                              )}
+                            </dd>
+                          </div>
+                          <div className="min-w-0">
+                            <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Last activity</dt>
+                            <dd className={`${SIZE.factValue} font-bold tabular-nums`} style={{ color: INK }}>
+                              {lead.lastActivityAt ? formatAgo(nowMs - new Date(lead.lastActivityAt).getTime()) : "—"}
+                            </dd>
+                          </div>
+                          {lead.assignedByName && (
+                            <div className="col-span-2 min-w-0">
+                              <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Assigned by</dt>
+                              <dd className={`${SIZE.factValue} font-semibold truncate`} style={{ color: TEXT2 }}>{lead.assignedByName}</dd>
                             </div>
                           )}
-                        </div>
-                      )}
+                        </dl>
+
+                        {/* Recycled (with reason) — shared badge, neutral look. */}
+                        {(lead.recycleReason) && (
+                          <div className="flex min-w-0 [&>span]:h-[22px]! [&>span]:inline-flex! [&>span]:items-center! [&>span]:text-[11px]! [&>span]:bg-[#f3f6fa]! [&>span]:text-[#475569]! [&>span]:border-[#e8edf3]!">
+                            <RecycledBadge reason={lead.recycleReason} fromStage={lead.recycledFromStage} fromStatus={lead.recycledFromStatus} />
+                          </div>
+                        )}
+
+                        {reassignOptions.length > 0 && (
+                          <>
+                            <div className="border-t border-dashed" style={{ borderColor: HAIRLINE }} aria-hidden="true" />
+                            {!isReassigning ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setReassigningLeadId(lead.id);
+                                  setReassignTargetId("");
+                                  setReassignNote("");
+                                }}
+                                style={callStyle(tone)}
+                                className={`${CALL_BUTTON} ${SIZE.button} w-full`}
+                              >
+                                <Repeat size={15} strokeWidth={2} />
+                                Reassign
+                              </button>
+                            ) : (
+                              <div className="space-y-2 rounded-[12px] p-3" style={GLASS_BOX}>
+                                <select
+                                  value={reassignTargetId}
+                                  onChange={(e) => setReassignTargetId(e.target.value)}
+                                  aria-label="Team member"
+                                  className="block h-11 w-full rounded-[12px] bg-white px-3 text-[13px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
+                                  style={{ boxShadow: `inset 0 0 0 1px ${HAIRLINE}`, color: INK }}
+                                >
+                                  <option value="">Select a team member</option>
+                                  {reassignOptions.map((m) => (
+                                    <option key={m.id} value={m.id}>{m.name}</option>
+                                  ))}
+                                </select>
+
+                                <input
+                                  type="text"
+                                  value={reassignNote}
+                                  onChange={(e) => setReassignNote(e.target.value)}
+                                  placeholder="Reason (optional)"
+                                  aria-label="Reason"
+                                  className="block h-11 w-full rounded-[12px] bg-white px-3 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
+                                  style={{ boxShadow: `inset 0 0 0 1px ${HAIRLINE}`, color: INK }}
+                                />
+
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    onClick={() => submitReassign(lead)}
+                                    disabled={!reassignTargetId || reassignSubmitting}
+                                    style={callStyle(tone)}
+                                    className={`${CALL_BUTTON} ${SIZE.button} disabled:opacity-40 disabled:cursor-not-allowed`}
+                                  >
+                                    {reassignSubmitting ? <Loader2 className="animate-spin mx-auto" size={15} /> : "Confirm"}
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setReassigningLeadId(null);
+                                      setReassignTargetId("");
+                                      setReassignNote("");
+                                    }}
+                                    disabled={reassignSubmitting}
+                                    className="h-11 px-3 rounded-[12px] text-[13px] font-semibold transition hover:bg-white/60"
+                                    style={{ color: TEXT2 }}
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
@@ -425,12 +489,13 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
                   <button
                     onClick={loadMoreLeads}
                     disabled={loadingMoreLeads}
-                    className="w-full h-9 rounded-lg text-[12px] font-bold text-amber-700 hover:text-amber-800 transition disabled:opacity-50"
+                    className="w-full h-11 rounded-[12px] text-[13px] font-bold transition disabled:opacity-50 hover:bg-white/60"
+                    style={{ color: TEXT2 }}
                   >
                     {loadingMoreLeads ? (
                       <Loader2 className="animate-spin mx-auto" size={14} />
                     ) : (
-                      `Load More (${leadsTotalCount - leads.length} more)`
+                      `Load more (${leadsTotalCount - leads.length} more)`
                     )}
                   </button>
                 )}
