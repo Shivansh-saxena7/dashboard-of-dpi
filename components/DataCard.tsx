@@ -1,14 +1,44 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useState } from "react";
 import { motion } from "framer-motion";
-import { Phone, MessageCircle } from "lucide-react";
+import { Phone, PencilLine, ChevronDown, PhoneCall } from "lucide-react";
+import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { MAX_DATA_ATTEMPTS } from "@/lib/calculateSLAStatus";
 import { buildWhatsAppLink } from "@/lib/buildWhatsAppLink";
 import { rememberCalledCard } from "@/lib/lastCalledLead";
+import { leadCardFont } from "@/lib/leadCardFont";
+import {
+  BUTTON_BG,
+  callStyle,
+  CALL_BUTTON,
+  cardSurface,
+  formatAgo,
+  formatAssignedExact,
+  formatExactTime,
+  GLASS_BOX,
+  HAIRLINE,
+  HEADER_GLASS,
+  ICON_BUTTON,
+  INK,
+  MUTED,
+  NAME_COLOR,
+  NEUTRAL_TAG,
+  PASS,
+  PassTone,
+  SIZE,
+  sourceDot,
+  statusPillStyle,
+  TAG,
+  TEXT2,
+  TINT_TAG
+} from "@/lib/leadCardLook";
+import LeadCardMore, { ExpandSection } from "./LeadCardMore";
+import LastLogPanel from "./LastLogPanel";
+import WhatsAppIcon from "./WhatsAppIcon";
 
 interface DataCardLead {
   id: string;
@@ -19,48 +49,36 @@ interface DataCardLead {
   status: LeadStatus;
   board_stage?: string | null;
   call_count: number;
+  assigned_at?: string | null;
 }
 
 interface DataCardProps {
   lead: DataCardLead;
   // Takes the id, not a no-arg closure (2026-09-18, matches LeadCard's
   // own onOpen exactly) — lets DataList pass one stable useCallback
-  // reference for every card instead of a fresh `() => setSelectedLeadId(lead.id)`
-  // arrow per card per render, which is what let memo below actually
-  // skip re-rendering unchanged cards.
+  // reference for every card, which is what lets memo below skip
+  // re-rendering unchanged cards.
   onOpen: (id: string) => void;
   index?: number;
 }
 
 // Deliberately NOT a reuse of LeadCard — no SLA countdown (Data has
-// none), no priority badge (Data is always Cold — showing a badge
-// that's never anything else is just noise), no board-stage anything.
-// Attempt-count is what actually matters here, the Data equivalent of
-// LeadCard's SLA countdown — auto-recycle triggers at
-// MAX_DATA_ATTEMPTS while status is still NEW/NOT_CONNECTED/
-// SWITCHED_OFF (see lib/calculateSLAStatus.ts), so that's what gets
-// the prominent warning treatment once it's close.
+// none), no priority badge (Data is always Cold), no project. Attempt-
+// count is what matters here, the Data equivalent of LeadCard's SLA
+// countdown — auto-recycle triggers at MAX_DATA_ATTEMPTS while status is
+// still NEW/NOT_CONNECTED/SWITCHED_OFF (lib/calculateSLAStatus.ts), so
+// that's what gets the header chip and the warning treatment.
 //
-// Wrapped in memo() (2026-09-18 perf audit) — this card had no
-// re-render protection at all before, unlike LeadCard/AdminLeadCard
-// which at least had memo (even if unstable props were defeating it
-// too). Paired with DataList.tsx now passing a stable onOpen + a
-// memoized per-card lead object, this actually skips unchanged cards
-// instead of re-rendering the whole visible list on every DataList
-// state change (search, filter, tab switch).
+// Design C "Pass" look (2026-10-09), shared with LeadCard / AdminLeadCard
+// via lib/leadCardLook.ts. Presentation only — the attempt rules and the
+// call / WhatsApp logging below are unchanged. Wrapped in memo() (2026-09-18
+// perf audit) with DataList passing a stable onOpen + memoized lead object.
 function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
+  const [expanded, setExpanded] = useState(false);
 
-  const statusDisplay = LEAD_STATUS_DISPLAY[lead.status];
-  const initial = lead.name?.charAt(0)?.toUpperCase() || "?";
-
-  // Attempt-count auto-recycle only actually applies while board_stage
-  // is still "LEADS" (calculateSLAStatus.ts) — once an employee has
-  // moved this lead to Follow-up/Visit, that mechanism no longer
-  // fires, so this warning must stop showing too, or it'd falsely
-  // suggest an about-to-be-recycled lead that's actually safe now.
-  // Before board_stage moves existed for Data (Point 2, 2026-08-19),
-  // every Data row was implicitly always "LEADS," so this check wasn't
-  // needed — it's a direct consequence of that change, not unrelated.
+  // Attempt-count auto-recycle only applies while board_stage is still
+  // "LEADS" — once moved to Follow-up/Visit it no longer fires, so the
+  // warning must stop showing too.
   const inLeadsStage = !lead.board_stage || lead.board_stage === "LEADS";
   const stillAtRisk =
     inLeadsStage &&
@@ -90,90 +108,193 @@ function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
       });
   }
 
+  // ---- presentation
+  const tone: PassTone = showAttemptWarning ? "OVERDUE" : !inLeadsStage ? "FOLLOW_UP" : "NEW";
+  const look = PASS[tone];
+  const statusLabel = (LEAD_STATUS_DISPLAY[lead.status]?.label || lead.status).toUpperCase();
+  const initial = lead.name?.charAt(0)?.toUpperCase() || "?";
+  const stageLabel = lead.board_stage === "FOLLOW_UP" ? "Follow-up" : lead.board_stage === "VISIT" ? "Visit" : lead.board_stage === "BOOKING" ? "Booked" : null;
+  const nowMs = new Date().getTime();
+  const dot = (color: string) => <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color }} aria-hidden="true" />;
+  // Header chip: attempts left (shown once the lead has been called, while it can still auto-recycle).
+  const showAttemptChip = stillAtRisk && lead.call_count > 0;
+
   return (
     <motion.div
       id={`data-card-${lead.id}`}
-      initial={{ opacity: 0, y: 16 }}
+      initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, delay: Math.min(index, 8) * 0.05 }}
-      whileHover={{ y: -3 }}
-      whileTap={{ scale: 0.99 }}
+      transition={{ duration: 0.3, delay: Math.min(index, 8) * 0.04 }}
       onClick={() => onOpen(lead.id)}
-      className="rounded-[22px] bg-white border border-slate-100 shadow-[0_4px_20px_rgba(15,23,42,0.06)] hover:shadow-[0_10px_30px_rgba(15,23,42,0.1)] transition-shadow p-4 sm:p-5 cursor-pointer"
+      style={cardSurface(tone)}
+      className={`${leadCardFont.className} @container relative w-full min-w-0 scroll-mt-28 overflow-hidden rounded-[18px] border cursor-pointer shadow-[var(--card-shadow)] transition-[transform,box-shadow] duration-200 hover:-translate-y-px hover:shadow-[var(--card-shadow-hover)] focus-within:ring-2 focus-within:ring-slate-300 motion-reduce:transition-none motion-reduce:hover:translate-y-0`}
     >
-      <div className="flex items-center gap-3">
-        {/* Position-in-current-list number — same addition as
-            LeadCard.tsx, reusing the `index` prop that already existed
-            (previously only fed the entrance-animation delay below). */}
-        <div className="shrink-0 w-5 text-center text-[11px] font-bold text-slate-400">
-          {index + 1}
+      {/* 3px accent line + slim header: position, source, status | attempts chip */}
+      <div className="h-[3px]" style={{ background: look.line }} aria-hidden="true" />
+      <div className={`flex items-center justify-between gap-2 px-3.5 py-1.5 ${HEADER_GLASS}`} style={{ background: look.header }}>
+        <div data-header-tags className="flex min-w-0 flex-wrap @[340px]:flex-nowrap items-center gap-1 @[360px]:gap-1.5 overflow-hidden [&>span:not(:first-child)]:shrink-0 @max-[420px]:[&>span]:px-1.5">
+          {/* Position in the current list — a visual count, not a lead ID. */}
+          <span className="text-[11px] font-bold tabular-nums" style={{ color: MUTED }}>#{index + 1}</span>
+          {lead.source && (
+            <span className={`${TAG} min-w-0 max-w-[140px] shrink!`} style={NEUTRAL_TAG} title={lead.source}>
+              {dot(sourceDot(lead.source))}
+              <span className="hidden truncate @[420px]:inline">{lead.source}</span>
+            </span>
+          )}
+          <span className={`${TAG} tracking-[.04em]`} style={statusPillStyle(lead.status)}>{statusLabel}</span>
         </div>
-
-        <div className="shrink-0 h-11 w-11 rounded-2xl bg-gradient-to-br from-yellow-400 to-amber-500 shadow-[0_4px_12px_rgba(217,119,6,0.35)] flex items-center justify-center text-slate-900 font-bold text-sm">
-          {initial}
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-[15px] font-bold text-slate-800 truncate">{lead.name}</p>
-          <p className="text-xs text-slate-500 mt-0.5">{lead.mobile}</p>
-        </div>
-
-        {lead.source && (
-          <span className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">
-            {lead.source}
+        {showAttemptChip && (
+          <span
+            title={`Auto-recycles after ${MAX_DATA_ATTEMPTS} attempts`}
+            className={`inline-flex h-[24px] shrink-0 items-center gap-1 rounded-full bg-white px-2.5 tabular-nums ${showAttemptWarning ? "motion-safe:animate-pulse" : ""}`}
+            style={{ color: look.accent, boxShadow: `inset 0 0 0 1px ${HAIRLINE}, 0 1px 2px rgba(15,23,42,.05)` }}
+          >
+            <PhoneCall size={12} strokeWidth={2} aria-hidden="true" />
+            <span className="text-[12px] font-extrabold whitespace-nowrap">
+              {attemptsLeft}
+              <span className="hidden @[420px]:inline"> attempt{attemptsLeft === 1 ? "" : "s"}</span> left
+            </span>
           </span>
         )}
       </div>
 
-      <div className="flex items-center flex-wrap gap-1.5 mt-3.5">
-        <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${statusDisplay.badgeClassName}`}>
-          {statusDisplay.label}
-        </span>
-
-        {lead.board_stage && lead.board_stage !== "LEADS" && (
-          <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-500">
-            {lead.board_stage === "FOLLOW_UP" ? "📞 Follow-up" : lead.board_stage === "VISIT" ? "🏠 Visit" : "✅ Booked"}
-          </span>
-        )}
-
-        {lead.call_count > 0 && (
-          stillAtRisk ? (
-            <span
-              className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
-                showAttemptWarning ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-500"
-              }`}
-            >
-              Called {lead.call_count}x · {attemptsLeft} attempt{attemptsLeft === 1 ? "" : "s"} left
+      <div className="flex flex-col gap-2 px-3.5 pt-2.5 pb-3">
+        {/* Identity + last log: side by side on a wide card, stacked on a narrow one. */}
+        <div className="flex flex-col gap-2 @[400px]:flex-row @[400px]:items-start @[400px]:gap-3">
+          <div className="flex min-w-0 flex-1 items-start gap-2.5">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[13px] font-extrabold" style={{ background: "#eef2f6", color: TEXT2, boxShadow: `inset 0 0 0 1px ${HAIRLINE}` }} aria-hidden="true">
+              {initial}
             </span>
-          ) : (
-            <span className="text-[11px] font-medium text-slate-400 px-1">
-              Called {lead.call_count}x
+            <div className="min-w-0 flex-1">
+              <p title={lead.name} className={`${SIZE.name} font-extrabold tracking-[-0.015em] break-words line-clamp-2`} style={{ color: NAME_COLOR }}>{lead.name}</p>
+              {/* Tap the number to copy it (Call button unchanged). */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigator.clipboard?.writeText(lead.mobile).then(() => toast.success("Number copied"), () => {});
+                }}
+                title="Tap to copy"
+                className={`mt-0.5 block ${SIZE.number} font-bold tabular-nums cursor-copy rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300`}
+                style={{ color: "#1e293b" }}
+              >
+                {lead.mobile}
+              </button>
+            </div>
+          </div>
+          <LastLogPanel
+            lookupKey="lead_history_id"
+            id={lead.leadHistoryId}
+            version={`${lead.status}|${lead.call_count}|${lead.board_stage ?? ""}`}
+            called={lead.call_count > 0}
+            resultLabel={lead.status !== "NEW" ? LEAD_STATUS_DISPLAY[lead.status]?.label : null}
+            className="@[400px]:w-[44%] @[400px]:max-w-[230px] @[400px]:shrink-0"
+          />
+        </div>
+
+        {/* Facts row: Assigned (exact · ago) / Calls / Attempts left */}
+        <dl className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-4 rounded-[12px] px-3 py-2" style={GLASS_BOX}>
+          <div className="min-w-0">
+            <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Assigned</dt>
+            <dd className={`${SIZE.factValue} font-bold tabular-nums`} style={{ color: INK }}>
+              {lead.assigned_at ? (
+                <>
+                  <span className="whitespace-nowrap">{formatAssignedExact(lead.assigned_at)}</span>{" "}
+                  <span className="whitespace-nowrap font-semibold" style={{ color: TEXT2 }}>· {formatAgo(nowMs - new Date(lead.assigned_at).getTime())}</span>
+                </>
+              ) : (
+                "—"
+              )}
+            </dd>
+          </div>
+          <div className="min-w-0">
+            <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Calls</dt>
+            <dd className={`${SIZE.factValue} font-bold tabular-nums`} style={{ color: INK }}>
+              {lead.call_count > 0 ? `${lead.call_count} ${lead.call_count === 1 ? "call" : "calls"}` : "None yet"}
+            </dd>
+          </div>
+          <div className="min-w-0">
+            <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Attempts left</dt>
+            <dd className={`${SIZE.factValue} font-bold tabular-nums`} style={{ color: showAttemptWarning ? "#b42318" : INK }}>
+              {stillAtRisk ? attemptsLeft : "—"}
+            </dd>
+          </div>
+        </dl>
+
+        {/* Tags: board stage (Data moved past Leads) and the last-attempt warning. Empty row collapses. */}
+        <div className="flex flex-wrap items-center gap-1.5 min-w-0 [&:not(:has(>:not(:empty)))]:hidden">
+          {showAttemptWarning && <span className={TAG} style={TINT_TAG.callFirst}>Last attempt</span>}
+          {stageLabel && (
+            <span className={TAG} style={NEUTRAL_TAG}>
+              {dot(look.accent)}
+              {stageLabel}
             </span>
-          )
-        )}
+          )}
+        </div>
+
+        {/* Dashed divider, then the action stub */}
+        <div className="border-t border-dashed" style={{ borderColor: HAIRLINE }} aria-hidden="true" />
+        <div className="flex items-center gap-2">
+          <motion.a href={`tel:${lead.mobile}`} onClick={handleCallClick} whileTap={{ scale: 0.98 }} style={callStyle(tone)} className={`${CALL_BUTTON} ${SIZE.button}`}>
+            <Phone size={16} strokeWidth={2} />
+            Call now
+          </motion.a>
+          <a
+            href={buildWhatsAppLink(lead.mobile)}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={handleWhatsAppClick}
+            aria-label="WhatsApp"
+            title="WhatsApp"
+            className={ICON_BUTTON}
+            style={BUTTON_BG.whatsapp}
+          >
+            <WhatsAppIcon size={20} />
+          </a>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpen(lead.id);
+            }}
+            aria-label="Update status"
+            title="Update status"
+            className={ICON_BUTTON}
+            style={look.update}
+          >
+            <PencilLine size={17} strokeWidth={2} />
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded((v) => !v);
+            }}
+            aria-label={expanded ? "Hide details" : "Show details"}
+            aria-expanded={expanded}
+            title={expanded ? "Hide details" : "Show details"}
+            className={ICON_BUTTON}
+            style={expanded ? BUTTON_BG.chevronOpen : BUTTON_BG.chevronClosed}
+          >
+            <ChevronDown size={18} strokeWidth={2} className={`transition-transform motion-reduce:transition-none ${expanded ? "rotate-180" : ""}`} />
+          </button>
+        </div>
       </div>
 
-      <div className="mt-4 flex items-center gap-2">
-        <motion.a
-          href={`tel:${lead.mobile}`}
-          onClick={handleCallClick}
-          whileTap={{ scale: 0.98 }}
-          className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl bg-gradient-to-r from-yellow-400 to-amber-500 text-slate-900 text-sm font-bold shadow-[0_6px_16px_rgba(217,119,6,0.3)] active:shadow-[0_2px_8px_rgba(217,119,6,0.3)]"
-        >
-          <Phone size={15} />
-          Call
-        </motion.a>
-
-        <motion.a
-          href={buildWhatsAppLink(lead.mobile)}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={handleWhatsAppClick}
-          whileTap={{ scale: 0.98 }}
-          className="flex-1 flex items-center justify-center gap-2 h-11 rounded-xl bg-emerald-500 text-white text-sm font-bold shadow-[0_6px_16px_rgba(16,185,129,0.3)] active:shadow-[0_2px_8px_rgba(16,185,129,0.3)]"
-        >
-          <MessageCircle size={15} />
-          WhatsApp
-        </motion.a>
+      <div className="px-3.5 empty:hidden" onClick={(e) => e.stopPropagation()}>
+        <ExpandSection open={expanded}>
+          <div className="mb-3.5 rounded-[14px] px-3 pb-3" style={{ background: "rgba(255,255,255,.8)", boxShadow: `inset 0 0 0 1px ${HAIRLINE}` }}>
+            <LeadCardMore
+              leadId={lead.id}
+              leadHistoryId={lead.leadHistoryId}
+              status={lead.status}
+              boardStage={lead.board_stage}
+              contacted={lead.status === "NEW" && lead.call_count > 0}
+              accent={look.accent}
+              times={lead.assigned_at ? [{ label: "Assigned", value: formatExactTime(lead.assigned_at) }] : []}
+            />
+          </div>
+        </ExpandSection>
       </div>
     </motion.div>
   );

@@ -15,7 +15,7 @@ import { rememberCalledCard } from "@/lib/lastCalledLead";
 import type { LeadSibling } from "@/lib/useLeadSiblings";
 import { recycledFromText } from "@/lib/recycleReasonDisplay";
 import { leadCardFont } from "@/lib/leadCardFont";
-import { BUTTON_BG, CALL_BUTTON, cardSurface, CALL, GLASS_BOX, NAME_COLOR, DOT, formatAssignedExact, formatExactTime, clockParts, GOLD, HAIRLINE, HEADER_GLASS, ICON_BUTTON, INK, MUTED, NEUTRAL_TAG, PASS, PassTone, SIZE, sourceDot, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
+import { BUTTON_BG, CALL_BUTTON, cardSurface, callStyle, GLASS_BOX, NAME_COLOR, DOT, formatAssignedExact, formatExactTime, clockParts, GOLD, HAIRLINE, HEADER_GLASS, ICON_BUTTON, INK, MUTED, NEUTRAL_TAG, PASS, PassTone, SIZE, sourceDot, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
 import LeadCardMore, { ExpandSection } from "./LeadCardMore";
 import WhatsAppIcon from "./WhatsAppIcon";
 import LastLogPanel from "./LastLogPanel";
@@ -503,7 +503,7 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
             href={`tel:${lead.mobile}`}
             onClick={handleCallClick}
             whileTap={{ scale: 0.98 }}
-            style={CALL}
+            style={callStyle(tone)}
             className={`${CALL_BUTTON} ${SIZE.button}`}
           >
             <Phone size={16} strokeWidth={2} />

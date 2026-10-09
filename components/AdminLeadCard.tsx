@@ -16,7 +16,7 @@ import LeadCardMore, { ExpandSection } from "./LeadCardMore";
 import LastLogPanel from "./LastLogPanel";
 import toast from "react-hot-toast";
 import { leadCardFont } from "@/lib/leadCardFont";
-import { BUTTON_BG, CALL_BUTTON, cardSurface, CALL, GLASS_BOX, NAME_COLOR, clockParts, DOT, formatAgo, formatAssignedExact, formatExactTime, HAIRLINE, HEADER_GLASS, ICON_BUTTON, INK, MUTED, NEUTRAL_TAG, PASS, PassTone, SIZE, sourceDot, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
+import { BUTTON_BG, CALL_BUTTON, cardSurface, callStyle, GLASS_BOX, NAME_COLOR, clockParts, DOT, formatAgo, formatAssignedExact, formatExactTime, HAIRLINE, HEADER_GLASS, ICON_BUTTON, INK, MUTED, NEUTRAL_TAG, PASS, PassTone, SIZE, sourceDot, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
 import ExistingClientBadge from "./ExistingClientBadge";
 import RecycledBadge from "./RecycledBadge";
 import TimerPausedBadge from "./TimerPausedBadge";
@@ -566,7 +566,7 @@ function AdminLeadCard({
         {/* Dashed divider, then the action stub: View history, JUNK Reassign (Admin only), expand */}
         <div className="border-t border-dashed" style={{ borderColor: HAIRLINE }} aria-hidden="true" />
         <div className="flex items-center gap-2">
-          <button type="button" onClick={() => setHistoryOpen(true)} style={CALL} className={`${CALL_BUTTON} ${SIZE.button}`}>
+          <button type="button" onClick={() => setHistoryOpen(true)} style={callStyle(tone)} className={`${CALL_BUTTON} ${SIZE.button}`}>
             <History size={16} strokeWidth={2} />
             View history
           </button>

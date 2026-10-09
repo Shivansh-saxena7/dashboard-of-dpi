@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import { Search, ChevronDown } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import DataCard from "./DataCard";
+import LeadCardSkeleton from "./LeadCardSkeleton";
 import DataDetailModal from "./DataDetailModal";
 import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
@@ -257,7 +258,8 @@ export default function DataList({ employeeId }: DataListProps) {
         source: lead.source,
         status: lead.status,
         board_stage: lead.board_stage,
-        call_count: lead.lead_history[0]?.call_count ?? 0
+        call_count: lead.lead_history[0]?.call_count ?? 0,
+        assigned_at: lead.lead_history[0]?.assigned_at ?? null
       })),
     [visibleLeads]
   );
@@ -297,11 +299,7 @@ export default function DataList({ employeeId }: DataListProps) {
   }
 
   if (loading) {
-    return (
-      <div className="mx-4 mt-6 text-center text-sm text-slate-400">
-        Loading your Data...
-      </div>
-    );
+    return <LeadCardSkeleton />;
   }
 
   const selectedLead = leads.find((lead) => lead.id === selectedLeadId);
@@ -311,8 +309,8 @@ export default function DataList({ employeeId }: DataListProps) {
       {leads.length === 0 ? (
         <div className="flex flex-col items-center justify-center mt-16 text-center px-4">
           <div className="text-5xl mb-3">🗂️</div>
-          <h2 className="text-lg font-semibold text-gray-700">No Data assigned to you yet</h2>
-          <p className="text-sm text-gray-500 mt-1">
+          <h2 className="text-lg font-semibold text-slate-800">No Data assigned to you yet</h2>
+          <p className="text-sm text-slate-600 mt-1 max-w-xs">
             Data an Admin sends you directly will show up here.
           </p>
         </div>
@@ -415,11 +413,11 @@ export default function DataList({ employeeId }: DataListProps) {
           {visibleLeads.length === 0 ? (
             <div className="flex flex-col items-center justify-center mt-16 text-center px-4">
               <div className="text-5xl mb-3">🔍</div>
-              <h2 className="text-lg font-semibold text-gray-700">No Data matches these filters</h2>
-              <p className="text-sm text-gray-500 mt-1">Try clearing the search or filters above.</p>
+              <h2 className="text-lg font-semibold text-slate-800">No Data matches these filters</h2>
+              <p className="text-sm text-slate-600 mt-1 max-w-xs">Try clearing the search or filters above.</p>
             </div>
           ) : (
-            <div className="mx-4 mt-4 space-y-3 pb-6">
+            <div className="mt-4 mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 items-start gap-4 mx-auto w-[calc(100%-2rem)] max-w-[1400px] rounded-[24px] bg-[linear-gradient(180deg,#f3f6fb_0%,#e9eef6_100%)] p-3 sm:p-4">
               {cardLeads.map((cardLead, index) => (
                 <DataCard
                   key={cardLead.id}
