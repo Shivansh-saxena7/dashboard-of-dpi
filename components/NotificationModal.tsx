@@ -413,52 +413,21 @@ export default function NotificationModal({
                     transition={{
                       delay: index * .05,
                     }}
-                    className="
-                    group
-
-                    relative
-
-                    rounded-3xl
-
-                    border
-                    border-gray-200
-
-                    bg-gradient-to-br
-                    from-white
-                    to-slate-50
-
-                    p-5
-
-                    shadow-sm
-
-                    hover:shadow-xl
-                    hover:-translate-y-1
-
-                    transition-all
-                    duration-300
-                    "
+                    // Full-row tint by notification group (lib/notificationSystem.ts):
+                    // white → soft tint, hairline border and 3px accent bar in the
+                    // group's hue; unread a touch stronger.
+                    style={{
+                      background: `linear-gradient(135deg, #ffffff 0%, ${item.is_read ? notificationStyle(item.type).row.read : notificationStyle(item.type).row.unread} 100%)`,
+                      borderColor: notificationStyle(item.type).row.border
+                    }}
+                    className="group relative overflow-hidden rounded-3xl border p-5 shadow-[inset_0_1px_0_rgba(255,255,255,.85),0_1px_2px_rgba(15,23,42,.04)] transition-[transform,box-shadow] duration-300 hover:-translate-y-0.5 hover:shadow-[inset_0_1px_0_rgba(255,255,255,.85),0_12px_24px_-12px_rgba(15,23,42,.18)] motion-reduce:transition-none motion-reduce:hover:translate-y-0"
                   >
 
-                    {!item.is_read && (
-
-                      <div
-                        className="
-                        absolute
-                        left-0
-                        top-0
-                        bottom-0
-
-                        w-1.5
-
-                        rounded-l-3xl
-
-                        bg-gradient-to-b
-                        from-blue-500
-                        to-violet-600
-                        "
-                      />
-
-                    )}
+                    <div
+                      className="absolute left-0 top-0 bottom-0 w-[3px]"
+                      style={{ background: notificationStyle(item.type).row.bar, opacity: item.is_read ? 0.45 : 1 }}
+                      aria-hidden="true"
+                    />
 
                     <div className="flex justify-between gap-4">
 
@@ -474,7 +443,7 @@ export default function NotificationModal({
 
                         <div>
 
-                          <h3 className="font-bold text-lg text-gray-800">
+                          <h3 className={`text-lg ${item.is_read ? "font-semibold text-slate-700" : "font-extrabold text-slate-900"}`}>
 
                             {item.title}
 

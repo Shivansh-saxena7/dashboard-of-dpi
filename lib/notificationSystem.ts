@@ -87,6 +87,22 @@ const GROUP_STYLE: Record<NotificationGroup | "SLA_URGENT", { iconBox: string; c
   OTHER: { iconBox: "bg-slate-100 text-slate-700", chip: "bg-slate-50 text-slate-700 border-slate-200", groupLabel: "Notification" }
 };
 
+// Full-row tint (2026-10-09): white → a soft 4–6% tint of the group's hue
+// (a touch stronger while unread), a hairline border in the same hue and a
+// 3px accent bar. Hex values so the gradient can be built inline.
+const ROW_TINT: Record<NotificationGroup | "SLA_URGENT", { read: string; unread: string; border: string; bar: string }> = {
+  NEW_LEAD: { read: "#f3f7ff", unread: "#e8f0ff", border: "#dbe7fe", bar: "#3b82f6" },
+  FOLLOW_UP: { read: "#f7f4ff", unread: "#efe8ff", border: "#e7defd", bar: "#8b5cf6" },
+  SLA: { read: "#fffaf0", unread: "#fff2da", border: "#fbe5bd", bar: "#f59e0b" },
+  SLA_URGENT: { read: "#fff5f5", unread: "#ffe9e9", border: "#fbd5d5", bar: "#ef4444" },
+  JUNK: { read: "#f6f8fa", unread: "#eef2f6", border: "#e2e8f0", bar: "#94a3b8" },
+  VISIT: { read: "#f2fbf9", unread: "#e4f7f2", border: "#c9eee5", bar: "#14b8a6" },
+  PEOPLE: { read: "#f2fbf5", unread: "#e5f7eb", border: "#cdeed8", bar: "#22c55e" },
+  SYSTEM: { read: "#fff4f6", unread: "#ffe8ee", border: "#fad3dd", bar: "#f43f5e" },
+  CELEBRATION: { read: "#fffcee", unread: "#fff6d4", border: "#f6e3a1", bar: "#eab308" },
+  OTHER: { read: "#f7f9fb", unread: "#f0f3f7", border: "#e2e8f0", bar: "#94a3b8" }
+};
+
 // Every type this app writes (notification table + code + DB functions).
 const NOTIFICATION_TYPES: Record<string, { label: string; icon: string; group: NotificationGroup | "SLA_URGENT" }> = {
   // New lead / data / reassignment — blue
@@ -141,6 +157,7 @@ export interface NotificationStyle {
   groupLabel: string;
   iconBoxClass: string;   // the round icon box
   chipClass: string;      // the small label chip
+  row: { read: string; unread: string; border: string; bar: string }; // full-row tint
 }
 
 export function notificationStyle(type: string | null | undefined): NotificationStyle {
@@ -150,7 +167,7 @@ export function notificationStyle(type: string | null | undefined): Notification
       ? NOTIFICATION_TYPE_LABELS[type] || type.toLowerCase().split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")
       : "Notification";
     const s = GROUP_STYLE.OTHER;
-    return { label: fallbackLabel, icon: "🔔", group: "OTHER", groupLabel: s.groupLabel, iconBoxClass: s.iconBox, chipClass: s.chip };
+    return { label: fallbackLabel, icon: "🔔", group: "OTHER", groupLabel: s.groupLabel, iconBoxClass: s.iconBox, chipClass: s.chip, row: ROW_TINT.OTHER };
   }
   const s = GROUP_STYLE[entry.group];
   return {
@@ -159,7 +176,8 @@ export function notificationStyle(type: string | null | undefined): Notification
     group: entry.group === "SLA_URGENT" ? "SLA" : entry.group,
     groupLabel: s.groupLabel,
     iconBoxClass: s.iconBox,
-    chipClass: s.chip
+    chipClass: s.chip,
+    row: ROW_TINT[entry.group]
   };
 }
 
