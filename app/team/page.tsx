@@ -20,6 +20,8 @@ import { BOARD_STAGES } from "@/lib/leadBoardStageDisplay";
 import { exportLeadsToExcel, exportLeadsToPDF } from "@/lib/exportLeadsReport";
 import { DateRangeOption, isWithinDateRange, dateRangeFilterLabel } from "@/lib/dateRangeFilter";
 import { fetchAllRows } from "@/lib/fetchAllRows";
+import { leadCardFont } from "@/lib/leadCardFont";
+import { CALL_BUTTON, callStyle, cardSurface, GLASS_BOX, HAIRLINE, HEADER_GLASS, INK, MUTED, NAME_COLOR, NEUTRAL_TAG, PASS, SIZE, sourceDot, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const ALL_STATUSES = Object.keys(LEAD_STATUS_DISPLAY);
@@ -597,80 +599,136 @@ export default function TeamPage() {
             Pending Leads ({pendingLeads.length})
           </p>
 
-          <div className="space-y-2.5">
+          {/* Pending (team-reserved, unassigned) leads — lead-card look (2026-10-09), presentation only. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 items-start gap-4 rounded-[24px] bg-[linear-gradient(180deg,#f3f6fb_0%,#e9eef6_100%)] p-3 sm:p-4">
             {pendingLeads.map((lead) => {
               const isAssigning = assigningLeadId === lead.id;
+              const look = PASS.NEW;
+              const priorityLabel = (LEAD_PRIORITY_DISPLAY[lead.priority as LeadPriority]?.label || lead.priority || "").toUpperCase();
 
               return (
-                <div key={lead.id} className="rounded-2xl bg-white border border-slate-100 shadow-md p-4">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="text-sm font-bold text-slate-800 truncate">{lead.name}</p>
-                      <p className="text-xs text-slate-500 mt-0.5">{lead.mobile}</p>
-                      {lead.project && <p className="text-xs text-slate-500">{lead.project}</p>}
+                <div
+                  key={lead.id}
+                  style={cardSurface("NEW")}
+                  className={`${leadCardFont.className} @container relative w-full min-w-0 overflow-hidden rounded-[18px] border shadow-[var(--card-shadow)] transition-[transform,box-shadow] duration-200 hover:-translate-y-px hover:shadow-[var(--card-shadow-hover)] focus-within:ring-2 focus-within:ring-slate-300 motion-reduce:transition-none motion-reduce:hover:translate-y-0`}
+                >
+                  {/* 3px accent line + slim header: source, priority | unassigned pill */}
+                  <div className="h-[3px]" style={{ background: look.line }} aria-hidden="true" />
+                  <div className={`flex items-center justify-between gap-2 px-3.5 py-1.5 ${HEADER_GLASS}`} style={{ background: look.header }}>
+                    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                      {lead.source && (
+                        <span className={`${TAG} min-w-0 max-w-[150px]`} style={NEUTRAL_TAG} title={lead.source}>
+                          <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: sourceDot(lead.source) }} aria-hidden="true" />
+                          <span className="truncate">{lead.source}</span>
+                        </span>
+                      )}
+                      {priorityLabel && (
+                        <span className={TAG} style={lead.priority === "hot" ? TINT_TAG.hot : lead.priority === "warm" ? TINT_TAG.warm : NEUTRAL_TAG}>
+                          {priorityLabel}
+                        </span>
+                      )}
                     </div>
-                    {lead.source && (
-                      <span className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">
-                        {lead.source}
-                      </span>
-                    )}
+                    <span className={`${TAG} shrink-0 tracking-[.04em]`} style={statusPillStyle("NEW")}>UNASSIGNED</span>
                   </div>
 
-                  {!isAssigning ? (
-                    <button
-                      onClick={() => {
-                        setAssigningLeadId(lead.id);
-                        setAssignTargetId("");
-                        setAssignNote("");
-                      }}
-                      className="flex items-center gap-1.5 mt-3 text-[11px] font-bold text-amber-700 hover:text-amber-800 transition"
-                    >
-                      <UserPlus size={12} />
-                      Assign to a team member
-                    </button>
-                  ) : (
-                    <div className="mt-3 pt-3 border-t border-slate-100 space-y-1.5">
-                      <select
-                        value={assignTargetId}
-                        onChange={(e) => setAssignTargetId(e.target.value)}
-                        className="w-full h-9 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs font-semibold text-slate-600 outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-300 transition"
+                  <div className="flex flex-col gap-2 px-3.5 pt-2.5 pb-3">
+                    <div className="min-w-0">
+                      <p title={lead.name} className={`${SIZE.name} font-extrabold tracking-[-0.015em] break-words line-clamp-2`} style={{ color: NAME_COLOR }}>{lead.name}</p>
+                      {/* Tap the number to copy it. */}
+                      <button
+                        type="button"
+                        onClick={() => navigator.clipboard?.writeText(lead.mobile).then(() => toast.success("Number copied"), () => {})}
+                        title="Tap to copy"
+                        className={`mt-0.5 block ${SIZE.number} font-bold tabular-nums cursor-copy rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300`}
+                        style={{ color: "#1e293b" }}
                       >
-                        <option value="">Select member...</option>
-                        {members.filter((m) => m.is_active).map((m) => (
-                          <option key={m.id} value={m.id}>{m.name}</option>
-                        ))}
-                      </select>
-
-                      <input
-                        type="text"
-                        value={assignNote}
-                        onChange={(e) => setAssignNote(e.target.value)}
-                        placeholder="Reason (optional)"
-                        className="w-full h-9 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs text-slate-600 outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-300 transition"
-                      />
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => submitAssignPending(lead)}
-                          disabled={!assignTargetId || assignSubmitting}
-                          className="flex-1 h-9 rounded-lg bg-amber-500 text-white text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-amber-600 transition"
-                        >
-                          {assignSubmitting ? <Loader2 className="animate-spin mx-auto" size={13} /> : "Confirm"}
-                        </button>
-                        <button
-                          onClick={() => {
-                            setAssigningLeadId(null);
-                            setAssignTargetId("");
-                            setAssignNote("");
-                          }}
-                          disabled={assignSubmitting}
-                          className="h-9 px-3 rounded-lg text-slate-400 text-xs font-semibold hover:text-slate-600 transition"
-                        >
-                          Cancel
-                        </button>
-                      </div>
+                        {lead.mobile}
+                      </button>
+                      {lead.project && <p className={`mt-0.5 ${SIZE.project} font-bold truncate`} style={{ color: look.project }}>{lead.project}</p>}
                     </div>
-                  )}
+
+                    {/* Facts row — a pending lead has no owner, calls or activity yet. */}
+                    <dl className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-4 rounded-[12px] px-3 py-2" style={GLASS_BOX}>
+                      <div className="min-w-0">
+                        <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Assigned</dt>
+                        <dd className={`${SIZE.factValue} font-bold`} style={{ color: INK }}>Not yet</dd>
+                      </div>
+                      <div className="min-w-0">
+                        <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Calls</dt>
+                        <dd className={`${SIZE.factValue} font-bold`} style={{ color: INK }}>—</dd>
+                      </div>
+                      <div className="min-w-0">
+                        <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Last activity</dt>
+                        <dd className={`${SIZE.factValue} font-bold`} style={{ color: INK }}>—</dd>
+                      </div>
+                    </dl>
+
+                    <div className="border-t border-dashed" style={{ borderColor: HAIRLINE }} aria-hidden="true" />
+
+                    {!isAssigning ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAssigningLeadId(lead.id);
+                          setAssignTargetId("");
+                          setAssignNote("");
+                        }}
+                        style={callStyle("NEW")}
+                        className={`${CALL_BUTTON} ${SIZE.button} w-full`}
+                      >
+                        <UserPlus size={16} strokeWidth={2} />
+                        Assign to a team member
+                      </button>
+                    ) : (
+                      <div className="space-y-2 rounded-[12px] p-3" style={GLASS_BOX}>
+                        <select
+                          value={assignTargetId}
+                          onChange={(e) => setAssignTargetId(e.target.value)}
+                          aria-label="Team member"
+                          className="block h-11 w-full rounded-[12px] bg-white px-3 text-[13px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
+                          style={{ boxShadow: `inset 0 0 0 1px ${HAIRLINE}`, color: INK }}
+                        >
+                          <option value="">Select a team member</option>
+                          {members.filter((m) => m.is_active).map((m) => (
+                            <option key={m.id} value={m.id}>{m.name}</option>
+                          ))}
+                        </select>
+
+                        <input
+                          type="text"
+                          value={assignNote}
+                          onChange={(e) => setAssignNote(e.target.value)}
+                          placeholder="Reason (optional)"
+                          aria-label="Reason"
+                          className="block h-11 w-full rounded-[12px] bg-white px-3 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
+                          style={{ boxShadow: `inset 0 0 0 1px ${HAIRLINE}`, color: INK }}
+                        />
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => submitAssignPending(lead)}
+                            disabled={!assignTargetId || assignSubmitting}
+                            style={callStyle("NEW")}
+                            className={`${CALL_BUTTON} ${SIZE.button} disabled:opacity-40 disabled:cursor-not-allowed`}
+                          >
+                            {assignSubmitting ? <Loader2 className="animate-spin mx-auto" size={15} /> : "Confirm"}
+                          </button>
+                          <button
+                            onClick={() => {
+                              setAssigningLeadId(null);
+                              setAssignTargetId("");
+                              setAssignNote("");
+                            }}
+                            disabled={assignSubmitting}
+                            className="h-11 px-3 rounded-[12px] text-[13px] font-semibold transition hover:bg-white/60"
+                            style={{ color: TEXT2 }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               );
             })}
