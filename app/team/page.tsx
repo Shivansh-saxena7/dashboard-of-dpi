@@ -21,7 +21,7 @@ import { exportLeadsToExcel, exportLeadsToPDF } from "@/lib/exportLeadsReport";
 import { DateRangeOption, isWithinDateRange, dateRangeFilterLabel } from "@/lib/dateRangeFilter";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 import { leadCardFont } from "@/lib/leadCardFont";
-import { CALL_BUTTON, callStyle, cardSurface, GLASS_BOX, HAIRLINE, HEADER_GLASS, INK, MUTED, NAME_COLOR, NEUTRAL_TAG, PASS, SIZE, sourceDot, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
+import { dotStyle, CALL_BUTTON, callStyle, cardSurface, GLASS_BOX, HAIRLINE, HEADER_GLASS, INK, MUTED, NAME_COLOR, NEUTRAL_TAG, PASS, SIZE, sourceDot, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const ALL_STATUSES = Object.keys(LEAD_STATUS_DISPLAY);
@@ -618,7 +618,7 @@ export default function TeamPage() {
                     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                       {lead.source && (
                         <span className={`${TAG} min-w-0 max-w-[150px]`} style={NEUTRAL_TAG} title={lead.source}>
-                          <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: sourceDot(lead.source) }} aria-hidden="true" />
+                          <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={dotStyle(sourceDot(lead.source))} aria-hidden="true" />
                           <span className="truncate">{lead.source}</span>
                         </span>
                       )}
@@ -633,13 +633,13 @@ export default function TeamPage() {
 
                   <div className="flex flex-col gap-2 px-3.5 pt-2.5 pb-3">
                     <div className="min-w-0">
-                      <p title={lead.name} className={`${SIZE.name} font-extrabold tracking-[-0.015em] break-words line-clamp-2`} style={{ color: NAME_COLOR }}>{lead.name}</p>
+                      <p title={lead.name} className={`${SIZE.name} break-words line-clamp-2`} style={{ color: NAME_COLOR }}>{lead.name}</p>
                       {/* Tap the number to copy it. */}
                       <button
                         type="button"
                         onClick={() => navigator.clipboard?.writeText(lead.mobile).then(() => toast.success("Number copied"), () => {})}
                         title="Tap to copy"
-                        className={`mt-0.5 block ${SIZE.number} font-bold tabular-nums cursor-copy rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300`}
+                        className={`mt-0.5 block ${SIZE.number} tabular-nums cursor-copy rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300`}
                         style={{ color: "#1e293b" }}
                       >
                         {lead.mobile}

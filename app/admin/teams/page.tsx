@@ -10,7 +10,7 @@ import DeleteModal from "../components/DeleteModal";
 import PageHeader from "@/components/PageHeader";
 import LastLogPanel from "@/components/LastLogPanel";
 import { leadCardFont } from "@/lib/leadCardFont";
-import { cardSurface, formatAgo, formatAssignedExact, formatExactTime, GLASS_BOX, HAIRLINE, HEADER_GLASS, INK, MUTED, NAME_COLOR, NEUTRAL_TAG, PASS, SIZE, TAG, TEXT2 } from "@/lib/leadCardLook";
+import { cardSurface, formatAgo, formatAssignedExact, formatExactTime, GLASS_BOX, headerChip, HEADER_GLASS, INK, MUTED, NAME_COLOR, NEUTRAL_TAG, PASS, SIZE, TAG, TEXT2 } from "@/lib/leadCardLook";
 // Admin-only team management — creating teams, assigning a Team
 // Leader, and adding/removing members, all from one team-centric
 // panel (select a team, see/edit its full roster) rather than a
@@ -686,7 +686,7 @@ export default function AdminTeamsPage() {
                                 </span>
                                 <span
                                   className="inline-flex h-[24px] shrink-0 items-center rounded-full bg-white px-2.5 text-[12px] font-extrabold tabular-nums"
-                                  style={{ color: look.accent, boxShadow: `inset 0 0 0 1px ${HAIRLINE}` }}
+                                  style={headerChip(look.accent)}
                                   title={formatExactTime(row.assigned_at)}
                                 >
                                   {formatAgo(nowMs - new Date(row.assigned_at).getTime())}
@@ -697,7 +697,7 @@ export default function AdminTeamsPage() {
                                 {/* Identity + last log: side by side on a wide card, stacked on a narrow one. */}
                                 <div className="flex flex-col gap-2 @[400px]:flex-row @[400px]:items-start @[400px]:gap-3">
                                   <div className="min-w-0 flex-1">
-                                    <p title={row.leads?.name || "Unknown lead"} className={`${SIZE.name} font-extrabold tracking-[-0.015em] break-words line-clamp-2`} style={{ color: NAME_COLOR }}>
+                                    <p title={row.leads?.name || "Unknown lead"} className={`${SIZE.name} break-words line-clamp-2`} style={{ color: NAME_COLOR }}>
                                       {row.leads?.name || "Unknown lead"}
                                     </p>
                                     {row.leads?.mobile && (
@@ -705,7 +705,7 @@ export default function AdminTeamsPage() {
                                         type="button"
                                         onClick={() => navigator.clipboard?.writeText(row.leads.mobile).then(() => toast.success("Number copied"), () => {})}
                                         title="Tap to copy"
-                                        className={`mt-0.5 block ${SIZE.number} font-bold tabular-nums cursor-copy rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300`}
+                                        className={`mt-0.5 block ${SIZE.number} tabular-nums cursor-copy rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300`}
                                         style={{ color: "#1e293b" }}
                                       >
                                         {row.leads.mobile}

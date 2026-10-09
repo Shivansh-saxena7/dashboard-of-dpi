@@ -16,7 +16,7 @@ import LeadCardMore, { ExpandSection } from "./LeadCardMore";
 import LastLogPanel from "./LastLogPanel";
 import toast from "react-hot-toast";
 import { leadCardFont } from "@/lib/leadCardFont";
-import { BUTTON_BG, CALL_BUTTON, cardSurface, callStyle, GLASS_BOX, NAME_COLOR, clockParts, DOT, formatAgo, formatAssignedExact, formatExactTime, HAIRLINE, HEADER_GLASS, ICON_BUTTON, INK, MUTED, NEUTRAL_TAG, PASS, PassTone, SIZE, sourceDot, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
+import { dotStyle, BUTTON_BG, CALL_BUTTON, cardSurface, callStyle, GLASS_BOX, NAME_COLOR, clockParts, DOT, formatAgo, formatAssignedExact, formatExactTime, HAIRLINE, headerChip, HEADER_GLASS, ICON_BUTTON, INK, MUTED, NEUTRAL_TAG, PASS, PassTone, SIZE, sourceDot, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
 import ExistingClientBadge from "./ExistingClientBadge";
 import RecycledBadge from "./RecycledBadge";
 import TimerPausedBadge from "./TimerPausedBadge";
@@ -306,7 +306,7 @@ function AdminLeadCard({
     : "NEW";
   const look = PASS[tone];
   const nowMs = new Date().getTime();
-  const dot = (color: string) => <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color }} aria-hidden="true" />;
+  const dot = (color: string) => <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={dotStyle(color)} aria-hidden="true" />;
   const untilDate = lead.pausedUntil ? new Date(lead.pausedUntil).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "";
 
   // Header clock — the same states the old badges showed.
@@ -389,7 +389,7 @@ function AdminLeadCard({
           <span
             title={clockTitle}
             className={`inline-flex h-[24px] shrink-0 items-center gap-1 rounded-full bg-white px-2 @[360px]:gap-1.5 @[360px]:px-2.5 tabular-nums ${recyclingNow ? "motion-safe:animate-pulse" : ""}`}
-            style={{ color: look.accent, boxShadow: `inset 0 0 0 1px ${HAIRLINE}, 0 1px 2px rgba(15,23,42,.05)` }}
+            style={headerChip(look.accent)}
           >
             <Timer size={12} strokeWidth={2} aria-hidden="true" />
             <span className="text-[12px] font-extrabold whitespace-nowrap">
@@ -427,13 +427,13 @@ function AdminLeadCard({
                 {initial}
               </span>
           <div className="min-w-0 flex-1">
-          <p title={lead.name} className={`${SIZE.name} font-extrabold tracking-[-0.015em] break-words line-clamp-2`} style={{ color: NAME_COLOR }}>{lead.name}</p>
+          <p title={lead.name} className={`${SIZE.name} break-words line-clamp-2`} style={{ color: NAME_COLOR }}>{lead.name}</p>
           {/* Tap the number to copy it. */}
           <button
             type="button"
             onClick={() => navigator.clipboard?.writeText(lead.mobile).then(() => toast.success("Number copied"), () => {})}
             title="Tap to copy"
-            className={`mt-0.5 block ${SIZE.number} font-bold tabular-nums cursor-copy rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300`}
+            className={`mt-0.5 block ${SIZE.number} tabular-nums cursor-copy rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300`}
             style={{ color: "#1e293b" }}
           >
             {lead.mobile}

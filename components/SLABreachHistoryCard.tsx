@@ -5,11 +5,11 @@ import { AlertTriangle, Trash2, Repeat, ClipboardList, LucideIcon } from "lucide
 import { ENDED_REASON_TEXT, ENDED_REASON_BADGE, DEFAULT_ENDED_REASON_BADGE } from "@/lib/endedReasonDisplay";
 import { leadCardFont } from "@/lib/leadCardFont";
 import {
-  cardSurface,
+  cardSurface, dotStyle,
   formatAgo,
   formatAssignedExact,
   GLASS_BOX,
-  HAIRLINE,
+  headerChip,
   HEADER_GLASS,
   INK,
   MUTED,
@@ -95,14 +95,14 @@ export default function SLABreachHistoryCard({ entry, index = 0 }: SLABreachHist
       {/* 3px accent line + slim header: what ended the assignment | source, last 4 digits */}
       <div className="h-[3px]" style={{ background: look.line }} aria-hidden="true" />
       <div className={`flex items-center justify-between gap-2 px-3.5 py-1.5 ${HEADER_GLASS}`} style={{ background: look.header }}>
-        <span className={`${TAG} tracking-[.02em]`} style={{ background: "#ffffff", color: look.accent, boxShadow: `inset 0 0 0 1px ${HAIRLINE}` }}>
+        <span className={`${TAG} tracking-[.02em]`} style={headerChip(look.accent)}>
           <Icon size={11} strokeWidth={2} aria-hidden="true" />
           {badge.label}
         </span>
         <div className="flex min-w-0 items-center gap-1.5">
           {entry.source && (
             <span className={`${TAG} min-w-0 max-w-[130px]`} style={NEUTRAL_TAG} title={entry.source}>
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: sourceDot(entry.source) }} aria-hidden="true" />
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={dotStyle(sourceDot(entry.source))} aria-hidden="true" />
               <span className="truncate">{entry.source}</span>
             </span>
           )}
@@ -119,9 +119,9 @@ export default function SLABreachHistoryCard({ entry, index = 0 }: SLABreachHist
         <div className="flex flex-col gap-2 @[400px]:flex-row @[400px]:items-start @[400px]:gap-3">
           <div className="min-w-0 flex-1">
             {entry.name ? (
-              <p title={entry.name} className={`${SIZE.name} font-extrabold tracking-[-0.015em] break-words line-clamp-2`} style={{ color: NAME_COLOR }}>{entry.name}</p>
+              <p title={entry.name} className={`${SIZE.name} break-words line-clamp-2`} style={{ color: NAME_COLOR }}>{entry.name}</p>
             ) : (
-              <p className={`${SIZE.name} font-bold italic`} style={{ color: MUTED }}>Name unavailable</p>
+              <p className={`${SIZE.name} italic`} style={{ color: MUTED }}>Name unavailable</p>
             )}
             {entry.project ? (
               <p className={`mt-0.5 ${SIZE.project} font-bold truncate`} style={{ color: look.project }}>{entry.project}</p>

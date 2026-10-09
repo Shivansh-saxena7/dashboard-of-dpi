@@ -15,12 +15,13 @@ import {
   BUTTON_BG,
   callStyle,
   CALL_BUTTON,
-  cardSurface,
+  cardSurface, dotStyle,
   formatAgo,
   formatAssignedExact,
   formatExactTime,
   GLASS_BOX,
   HAIRLINE,
+  headerChip,
   HEADER_GLASS,
   ICON_BUTTON,
   INK,
@@ -115,7 +116,7 @@ function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
   const initial = lead.name?.charAt(0)?.toUpperCase() || "?";
   const stageLabel = lead.board_stage === "FOLLOW_UP" ? "Follow-up" : lead.board_stage === "VISIT" ? "Visit" : lead.board_stage === "BOOKING" ? "Booked" : null;
   const nowMs = new Date().getTime();
-  const dot = (color: string) => <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color }} aria-hidden="true" />;
+  const dot = (color: string) => <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={dotStyle(color)} aria-hidden="true" />;
   // Header chip: attempts left (shown once the lead has been called, while it can still auto-recycle).
   const showAttemptChip = stillAtRisk && lead.call_count > 0;
 
@@ -147,7 +148,7 @@ function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
           <span
             title={`Auto-recycles after ${MAX_DATA_ATTEMPTS} attempts`}
             className={`inline-flex h-[24px] shrink-0 items-center gap-1 rounded-full bg-white px-2.5 tabular-nums ${showAttemptWarning ? "motion-safe:animate-pulse" : ""}`}
-            style={{ color: look.accent, boxShadow: `inset 0 0 0 1px ${HAIRLINE}, 0 1px 2px rgba(15,23,42,.05)` }}
+            style={headerChip(look.accent)}
           >
             <PhoneCall size={12} strokeWidth={2} aria-hidden="true" />
             <span className="text-[12px] font-extrabold whitespace-nowrap">
@@ -166,7 +167,7 @@ function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
               {initial}
             </span>
             <div className="min-w-0 flex-1">
-              <p title={lead.name} className={`${SIZE.name} font-extrabold tracking-[-0.015em] break-words line-clamp-2`} style={{ color: NAME_COLOR }}>{lead.name}</p>
+              <p title={lead.name} className={`${SIZE.name} break-words line-clamp-2`} style={{ color: NAME_COLOR }}>{lead.name}</p>
               {/* Tap the number to copy it (Call button unchanged). */}
               <button
                 type="button"
@@ -175,7 +176,7 @@ function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
                   navigator.clipboard?.writeText(lead.mobile).then(() => toast.success("Number copied"), () => {});
                 }}
                 title="Tap to copy"
-                className={`mt-0.5 block ${SIZE.number} font-bold tabular-nums cursor-copy rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300`}
+                className={`mt-0.5 block ${SIZE.number} tabular-nums cursor-copy rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300`}
                 style={{ color: "#1e293b" }}
               >
                 {lead.mobile}

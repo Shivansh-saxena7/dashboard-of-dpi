@@ -15,7 +15,7 @@ import { rememberCalledCard } from "@/lib/lastCalledLead";
 import type { LeadSibling } from "@/lib/useLeadSiblings";
 import { recycledFromText } from "@/lib/recycleReasonDisplay";
 import { leadCardFont } from "@/lib/leadCardFont";
-import { BUTTON_BG, CALL_BUTTON, cardSurface, callStyle, GLASS_BOX, NAME_COLOR, DOT, formatAssignedExact, formatExactTime, clockParts, GOLD, HAIRLINE, HEADER_GLASS, ICON_BUTTON, INK, MUTED, NEUTRAL_TAG, PASS, PassTone, SIZE, sourceDot, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
+import { dotStyle, BUTTON_BG, CALL_BUTTON, cardSurface, callStyle, GLASS_BOX, NAME_COLOR, DOT, formatAssignedExact, formatExactTime, clockParts, GOLD, HAIRLINE, headerChip, HEADER_GLASS, ICON_BUTTON, INK, MUTED, NEUTRAL_TAG, PASS, PassTone, SIZE, sourceDot, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
 import LeadCardMore, { ExpandSection } from "./LeadCardMore";
 import WhatsAppIcon from "./WhatsAppIcon";
 import LastLogPanel from "./LastLogPanel";
@@ -321,7 +321,7 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
   const clockTitle = [clock ? `${clock.label} ${clock.value}` : null, clock?.sub, recycleTitle].filter(Boolean).join(" · ") || undefined;
   // Header chip text; words drop on a narrow card (full label in the tooltip).
   const chip = clockParts(clock);
-  const dot = (color: string) => <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color }} aria-hidden="true" />;
+  const dot = (color: string) => <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={dotStyle(color)} aria-hidden="true" />;
 
   return (
     <motion.div
@@ -362,7 +362,7 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
           <span
             title={clockTitle}
             className={`inline-flex h-[24px] shrink-0 items-center gap-1 rounded-full bg-white px-2 @[360px]:gap-1.5 @[360px]:px-2.5 tabular-nums ${overdue ? "motion-safe:animate-pulse" : ""}`}
-            style={{ color: look.accent, boxShadow: `inset 0 0 0 1px ${HAIRLINE}, 0 1px 2px rgba(15,23,42,.05)` }}
+            style={headerChip(look.accent)}
           >
             <Timer size={12} strokeWidth={2} aria-hidden="true" />
             <span className="text-[12px] font-extrabold whitespace-nowrap">
@@ -379,7 +379,7 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
         {/* Identity + last log: side by side on a wide card, stacked (log as a slim strip) on a narrow one. */}
         <div className="flex flex-col gap-2 @[380px]:flex-row @[380px]:items-start @[380px]:gap-3">
           <div className="min-w-0 flex-1">
-            <p title={lead.name} className={`${SIZE.name} font-extrabold tracking-[-0.015em] break-words line-clamp-2`} style={{ color: NAME_COLOR }}>{lead.name}</p>
+            <p title={lead.name} className={`${SIZE.name} break-words line-clamp-2`} style={{ color: NAME_COLOR }}>{lead.name}</p>
             {/* Tap the number to copy it (Call button unchanged). */}
             <button
               type="button"
@@ -388,7 +388,7 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
                 navigator.clipboard?.writeText(lead.mobile).then(() => toast.success("Number copied"), () => {});
               }}
               title="Tap to copy"
-              className={`mt-0.5 block ${SIZE.number} font-bold tabular-nums cursor-copy rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300`}
+              className={`mt-0.5 block ${SIZE.number} tabular-nums cursor-copy rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300`}
               style={{ color: "#1e293b" }}
             >
               {lead.mobile}

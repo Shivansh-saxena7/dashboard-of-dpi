@@ -14,7 +14,7 @@ import RecycledBadge from "./RecycledBadge";
 import TimerPausedBadge from "./TimerPausedBadge";
 import { getRecycleCutoff } from "@/lib/calculateSLAStatus";
 import { leadCardFont } from "@/lib/leadCardFont";
-import { CALL_BUTTON, callStyle, cardSurface, formatAgo, formatAssignedExact, GLASS_BOX, HAIRLINE, HEADER_GLASS, INK, MUTED, NAME_COLOR, NEUTRAL_TAG, PASS, PassTone, SIZE, statusPillStyle, TAG, TEXT2 } from "@/lib/leadCardLook";
+import { dotStyle, CALL_BUTTON, callStyle, cardSurface, formatAgo, formatAssignedExact, GLASS_BOX, HAIRLINE, HEADER_GLASS, INK, MUTED, NAME_COLOR, NEUTRAL_TAG, PASS, PassTone, SIZE, statusPillStyle, TAG, TEXT2 } from "@/lib/leadCardLook";
 interface TeamMemberDetailModalProps {
   member: { id: string; name: string };
   teamLeaderId: string;
@@ -361,7 +361,7 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
                         )}
                         {boardStageDisplay && (
                           <span className={TAG} style={NEUTRAL_TAG}>
-                            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: look.accent }} aria-hidden="true" />
+                            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={dotStyle(look.accent)} aria-hidden="true" />
                             {boardStageDisplay.label}
                           </span>
                         )}
@@ -372,7 +372,7 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
 
                       <div className="flex flex-col gap-2 px-3.5 pt-2.5 pb-3">
                         <div className="min-w-0">
-                          <p title={lead.name} className={`${SIZE.name} font-extrabold tracking-[-0.015em] break-words line-clamp-2`} style={{ color: NAME_COLOR }}>{lead.name}</p>
+                          <p title={lead.name} className={`${SIZE.name} break-words line-clamp-2`} style={{ color: NAME_COLOR }}>{lead.name}</p>
                           {lead.project && <p className={`mt-0.5 ${SIZE.project} font-bold truncate`} style={{ color: look.project }}>{lead.project}</p>}
                         </div>
 

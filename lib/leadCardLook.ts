@@ -8,9 +8,38 @@ import type { CSSProperties } from "react";
 
 export const INK = "#0f172a";
 export const TEXT2 = "#475569";
-export const MUTED = "#94a3b8";
+// Muted labels: neutral slate dark enough for AA (>= 4.9:1) on every card tint (was #94a3b8, 2.4:1).
+export const MUTED = "#5b6779";
 export const HAIRLINE = "#e8edf3";
 export const GOLD = "#b7791f";
+
+// Raised surface (2026-10-09 depth pass 2): a soft gloss on the top half over
+// a white-to-tint gradient, a 1px white highlight on top, a slightly darker
+// inner bottom edge, a 1px tone ring, and a two-layer shadow (one tight, one
+// soft). No blur filters, so long lead lists stay smooth.
+export function raised(bg: string, ring: string, color?: string): CSSProperties {
+  return {
+    background: `linear-gradient(180deg, rgba(255,255,255,.9) 0%, rgba(255,255,255,0) 55%), linear-gradient(180deg, #ffffff 0%, ${bg} 100%)`,
+    ...(color ? { color } : {}),
+    boxShadow: `inset 0 1px 0 rgba(255,255,255,.95), inset 0 -1px 0 rgba(15,23,42,.06), inset 0 0 0 1px ${ring}, 0 1px 1px rgba(15,23,42,.06), 0 2px 5px -2px rgba(15,23,42,.12)`
+  };
+}
+
+// Small coloured dot (source, status): a white ring and a soft glow in its own colour.
+export function dotStyle(color: string): CSSProperties {
+  return {
+    background: `radial-gradient(circle at 35% 30%, rgba(255,255,255,.55) 0%, rgba(255,255,255,0) 55%), ${color}`,
+    boxShadow: `0 0 0 1.5px rgba(255,255,255,.95), 0 0 0 3px color-mix(in srgb, ${color} 22%, transparent), 0 0 6px color-mix(in srgb, ${color} 45%, transparent)`
+  };
+}
+
+// The one-off accent chip on the right of a header (clock, attempts, ago,
+// history badge): white raised pill in the card's accent colour.
+// Text uses the tone's deeper shade (same as its project / Update colour) so every tone passes AA.
+const CHIP_TEXT: Record<string, string> = { "#2563eb": "#1d4ed8", "#0d9488": "#0f766e", "#d1343a": "#b42318", "#64748b": "#475569" };
+export function headerChip(color: string): CSSProperties {
+  return raised("#f6f8fb", HAIRLINE, CHIP_TEXT[color] || color);
+}
 
 export const CARD_BG = "linear-gradient(180deg, #ffffff 0%, #f9fbfe 100%)";
 export const CARD_SHADOW = "inset 0 1px 0 rgba(255,255,255,.8), 0 1px 2px rgba(15,23,42,.04), 0 12px 28px -16px rgba(15,23,42,.16)";
@@ -20,43 +49,43 @@ export type PassTone = "NEW" | "FOLLOW_UP" | "OVERDUE" | "QUIET";
 
 export const PASS: Record<
   PassTone,
-  { accent: string; header: string; line: string; project: string; call: string; callShadow: string; update: { background: string; color: string } }
+  { accent: string; header: string; line: string; project: string; call: string; callShadow: string; update: CSSProperties }
 > = {
   NEW: {
     accent: "#2563eb",
-    header: "linear-gradient(90deg, #f2f7ff 0%, #ffffff 100%)",
-    line: "linear-gradient(90deg, #3b82f6 0%, #06b6d4 100%)",
+    header: "linear-gradient(180deg, rgba(37,99,235,.13) 0px, rgba(37,99,235,0) 7px), linear-gradient(112deg, rgba(255,255,255,0) 28%, rgba(255,255,255,.6) 44%, rgba(37,99,235,.06) 60%, rgba(37,99,235,0) 78%), linear-gradient(180deg, rgba(255,255,255,.75) 0%, rgba(255,255,255,0) 55%), linear-gradient(0deg, rgba(37,99,235,.06) 0%, rgba(37,99,235,0) 70%), linear-gradient(90deg, #f2f7ff 0%, #ffffff 100%)",
+    line: "linear-gradient(180deg, rgba(255,255,255,.7) 0px, rgba(255,255,255,0) 1.5px), linear-gradient(90deg, rgba(96,165,250,.25) 0%, #60a5fa 14%, #2563eb 45%, #06b6d4 82%, rgba(34,211,238,.25) 100%)",
     project: "#1e40af",
     call: "linear-gradient(135deg, #2f6df6 0%, #1e55d8 100%)",
     callShadow: "0 8px 16px -10px rgba(37,99,235,.55)",
-    update: { background: "#eef4ff", color: "#1d4ed8" }
+    update: raised("#eef4ff", "rgba(37,99,235,.22)", "#1d4ed8")
   },
   FOLLOW_UP: {
     accent: "#0d9488",
-    header: "linear-gradient(90deg, #effcf9 0%, #ffffff 100%)",
-    line: "linear-gradient(90deg, #14b8a6 0%, #22d3ee 100%)",
+    header: "linear-gradient(180deg, rgba(13,148,136,.13) 0px, rgba(13,148,136,0) 7px), linear-gradient(112deg, rgba(255,255,255,0) 28%, rgba(255,255,255,.6) 44%, rgba(13,148,136,.06) 60%, rgba(13,148,136,0) 78%), linear-gradient(180deg, rgba(255,255,255,.75) 0%, rgba(255,255,255,0) 55%), linear-gradient(0deg, rgba(13,148,136,.06) 0%, rgba(13,148,136,0) 70%), linear-gradient(90deg, #effcf9 0%, #ffffff 100%)",
+    line: "linear-gradient(180deg, rgba(255,255,255,.7) 0px, rgba(255,255,255,0) 1.5px), linear-gradient(90deg, rgba(94,234,212,.3) 0%, #5eead4 14%, #0d9488 48%, #22d3ee 84%, rgba(34,211,238,.25) 100%)",
     project: "#0f766e",
     call: "linear-gradient(135deg, #14b8a6 0%, #0d9488 100%)",
     callShadow: "0 8px 16px -10px rgba(13,148,136,.55)",
-    update: { background: "#e9f8f5", color: "#0f766e" }
+    update: raised("#e9f8f5", "rgba(13,148,136,.24)", "#0f766e")
   },
   OVERDUE: {
     accent: "#d1343a",
-    header: "linear-gradient(90deg, #fff4f0 0%, #ffffff 100%)",
-    line: "linear-gradient(90deg, #fb923c 0%, #ef4444 100%)",
+    header: "linear-gradient(180deg, rgba(229,72,77,.13) 0px, rgba(229,72,77,0) 7px), linear-gradient(112deg, rgba(255,255,255,0) 28%, rgba(255,255,255,.6) 44%, rgba(229,72,77,.06) 60%, rgba(229,72,77,0) 78%), linear-gradient(180deg, rgba(255,255,255,.75) 0%, rgba(255,255,255,0) 55%), linear-gradient(0deg, rgba(229,72,77,.06) 0%, rgba(229,72,77,0) 70%), linear-gradient(90deg, #fff4f0 0%, #ffffff 100%)",
+    line: "linear-gradient(180deg, rgba(255,255,255,.7) 0px, rgba(255,255,255,0) 1.5px), linear-gradient(90deg, rgba(253,186,116,.3) 0%, #fdba74 14%, #f97316 42%, #e5484d 78%, rgba(239,68,68,.25) 100%)",
     project: "#b42318",
     call: "linear-gradient(135deg, #f0663a 0%, #dc3545 100%)",
     callShadow: "0 8px 16px -10px rgba(220,53,69,.55)",
-    update: { background: "#fff1ee", color: "#b42318" }
+    update: raised("#fff1ee", "rgba(209,52,58,.22)", "#b42318")
   },
   QUIET: {
     accent: "#64748b",
-    header: "linear-gradient(90deg, #f4f6f9 0%, #ffffff 100%)",
-    line: "linear-gradient(90deg, #94a3b8 0%, #cbd5e1 100%)",
+    header: "linear-gradient(180deg, rgba(100,116,139,.13) 0px, rgba(100,116,139,0) 7px), linear-gradient(112deg, rgba(255,255,255,0) 28%, rgba(255,255,255,.6) 44%, rgba(100,116,139,.06) 60%, rgba(100,116,139,0) 78%), linear-gradient(180deg, rgba(255,255,255,.75) 0%, rgba(255,255,255,0) 55%), linear-gradient(0deg, rgba(100,116,139,.06) 0%, rgba(100,116,139,0) 70%), linear-gradient(90deg, #f4f6f9 0%, #ffffff 100%)",
+    line: "linear-gradient(180deg, rgba(255,255,255,.7) 0px, rgba(255,255,255,0) 1.5px), linear-gradient(90deg, rgba(203,213,225,.3) 0%, #cbd5e1 16%, #64748b 50%, #cbd5e1 84%, rgba(203,213,225,.3) 100%)",
     project: "#334155",
     call: "linear-gradient(135deg, #64748b 0%, #475569 100%)",
     callShadow: "0 8px 16px -10px rgba(71,85,105,.5)",
-    update: { background: "#f1f5f9", color: "#334155" }
+    update: raised("#f1f5f9", "rgba(100,116,139,.24)", "#334155")
   }
 };
 
@@ -72,19 +101,19 @@ const STATUS_PILL: Record<string, { bg: string; text: string }> = {
 };
 export const statusPillStyle = (status: string): CSSProperties => {
   const c = STATUS_PILL[status] || { bg: "#f1f5f9", text: TEXT2 };
-  return { background: c.bg, color: c.text };
+  return raised(c.bg, `${c.text}2e`, c.text);
 };
 
 // Tags. Coloured ones are the only semantic exceptions; everything else is
 // the neutral pill + a dot.
 const TAG_BASE = "inline-flex h-[22px] items-center gap-1.5 rounded-full px-2 text-[11px] font-bold leading-none whitespace-nowrap";
 export const TAG = TAG_BASE;
-export const NEUTRAL_TAG: CSSProperties = { background: "#f3f6fa", color: TEXT2, boxShadow: `inset 0 0 0 1px ${HAIRLINE}` };
+export const NEUTRAL_TAG: CSSProperties = raised("#eef2f7", "#e2e8f0", TEXT2);
 export const TINT_TAG = {
-  hot: { background: "#fff1f1", color: "#b42318", boxShadow: "inset 0 0 0 1px #fde2e2" },
-  warm: { background: "#fff7e6", color: "#92400e", boxShadow: "inset 0 0 0 1px #fdecc8" },
-  callFirst: { background: "#fff1f1", color: "#b42318", boxShadow: "inset 0 0 0 1px #fde2e2" },
-  recycleSoon: { background: "#fff7e6", color: "#92400e", boxShadow: "inset 0 0 0 1px #fdecc8" }
+  hot: raised("#ffeaea", "#fbd5d5", "#b42318"),
+  warm: raised("#fff3dc", "#fbe3b6", "#92400e"),
+  callFirst: raised("#ffeaea", "#fbd5d5", "#b42318"),
+  recycleSoon: raised("#fff3dc", "#fbe3b6", "#92400e")
 } satisfies Record<string, CSSProperties>;
 
 export const DOT = {
@@ -106,9 +135,10 @@ export function sourceDot(source: string | null | undefined): string {
 }
 
 // Sizes (decent): name 18, number 15, project 13.5, facts 12.5 / labels 10, tags 11, buttons 14.
+// Name 600 and number 500 (lighter than the old 800 / 700); the number stays tabular at each call site.
 export const SIZE = {
-  name: "text-[18px] leading-[1.25]",
-  number: "text-[15px] leading-tight tracking-[.03em]",
+  name: "text-[18px] leading-[1.25] font-semibold tracking-[-0.01em]",
+  number: "text-[15px] leading-tight tracking-[.03em] font-medium",
   project: "text-[13.5px] leading-snug",
   factLabel: "text-[10px] tracking-[.08em] uppercase",
   factValue: "text-[12.5px] leading-snug",
@@ -116,14 +146,14 @@ export const SIZE = {
 };
 
 export const ICON_BUTTON =
-  "shrink-0 h-11 w-11 rounded-[13px] flex items-center justify-center transition-[filter,transform] hover:brightness-[.97] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-400";
+  "shrink-0 h-11 w-11 rounded-[13px] flex items-center justify-center transition-[filter,transform] hover:-translate-y-px hover:brightness-[.98] active:translate-y-0 active:scale-95 motion-reduce:transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-400";
 export const CALL_BUTTON =
-  "flex-1 min-w-0 h-11 rounded-[13px] flex items-center justify-center gap-1.5 font-bold whitespace-nowrap transition-[filter,transform] hover:brightness-[.96] active:scale-[.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-500";
+  "flex-1 min-w-0 h-11 rounded-[13px] flex items-center justify-center gap-1.5 font-bold whitespace-nowrap transition-[filter,transform] hover:-translate-y-px hover:brightness-[.97] active:translate-y-0 active:scale-[.98] motion-reduce:transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-500";
 export const BUTTON_BG = {
-  whatsapp: { background: "#e9fbf1" },
-  quickDial: { background: "#f3f6fa", color: "#334155" },
-  chevronClosed: { background: "#f3f6fa", color: "#334155" },
-  chevronOpen: { background: INK, color: "#ffffff" }
+  whatsapp: raised("#e2f7eb", "#c9ecd8"),
+  quickDial: raised("#eef2f7", "#e2e8f0", "#334155"),
+  chevronClosed: raised("#eef2f7", "#e2e8f0", "#334155"),
+  chevronOpen: { background: "linear-gradient(180deg, #1e293b 0%, #0f172a 100%)", color: "#ffffff", boxShadow: "inset 0 1px 0 rgba(255,255,255,.12), 0 2px 6px -2px rgba(15,23,42,.45)" } as CSSProperties
 };
 
 // "18m ago" / "3h ago" / "2d ago".
@@ -210,4 +240,4 @@ export function callStyle(tone: PassTone): CSSProperties {
 }
 
 // Header: soft tint + 3px accent line, with a glassy top/bottom highlight.
-export const HEADER_GLASS = "shadow-[inset_0_1px_0_rgba(255,255,255,.85),inset_0_-1px_0_rgba(232,237,243,.9)]";
+export const HEADER_GLASS = "min-h-[36px] shadow-[inset_0_1px_0_rgba(255,255,255,.95),inset_0_-1px_0_rgba(226,232,240,.95),inset_0_-4px_5px_-4px_rgba(15,23,42,.09),0_1px_2px_rgba(15,23,42,.04)]";
