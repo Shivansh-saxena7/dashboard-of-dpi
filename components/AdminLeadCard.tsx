@@ -16,7 +16,9 @@ import LeadCardMore, { ExpandSection } from "./LeadCardMore";
 import LastLogPanel from "./LastLogPanel";
 import toast from "react-hot-toast";
 import { leadCardFont } from "@/lib/leadCardFont";
-import { CHAMPAGNE, dotStyle, BUTTON_BG, CALL_BUTTON, cardSurface, DOCK, FACTS, callStyle, GLASS_BOX, NAME_COLOR, clockParts, DOT, formatAgo, formatAssignedExact, formatExactTime, HAIRLINE, headerChip, HEADER_GLASS, ICON_BUTTON, INK, MUTED, NEUTRAL_TAG, PASS, PassTone, SIZE, sourceDot, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
+import { FACT_LABEL, FACT_VALUE, FACTS_BOX, NUMBER_INK, CHAMPAGNE, dotStyle, BUTTON_BG, CALL_BUTTON, cardSurface, DOCK, FACTS, callStyle, GLASS_BOX, NAME_COLOR, clockParts, DOT, formatAgo, formatAssignedExact, formatExactTime, HAIRLINE, headerChip, HEADER_GLASS, ICON_BUTTON, INK, MUTED, NEUTRAL_TAG, PASS, PassTone, SIZE, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
+import FactIcon from "@/components/FactIcon";
+import SourceChip from "@/components/SourceChip";
 import ExistingClientBadge from "./ExistingClientBadge";
 import RecycledBadge from "./RecycledBadge";
 import TimerPausedBadge from "./TimerPausedBadge";
@@ -365,14 +367,7 @@ function AdminLeadCard({
               {dot(DOT.slate)}
               Personal
             </span>
-          ) : (
-            lead.source && (
-              <span className={`${TAG} min-w-0 max-w-[120px] shrink!`} style={NEUTRAL_TAG} title={lead.source}>
-                {dot(sourceDot(lead.source))}
-                <span className="hidden truncate @[420px]:inline">{lead.source}</span>
-              </span>
-            )
-          )}
+          ) : null}
           {lead.priority === "hot" ? (
             <span className={TAG} style={TINT_TAG.hot}>HOT</span>
           ) : lead.priority === "warm" ? (
@@ -434,11 +429,12 @@ function AdminLeadCard({
             onClick={() => navigator.clipboard?.writeText(lead.mobile).then(() => toast.success("Number copied"), () => {})}
             title="Tap to copy"
             className={`mt-0.5 block ${SIZE.number} tabular-nums cursor-copy rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300`}
-            style={{ color: "#1e293b" }}
+            style={{ color: NUMBER_INK }}
           >
             {lead.mobile}
           </button>
-          {lead.project && <p className={`mt-0.5 ${SIZE.project} font-bold truncate`} style={{ color: look.project }}>{lead.project}</p>}
+          {lead.project && <p className={`mt-0.5 ${SIZE.project} font-medium truncate`} style={{ color: look.project }}>{lead.project}</p>}
+          <SourceChip source={lead.isPersonalLead ? null : lead.source} />
           </div>
         </div>
         <LastLogPanel
@@ -452,10 +448,10 @@ function AdminLeadCard({
         </div>
 
         {/* Facts row: Assigned (exact · ago) / Calls / Last activity */}
-        <dl className={FACTS} style={GLASS_BOX}>
+        <dl className={FACTS} style={FACTS_BOX}>
           <div className="min-w-0">
-            <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Assigned</dt>
-            <dd className={`${SIZE.factValue} font-bold tabular-nums`} style={{ color: INK }}>
+            <dt className={FACT_LABEL}><FactIcon name="assigned" />Assigned</dt>
+            <dd className={`${FACT_VALUE} tabular-nums`}>
               {lead.assignedAt ? (
                 <>
                   <span className="whitespace-nowrap">{formatAssignedExact(lead.assignedAt)}</span>{" "}
@@ -467,12 +463,12 @@ function AdminLeadCard({
             </dd>
           </div>
           <div className="min-w-0">
-            <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Calls</dt>
-            <dd className={`${SIZE.factValue} font-bold tabular-nums`} style={{ color: INK }}>{callsValue}</dd>
+            <dt className={FACT_LABEL}><FactIcon name="calls" />Calls</dt>
+            <dd className={`${FACT_VALUE} tabular-nums`}>{callsValue}</dd>
           </div>
           <div className="min-w-0">
-            <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Last activity</dt>
-            <dd className={`${SIZE.factValue} font-bold tabular-nums`} style={{ color: INK }}>{lastActivityValue}</dd>
+            <dt className={FACT_LABEL}><FactIcon name="activity" />Last activity</dt>
+            <dd className={`${FACT_VALUE} tabular-nums`}>{lastActivityValue}</dd>
           </div>
         </dl>
 

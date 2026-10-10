@@ -14,29 +14,28 @@ import { leadCardFont } from "@/lib/leadCardFont";
 import {
   BUTTON_BG,
   callStyle,
-  CALL_BUTTON, CHAMPAGNE, DOCK, FACTS,
+  CALL_BUTTON, FACT_LABEL, FACT_VALUE, FACTS_BOX, NUMBER_INK, CHAMPAGNE, DOCK, FACTS,
   cardSurface, dotStyle,
   formatAgo,
   formatAssignedExact,
   formatExactTime,
-  GLASS_BOX,
   HAIRLINE,
   headerChip,
   HEADER_GLASS,
   ICON_BUTTON,
   INK,
-  MUTED,
   NAME_COLOR,
   NEUTRAL_TAG,
   PASS,
   PassTone,
   SIZE,
-  sourceDot,
   statusPillStyle,
   TAG,
   TEXT2,
   TINT_TAG
 } from "@/lib/leadCardLook";
+import FactIcon from "@/components/FactIcon";
+import SourceChip from "@/components/SourceChip";
 import LeadCardMore, { ExpandSection } from "./LeadCardMore";
 import LastLogPanel from "./LastLogPanel";
 import WhatsAppIcon from "./WhatsAppIcon";
@@ -136,12 +135,6 @@ function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
         <div data-header-tags className="flex min-w-0 flex-wrap @[340px]:flex-nowrap items-center gap-1 @[360px]:gap-1.5 overflow-hidden [&>span:not(:first-child)]:shrink-0 @max-[420px]:[&>span]:px-1.5">
           {/* Position in the current list — a visual count, not a lead ID. */}
           <span className="text-[11px] font-bold tabular-nums" style={{ color: CHAMPAGNE.text }}>#{index + 1}</span>
-          {lead.source && (
-            <span className={`${TAG} min-w-0 max-w-[140px] shrink!`} style={NEUTRAL_TAG} title={lead.source}>
-              {dot(sourceDot(lead.source))}
-              <span className="hidden truncate @[420px]:inline">{lead.source}</span>
-            </span>
-          )}
           <span className={`${TAG} tracking-[.04em]`} style={statusPillStyle(lead.status)}>{statusLabel}</span>
         </div>
         {showAttemptChip && (
@@ -177,10 +170,11 @@ function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
                 }}
                 title="Tap to copy"
                 className={`mt-0.5 block ${SIZE.number} tabular-nums cursor-copy rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300`}
-                style={{ color: "#1e293b" }}
+                style={{ color: NUMBER_INK }}
               >
                 {lead.mobile}
               </button>
+              <SourceChip source={lead.source} />
             </div>
           </div>
           <LastLogPanel
@@ -194,10 +188,10 @@ function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
         </div>
 
         {/* Facts row: Assigned (exact · ago) / Calls / Attempts left */}
-        <dl className={FACTS} style={GLASS_BOX}>
+        <dl className={FACTS} style={FACTS_BOX}>
           <div className="min-w-0">
-            <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Assigned</dt>
-            <dd className={`${SIZE.factValue} font-bold tabular-nums`} style={{ color: INK }}>
+            <dt className={FACT_LABEL}><FactIcon name="assigned" />Assigned</dt>
+            <dd className={`${FACT_VALUE} tabular-nums`}>
               {lead.assigned_at ? (
                 <>
                   <span className="whitespace-nowrap">{formatAssignedExact(lead.assigned_at)}</span>{" "}
@@ -209,13 +203,13 @@ function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
             </dd>
           </div>
           <div className="min-w-0">
-            <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Calls</dt>
-            <dd className={`${SIZE.factValue} font-bold tabular-nums`} style={{ color: INK }}>
+            <dt className={FACT_LABEL}><FactIcon name="calls" />Calls</dt>
+            <dd className={`${FACT_VALUE} tabular-nums`}>
               {lead.call_count > 0 ? `${lead.call_count} ${lead.call_count === 1 ? "call" : "calls"}` : "None yet"}
             </dd>
           </div>
           <div className="min-w-0">
-            <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Attempts left</dt>
+            <dt className={FACT_LABEL}><FactIcon name="attempts" />Attempts left</dt>
             <dd className={`${SIZE.factValue} font-bold tabular-nums`} style={{ color: showAttemptWarning ? "#b42318" : INK }}>
               {stillAtRisk ? attemptsLeft : "—"}
             </dd>

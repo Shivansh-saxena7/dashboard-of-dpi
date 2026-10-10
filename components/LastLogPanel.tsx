@@ -3,11 +3,11 @@
 // Compact "Last log" panel on the lead card (employee + admin/coordinator).
 // Shows what happened last (Called · result / status / Note), how long ago
 // (amber once older than 24h) and two lines of the latest note (full text
-// in the tooltip). Neutral colours. Display only.
+// in the tooltip). Soft slate note, champagne label/time. Display only.
 
 import { StickyNote, PhoneCall } from "lucide-react";
 import { useLastLog, LastLogKey } from "@/lib/useLastLog";
-import { formatAgo, HAIRLINE, INK, MUTED, TEXT2 } from "@/lib/leadCardLook";
+import { CHAMPAGNE, formatAgo, HAIRLINE, MUTED } from "@/lib/leadCardLook";
 
 export default function LastLogPanel({
   lookupKey,
@@ -53,12 +53,12 @@ export default function LastLogPanel({
 
   return (
     <div className={`min-w-0 rounded-[12px] px-2.5 py-2 ${className}`} style={box} title={log.note}>
-      <p className="flex items-center gap-1.5 text-[11px] font-bold leading-none" style={{ color: TEXT2 }}>
+      <p className="flex items-center gap-1.5 text-[11px] font-bold leading-none" style={{ color: CHAMPAGNE.text }}>
         {called ? <PhoneCall size={11} strokeWidth={2} aria-hidden="true" /> : <StickyNote size={11} strokeWidth={2} aria-hidden="true" />}
         <span className="truncate">{what}</span>
-        <span className="shrink-0 tabular-nums font-semibold" style={{ color: stale ? "#b45309" : MUTED }}>· {formatAgo(ageMs)}</span>
+        <span className="shrink-0 tabular-nums font-semibold" style={{ color: stale ? "#b45309" : "#6f6553" }}>· {formatAgo(ageMs)}</span>
       </p>
-      <p className="mt-1 text-[12px] font-medium leading-snug break-words line-clamp-2" style={{ color: INK }}>{log.note}</p>
+      <p className="mt-1 text-[12px] font-medium leading-snug break-words line-clamp-2" style={{ color: "#475569" }}>{log.note}</p>
     </div>
   );
 }

@@ -10,7 +10,8 @@ import DeleteModal from "../components/DeleteModal";
 import PageHeader from "@/components/PageHeader";
 import LastLogPanel from "@/components/LastLogPanel";
 import { leadCardFont } from "@/lib/leadCardFont";
-import { cardSurface, formatAgo, formatAssignedExact, formatExactTime, GLASS_BOX, headerChip, HEADER_GLASS, INK, MUTED, NAME_COLOR, NEUTRAL_TAG, PASS, SIZE, TAG, TEXT2 } from "@/lib/leadCardLook";
+import { FACT_LABEL, FACT_VALUE, FACTS_BOX, NUMBER_INK, cardSurface, formatAgo, formatAssignedExact, formatExactTime, GLASS_BOX, headerChip, HEADER_GLASS, INK, MUTED, NAME_COLOR, NEUTRAL_TAG, PASS, SIZE, TAG, TEXT2 } from "@/lib/leadCardLook";
+import FactIcon from "@/components/FactIcon";
 // Admin-only team management — creating teams, assigning a Team
 // Leader, and adding/removing members, all from one team-centric
 // panel (select a team, see/edit its full roster) rather than a
@@ -706,26 +707,26 @@ export default function AdminTeamsPage() {
                                         onClick={() => navigator.clipboard?.writeText(row.leads.mobile).then(() => toast.success("Number copied"), () => {})}
                                         title="Tap to copy"
                                         className={`mt-0.5 block ${SIZE.number} tabular-nums cursor-copy rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300`}
-                                        style={{ color: "#1e293b" }}
+                                        style={{ color: NUMBER_INK }}
                                       >
                                         {row.leads.mobile}
                                       </button>
                                     )}
-                                    {row.leads?.project && <p className={`mt-0.5 ${SIZE.project} font-bold truncate`} style={{ color: look.project }}>{row.leads.project}</p>}
+                                    {row.leads?.project && <p className={`mt-0.5 ${SIZE.project} font-medium truncate`} style={{ color: look.project }}>{row.leads.project}</p>}
                                   </div>
                                   {/* Latest note on this assignment (admin can read lead_notes). */}
                                   <LastLogPanel lookupKey="lead_history_id" id={row.id} className="@[400px]:w-[44%] @[400px]:max-w-[230px] @[400px]:shrink-0" />
                                 </div>
 
                                 {/* Facts row: Assigned to / Assigned (exact · ago) */}
-                                <dl className="grid grid-cols-1 gap-y-1.5 @[19rem]:grid-cols-[auto_minmax(0,1fr)] gap-x-4 rounded-[12px] px-3 py-2" style={GLASS_BOX}>
+                                <dl className="grid grid-cols-1 gap-y-1.5 @[19rem]:grid-cols-[auto_minmax(0,1fr)] gap-x-4 rounded-[12px] px-3 py-2" style={FACTS_BOX}>
                                   <div className="min-w-0">
-                                    <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Assigned to</dt>
-                                    <dd className={`${SIZE.factValue} font-bold truncate`} style={{ color: INK }}>{row.employee?.name || "Unknown"}</dd>
+                                    <dt className={FACT_LABEL}><FactIcon name="owner" />Assigned to</dt>
+                                    <dd className={`${FACT_VALUE} truncate`}>{row.employee?.name || "Unknown"}</dd>
                                   </div>
                                   <div className="min-w-0">
-                                    <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Assigned</dt>
-                                    <dd className={`${SIZE.factValue} font-bold tabular-nums`} style={{ color: INK }}>
+                                    <dt className={FACT_LABEL}><FactIcon name="assigned" />Assigned</dt>
+                                    <dd className={`${FACT_VALUE} tabular-nums`}>
                                       <span className="whitespace-nowrap">{formatAssignedExact(row.assigned_at)}</span>{" "}
                                       <span className="whitespace-nowrap font-semibold" style={{ color: TEXT2 }}>· {formatAgo(nowMs - new Date(row.assigned_at).getTime())}</span>
                                     </dd>

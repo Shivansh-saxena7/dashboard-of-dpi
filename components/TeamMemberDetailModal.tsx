@@ -14,7 +14,8 @@ import RecycledBadge from "./RecycledBadge";
 import TimerPausedBadge from "./TimerPausedBadge";
 import { getRecycleCutoff } from "@/lib/calculateSLAStatus";
 import { leadCardFont } from "@/lib/leadCardFont";
-import { CHAMPAGNE, dotStyle, CALL_BUTTON, callStyle, cardSurface, formatAgo, formatAssignedExact, GLASS_BOX, HAIRLINE, HEADER_GLASS, INK, MUTED, NAME_COLOR, NEUTRAL_TAG, PASS, PassTone, SIZE, statusPillStyle, TAG, TEXT2 } from "@/lib/leadCardLook";
+import { FACT_LABEL, FACT_VALUE, FACTS_BOX, CHAMPAGNE, dotStyle, CALL_BUTTON, callStyle, cardSurface, formatAgo, formatAssignedExact, GLASS_BOX, HAIRLINE, HEADER_GLASS, INK, NAME_COLOR, NEUTRAL_TAG, PASS, PassTone, SIZE, statusPillStyle, TAG, TEXT2 } from "@/lib/leadCardLook";
+import FactIcon from "@/components/FactIcon";
 interface TeamMemberDetailModalProps {
   member: { id: string; name: string };
   teamLeaderId: string;
@@ -373,14 +374,14 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
                       <div className="flex flex-col gap-2 px-3.5 pt-2.5 pb-3">
                         <div className="min-w-0">
                           <p title={lead.name} className={`${SIZE.name} break-words line-clamp-2`} style={{ color: NAME_COLOR }}>{lead.name}</p>
-                          {lead.project && <p className={`mt-0.5 ${SIZE.project} font-bold truncate`} style={{ color: look.project }}>{lead.project}</p>}
+                          {lead.project && <p className={`mt-0.5 ${SIZE.project} font-medium truncate`} style={{ color: look.project }}>{lead.project}</p>}
                         </div>
 
                         {/* Facts row: Assigned (exact · ago) / Last activity / Assigned by */}
-                        <dl className="grid grid-cols-[minmax(0,1fr)_auto] @max-[20rem]:grid-cols-1 gap-x-4 gap-y-1.5 rounded-[12px] px-3 py-2" style={GLASS_BOX}>
+                        <dl className="grid grid-cols-[minmax(0,1fr)_auto] @max-[20rem]:grid-cols-1 gap-x-4 gap-y-1.5 rounded-[12px] px-3 py-2" style={FACTS_BOX}>
                           <div className="min-w-0">
-                            <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Assigned</dt>
-                            <dd className={`${SIZE.factValue} font-bold tabular-nums`} style={{ color: INK }}>
+                            <dt className={FACT_LABEL}><FactIcon name="assigned" />Assigned</dt>
+                            <dd className={`${FACT_VALUE} tabular-nums`}>
                               {lead.assignedAt ? (
                                 <>
                                   <span className="whitespace-nowrap">{formatAssignedExact(lead.assignedAt)}</span>{" "}
@@ -392,14 +393,14 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
                             </dd>
                           </div>
                           <div className="min-w-0">
-                            <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Last activity</dt>
-                            <dd className={`${SIZE.factValue} font-bold tabular-nums`} style={{ color: INK }}>
+                            <dt className={FACT_LABEL}><FactIcon name="activity" />Last activity</dt>
+                            <dd className={`${FACT_VALUE} tabular-nums`}>
                               {lead.lastActivityAt ? formatAgo(nowMs - new Date(lead.lastActivityAt).getTime()) : "—"}
                             </dd>
                           </div>
                           {lead.assignedByName && (
                             <div className="col-span-full min-w-0">
-                              <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Assigned by</dt>
+                              <dt className={FACT_LABEL}><FactIcon name="by" />Assigned by</dt>
                               <dd className={`${SIZE.factValue} font-semibold truncate`} style={{ color: TEXT2 }}>{lead.assignedByName}</dd>
                             </div>
                           )}

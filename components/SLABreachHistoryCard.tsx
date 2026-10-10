@@ -5,7 +5,7 @@ import { AlertTriangle, Trash2, Repeat, ClipboardList, LucideIcon } from "lucide
 import { ENDED_REASON_TEXT, ENDED_REASON_BADGE, DEFAULT_ENDED_REASON_BADGE } from "@/lib/endedReasonDisplay";
 import { leadCardFont } from "@/lib/leadCardFont";
 import {
-  cardSurface, dotStyle,
+  cardSurface, FACT_LABEL, FACT_VALUE, FACTS_BOX,
   formatAgo,
   formatAssignedExact,
   GLASS_BOX,
@@ -18,10 +18,11 @@ import {
   PASS,
   PassTone,
   SIZE,
-  sourceDot,
   TAG,
   TEXT2
 } from "@/lib/leadCardLook";
+import FactIcon from "@/components/FactIcon";
+import SourceChip from "@/components/SourceChip";
 import LastLogPanel from "./LastLogPanel";
 
 interface SLABreachHistoryEntry {
@@ -100,12 +101,6 @@ export default function SLABreachHistoryCard({ entry, index = 0 }: SLABreachHist
           {badge.label}
         </span>
         <div className="ml-auto flex min-w-0 items-center gap-1.5">
-          {entry.source && (
-            <span className={`${TAG} min-w-0 max-w-[130px]`} style={NEUTRAL_TAG} title={entry.source}>
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={dotStyle(sourceDot(entry.source))} aria-hidden="true" />
-              <span className="truncate">{entry.source}</span>
-            </span>
-          )}
           {entry.mobile_last4 && (
             <span className={`${TAG} shrink-0 tabular-nums`} style={NEUTRAL_TAG}>
               •••• {entry.mobile_last4}
@@ -124,10 +119,11 @@ export default function SLABreachHistoryCard({ entry, index = 0 }: SLABreachHist
               <p className={`${SIZE.name} italic`} style={{ color: MUTED }}>Name unavailable</p>
             )}
             {entry.project ? (
-              <p className={`mt-0.5 ${SIZE.project} font-bold truncate`} style={{ color: look.project }}>{entry.project}</p>
+              <p className={`mt-0.5 ${SIZE.project} font-medium truncate`} style={{ color: look.project }}>{entry.project}</p>
             ) : (
               <p className={`mt-0.5 ${SIZE.project} italic`} style={{ color: MUTED }}>Project unavailable</p>
             )}
+            <SourceChip source={entry.source} />
           </div>
           <LastLogPanel lookupKey="lead_history_id" id={entry.lead_history_id} className="@[400px]:w-[44%] @[400px]:max-w-[230px] @[400px]:shrink-0" />
         </div>
@@ -144,9 +140,9 @@ export default function SLABreachHistoryCard({ entry, index = 0 }: SLABreachHist
         </p>
 
         {/* Facts row: Assigned (exact · ago) */}
-        <dl className="rounded-[12px] px-3 py-2" style={GLASS_BOX}>
-          <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Assigned</dt>
-          <dd className={`${SIZE.factValue} font-bold tabular-nums`} style={{ color: INK }}>
+        <dl className="rounded-[12px] px-3 py-2" style={FACTS_BOX}>
+          <dt className={FACT_LABEL}><FactIcon name="assigned" />Assigned</dt>
+          <dd className={`${FACT_VALUE} tabular-nums`}>
             <span className="whitespace-nowrap">{formatAssignedExact(entry.assigned_at)}</span>{" "}
             <span className="whitespace-nowrap font-semibold" style={{ color: TEXT2 }}>· {formatAgo(nowMs - new Date(entry.assigned_at).getTime())}</span>
           </dd>

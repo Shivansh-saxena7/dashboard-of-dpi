@@ -21,7 +21,9 @@ import { exportLeadsToExcel, exportLeadsToPDF } from "@/lib/exportLeadsReport";
 import { DateRangeOption, isWithinDateRange, dateRangeFilterLabel } from "@/lib/dateRangeFilter";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 import { leadCardFont } from "@/lib/leadCardFont";
-import { CHAMPAGNE, dotStyle, CALL_BUTTON, FACTS, callStyle, cardSurface, GLASS_BOX, HAIRLINE, HEADER_GLASS, INK, MUTED, NAME_COLOR, NEUTRAL_TAG, PASS, SIZE, sourceDot, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
+import { FACT_LABEL, FACT_VALUE, FACTS_BOX, NUMBER_INK, CHAMPAGNE, CALL_BUTTON, FACTS, callStyle, cardSurface, GLASS_BOX, HAIRLINE, HEADER_GLASS, INK, NAME_COLOR, NEUTRAL_TAG, PASS, SIZE, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
+import FactIcon from "@/components/FactIcon";
+import SourceChip from "@/components/SourceChip";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const ALL_STATUSES = Object.keys(LEAD_STATUS_DISPLAY);
@@ -616,12 +618,6 @@ export default function TeamPage() {
                   <div className="h-[3px]" style={{ background: look.line }} aria-hidden="true" />
                   <div className={`flex items-center justify-between gap-2 px-3.5 py-1.5 ${HEADER_GLASS}`} style={{ background: look.header }}>
                     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                      {lead.source && (
-                        <span className={`${TAG} min-w-0 max-w-[150px]`} style={NEUTRAL_TAG} title={lead.source}>
-                          <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={dotStyle(sourceDot(lead.source))} aria-hidden="true" />
-                          <span className="truncate">{lead.source}</span>
-                        </span>
-                      )}
                       {priorityLabel && (
                         <span className={TAG} style={lead.priority === "hot" ? TINT_TAG.hot : lead.priority === "warm" ? TINT_TAG.warm : NEUTRAL_TAG}>
                           {priorityLabel}
@@ -640,26 +636,27 @@ export default function TeamPage() {
                         onClick={() => navigator.clipboard?.writeText(lead.mobile).then(() => toast.success("Number copied"), () => {})}
                         title="Tap to copy"
                         className={`mt-0.5 block ${SIZE.number} tabular-nums cursor-copy rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300`}
-                        style={{ color: "#1e293b" }}
+                        style={{ color: NUMBER_INK }}
                       >
                         {lead.mobile}
                       </button>
-                      {lead.project && <p className={`mt-0.5 ${SIZE.project} font-bold truncate`} style={{ color: look.project }}>{lead.project}</p>}
+                      {lead.project && <p className={`mt-0.5 ${SIZE.project} font-medium truncate`} style={{ color: look.project }}>{lead.project}</p>}
+                      <SourceChip source={lead.source} />
                     </div>
 
                     {/* Facts row — a pending lead has no owner, calls or activity yet. */}
-                    <dl className={FACTS} style={GLASS_BOX}>
+                    <dl className={FACTS} style={FACTS_BOX}>
                       <div className="min-w-0">
-                        <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Assigned</dt>
-                        <dd className={`${SIZE.factValue} font-bold`} style={{ color: INK }}>Not yet</dd>
+                        <dt className={FACT_LABEL}><FactIcon name="assigned" />Assigned</dt>
+                        <dd className={`${FACT_VALUE}`}>Not yet</dd>
                       </div>
                       <div className="min-w-0">
-                        <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Calls</dt>
-                        <dd className={`${SIZE.factValue} font-bold`} style={{ color: INK }}>—</dd>
+                        <dt className={FACT_LABEL}><FactIcon name="calls" />Calls</dt>
+                        <dd className={`${FACT_VALUE}`}>—</dd>
                       </div>
                       <div className="min-w-0">
-                        <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Last activity</dt>
-                        <dd className={`${SIZE.factValue} font-bold`} style={{ color: INK }}>—</dd>
+                        <dt className={FACT_LABEL}><FactIcon name="activity" />Last activity</dt>
+                        <dd className={`${FACT_VALUE}`}>—</dd>
                       </div>
                     </dl>
 

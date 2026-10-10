@@ -128,6 +128,31 @@ export const DOT = {
   amber: "#f59e0b"
 };
 
+// Source label (2026-10-10): one display name per source, shared by every
+// lead card. Raw values seen in the DB: "99 Acre", "Housing", "Meta",
+// "Personal", "Catcher", "Manual Booking Entry"; the rest are mapped for
+// manual entry / future imports. Empty or missing -> null (no chip shown).
+export function sourceLabel(source: string | null | undefined): string | null {
+  const raw = (source || "").trim();
+  if (!raw) return null;
+  const s = raw.toLowerCase();
+  if (/99\s*acre/.test(s)) return "99acres";
+  if (s.includes("housing")) return "Housing.com";
+  if (s.includes("magic")) return "MagicBricks";
+  if (/instagram|\big\b/.test(s)) return "Instagram";
+  if (/facebook|\bfb\b/.test(s)) return "Facebook";
+  if (s.includes("meta")) return "Meta";
+  if (s.includes("google")) return "Google";
+  if (s.includes("website") || s === "web") return "Website";
+  if (/walk[\s-]?in/.test(s)) return "Walk-in";
+  if (s.includes("referr")) return "Referral";
+  if (s.includes("catcher")) return "Catcher";
+  if (s.includes("personal")) return "Personal";
+  if (s.includes("legacy")) return "Legacy";
+  if (s.includes("manual")) return "Manual entry";
+  return raw;
+}
+
 // Source dot colour (99 Acres orange, Housing.com cyan, Meta blue; others slate).
 export function sourceDot(source: string | null | undefined): string {
   const s = (source || "").toLowerCase();
@@ -140,10 +165,10 @@ export function sourceDot(source: string | null | undefined): string {
 // Sizes (decent): name 18, number 15, project 13.5, facts 12.5 / labels 10, tags 11, buttons 14.
 // Name 600 and number 500 (lighter than the old 800 / 700); the number stays tabular at each call site.
 export const SIZE = {
-  name: "text-[18px] leading-[1.25] font-semibold tracking-[-0.01em]",
-  number: "text-[15px] leading-tight tracking-[.03em] font-medium",
+  name: "text-[18px] leading-[1.25] font-bold tracking-[-0.012em]",
+  number: "text-[15px] leading-tight tracking-[.03em] font-semibold",
   project: "text-[13.5px] leading-snug",
-  factLabel: "text-[10px] tracking-[.08em] uppercase",
+  factLabel: "text-[10px] tracking-[.06em] uppercase",
   factValue: "text-[12.5px] leading-snug",
   button: "text-[14px]"
 };
@@ -152,10 +177,20 @@ export const SIZE = {
 // browser text) Call takes the full first line and the icon buttons share the
 // second line equally, so nothing is squeezed or pushed out of the card. rem so
 // it follows the browser text size.
-// Facts row (Assigned | Calls | Last activity). On a card narrower than 20rem
+// Facts row (Assigned | Calls | Last activity). On a card narrower than 24rem
 // the Assigned date takes the whole first line and the other two share the
-// second, so the date never runs into the next column.
-export const FACTS = "grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-4 gap-y-1.5 @max-[20rem]:grid-cols-2 @max-[20rem]:[&>*:first-child]:col-span-2 rounded-[12px] px-3 py-2";
+// second; under 18rem every fact gets its own line, so nothing wraps or spills.
+export const FACTS = "grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-4 gap-y-2 @max-[24rem]:grid-cols-[auto_minmax(0,1fr)] @max-[24rem]:gap-x-6 @max-[18rem]:grid-cols-1 @max-[24rem]:[&>*:first-child]:col-span-full rounded-[12px] px-3 py-2";
+
+// Text hierarchy (2026-10-10): rich neutrals, not all black.
+//   name   #16202e 700 (INK)      number #2c3a4e 600 (cool slate-ink)
+//   label  #6f6553 warm champagne-grey, small caps   value #334155 600 (graphite)
+// Every pair measured >= 4.9:1 on the card tints and facts box.
+export const NUMBER_INK = "#2c3a4e";
+export const FACT_LABEL = `${SIZE.factLabel} inline-flex items-center gap-1.5 whitespace-nowrap font-bold text-[#6f6553]`;
+export const FACT_VALUE = `${SIZE.factValue} mt-0.5 font-semibold text-[#334155]`;
+// Facts box: soft white glass with a warm champagne hairline.
+export const FACTS_BOX: CSSProperties = { background: "rgba(255,255,255,.72)", boxShadow: "inset 0 0 0 1px #ece3cf, 0 1px 2px rgba(15,23,42,.03)" };
 
 export const DOCK = "flex flex-wrap items-center gap-2 @max-[20rem]:[&>*]:flex-1 @max-[20rem]:[&>*:first-child]:basis-full";
 
@@ -214,6 +249,7 @@ const TONE_STOPS: Record<PassTone, [string, string, string]> = {
   OVERDUE: ["#ffffff", "#fff6f1", "#ffe9e1"],
   QUIET: ["#ffffff", "#f5f7fa", "#eaeff5"]
 };
+const TONE_INK: Record<PassTone, string> = { NEW: "#1d4ed8", FOLLOW_UP: "#0f766e", OVERDUE: "#b42318", QUIET: "#475569" };
 export function cardSurface(tone: PassTone): CSSProperties {
   const rgb = TONE_RGB[tone];
   const [a, b, c] = TONE_STOPS[tone];
@@ -225,6 +261,9 @@ export function cardSurface(tone: PassTone): CSSProperties {
       `linear-gradient(160deg, rgba(${rgb},.35) 0%, ${HAIRLINE} 45%) border-box`
     ].join(", "),
     borderColor: "transparent",
+    ["--tone-tint" as string]: `rgba(${rgb},.12)`,
+    ["--tone-ring" as string]: `rgba(${rgb},.22)`,
+    ["--tone-ink" as string]: TONE_INK[tone],
     ["--card-shadow" as string]: `inset 0 1px 0 rgba(255,255,255,.9), 0 1px 2px rgba(15,23,42,.04), 0 10px 24px -12px rgba(${rgb},.24), 0 24px 48px -28px rgba(15,23,42,.18)`,
     ["--card-shadow-hover" as string]: `inset 0 1px 0 rgba(255,255,255,.9), 0 2px 4px rgba(15,23,42,.05), 0 14px 28px -12px rgba(${rgb},.30), 0 28px 52px -28px rgba(15,23,42,.22)`
   };

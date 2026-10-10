@@ -215,18 +215,18 @@ export default function CoordinatorLayout({
             since flex items default to min-width:auto (floored at
             content's min-content size) regardless of nesting depth. */}
         <div className="flex-1 lg:ml-[230px] w-full min-w-0">
-          <div className="sticky top-0 z-30 bg-white/90 backdrop-blur-xl border-b border-slate-200 px-5 h-[60px] flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <button onClick={() => setMenuOpen(true)} className="lg:hidden">
+          <div className="sticky top-0 z-30 bg-white/90 backdrop-blur-xl border-b border-slate-200 px-5 h-[60px] flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+              <button onClick={() => setMenuOpen(true)} className="shrink-0 lg:hidden">
                 <Menu size={30} />
               </button>
-              <div>
-                <h1 className="font-bold text-xl lg:text-xl text-slate-800">Coordinator Dashboard</h1>
-                <p className="text-slate-500 text-xs">Welcome back, {name}</p>
+              <div className="min-w-0">
+                <h1 className="truncate font-bold text-xl lg:text-xl text-slate-800">Coordinator Dashboard</h1>
+                <p className="truncate text-slate-500 text-xs">Welcome back, {name}</p>
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex shrink-0 items-center gap-3">
               <button
                 onClick={handleBellClick}
                 className="relative p-2 rounded-lg bg-white border border-slate-200 shadow-sm hover:bg-slate-50 transition"

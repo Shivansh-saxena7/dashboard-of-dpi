@@ -190,8 +190,8 @@ async function main() {
     ["G6 Admin HOLIDAY Wed = blocked", (() => { const g = shiftStartBlock(holidayOn, ist("2026-10-14T10:45"), { hasOverride: false }); return g.blocked ? g.kind : "allowed"; })(), "HOLIDAY"],
     ["G7 no calendar (load failed / fail-open path) = allowed", shiftStartBlock(null, ist("2026-10-13T10:45"), { hasOverride: false }).blocked, false],
     ["G9 Admin HOLIDAY + override = allowed", shiftStartBlock(holidayOn, ist("2026-10-14T10:45"), { hasOverride: true }).blocked, false],
-    ["G10 holiday message names the reason", (() => { const g = shiftStartBlock(holidayOn, ist("2026-10-14T10:45"), { hasOverride: false }); return g.blocked ? g.message : ""; })(), "Aaj TEST holiday ki wajah se non-working day hai (till end of Wed, 14 Oct) — shift start nahi ho sakti."],
-    ["G8 weekly-off message", (() => { const g = shiftStartBlock(tuesdayOff, ist("2026-10-13T10:45"), { hasOverride: false }); return g.blocked ? g.message : ""; })(), "Aaj weekly off hai — shift start nahi ho sakti. Special working day ke liye Admin se override lein."],
+    ["G10 holiday message names the reason", (() => { const g = shiftStartBlock(holidayOn, ist("2026-10-14T10:45"), { hasOverride: false }); return g.blocked ? g.message : ""; })(), "Today is a non-working day because of TEST holiday (till end of Wed, 14 Oct) — the shift cannot be started."],
+    ["G8 weekly-off message", (() => { const g = shiftStartBlock(tuesdayOff, ist("2026-10-13T10:45"), { hasOverride: false }); return g.blocked ? g.message : ""; })(), "Today is a weekly off — the shift cannot be started. For a special working day, ask Admin for an override."],
     // Recycle hours (Option A Phase 1): 10:30 (first_half_start_time) to
     // 18:30 (sla_office_end_time) + grace, read from settings.
     ["H1 Thu 14:00 = recycles allowed", isWithinRecycleHours(ist("2026-10-08T14:00"), "10:30:00", "18:30:00", 0), true],

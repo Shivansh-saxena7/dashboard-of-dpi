@@ -288,8 +288,8 @@ export function shiftStartBlock(
   const until = formatPauseUntil(status.until);
   const message =
     status.kind === "WEEKLY_OFF"
-      ? `Aaj weekly off hai — shift start nahi ho sakti. Special working day ke liye Admin se override lein.`
-      : `Aaj ${status.reason || "holiday"} ki wajah se non-working day hai (till ${until}) — shift start nahi ho sakti.`;
+      ? `Today is a weekly off — the shift cannot be started. For a special working day, ask Admin for an override.`
+      : `Today is a non-working day because of ${status.reason || "a holiday"} (till ${until}) — the shift cannot be started.`;
   return { blocked: true, kind: status.kind, until: status.until, message };
 }
 
