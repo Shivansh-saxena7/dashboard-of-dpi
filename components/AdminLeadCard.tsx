@@ -372,12 +372,14 @@ function AdminLeadCard({
             <span className={TAG} style={TINT_TAG.hot}>HOT</span>
           ) : lead.priority === "warm" ? (
             <span className={TAG} style={TINT_TAG.warm}>WARM</span>
-          ) : (
+          ) : lead.priority ? (
+            // Guarded (2026-10-10): a lead with no priority used to crash the
+            // whole list on .toUpperCase() of null; it now just shows no chip.
             <span className={TAG} style={NEUTRAL_TAG}>
               <span className="hidden @[360px]:inline-flex">{dot(DOT.blueGrey)}</span>
               {(priorityDisplay?.label || lead.priority).toUpperCase()}
             </span>
-          )}
+          ) : null}
           <span className={`${TAG} tracking-[.04em]`} style={statusPillStyle(lead.status)}>{statusLabel}</span>
         </div>
         {chip && (

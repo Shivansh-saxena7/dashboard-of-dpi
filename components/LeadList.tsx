@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 import { Search, ChevronDown } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { fetchAllRows } from "@/lib/fetchAllRows";
 import LeadCard from "./LeadCard";
 import LeadDetailModal from "./LeadDetailModal";
 import LeadCardSkeleton from "./LeadCardSkeleton";
@@ -318,50 +319,59 @@ export default function LeadList({ employeeId }: LeadListProps) {
   async function loadLeads() {
     setLoading(true);
 
-    const { data, error } = await supabase
-      .from("leads")
-      .select(
-        `
-        id,
-        name,
-        mobile,
-        project,
-        source,
-        catcher_name,
-        status,
-        priority,
-        board_stage,
-        sla_deadline,
-        recycle_count,
-        created_at,
-        is_personal_lead,
-        lead_history!inner (
-          id,
-          call_count,
-          outcome_at,
-          assigned_at,
-          first_call_at,
-          first_whatsapp_at,
-          assigned_by_type,
-          reassign_note,
-          recycle_reason,
-          recycled_from_status,
-          recycled_from_stage,
-          last_activity_at,
-          paused_until,
-          pause_reason,
-          pause_note,
-          pause_verified_at,
-          assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name),
-          pause_verified_by:employees!lead_history_pause_verified_by_fkey(name)
-        )
-      `
-      )
-      .eq("current_owner_id", employeeId)
-      .eq("lead_type", "LEAD")
-      .eq("lead_history.employee_id", employeeId)
-      .eq("lead_history.is_active", true)
-      .order("created_at", { ascending: false });
+    // fetchAllRows (2026-10-10): an employee's own list had no ceiling and
+    // could pass the 1000-row PostgREST cap (see CLAUDE.md). id tie-break
+    // keeps the paging stable.
+    const { data, error } = await fetchAllRows(
+      () =>
+        supabase
+          .from("leads")
+          .select(
+            `
+            id,
+            name,
+            mobile,
+            project,
+            source,
+            catcher_name,
+            status,
+            priority,
+            board_stage,
+            sla_deadline,
+            recycle_count,
+            created_at,
+            is_personal_lead,
+            lead_history!inner (
+              id,
+              call_count,
+              outcome_at,
+              assigned_at,
+              first_call_at,
+              first_whatsapp_at,
+              assigned_by_type,
+              reassign_note,
+              recycle_reason,
+              recycled_from_status,
+              recycled_from_stage,
+              last_activity_at,
+              paused_until,
+              pause_reason,
+              pause_note,
+              pause_verified_at,
+              assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name),
+              pause_verified_by:employees!lead_history_pause_verified_by_fkey(name)
+            )
+          `,
+            { count: "exact" }
+          )
+          .eq("current_owner_id", employeeId)
+          .eq("lead_type", "LEAD")
+          .eq("lead_history.employee_id", employeeId)
+          .eq("lead_history.is_active", true)
+          .order("created_at", { ascending: false })
+          .order("id"),
+      { anomalyContext: { supabase, source: "LeadList:loadLeads" } }
+    );
 
     if (!error && data) {
       setLeads(data);
@@ -596,7 +606,12 @@ export default function LeadList({ employeeId }: LeadListProps) {
             pause_reason: h?.pause_reason ?? null,
             assigned_at: h?.assigned_at ?? null
           },
-          h?.outcome_at ?? null
+          h?.outcome_at ?? null,
+          // Same personal-lead and calendar inputs as the card's own
+          // countdown, so the filter never lists a lead whose card shows
+          // no recycle timer (2026-10-10).
+          lead.is_personal_lead,
+          workingCalendar
         ) !== null;
       });
     }
@@ -622,11 +637,12 @@ export default function LeadList({ employeeId }: LeadListProps) {
           return nowMs - assignedMs <= MONTH_MS;
         }
 
-        if (dateRangeFilter === "CUSTOM" && customStart && customEnd) {
+        // Either end may be left empty (open-ended range, 2026-10-10).
+        if (dateRangeFilter === "CUSTOM" && (customStart || customEnd)) {
           // IST-aware boundaries (2026-10-01 fix) -- see istTime.ts's
           // own comment for why plain `new Date(customStart)` was wrong.
-          const startMs = istDateStringToRangeStartUTC(customStart).getTime();
-          const endMs = istDateStringToRangeEndUTC(customEnd).getTime();
+          const startMs = customStart ? istDateStringToRangeStartUTC(customStart).getTime() : -Infinity;
+          const endMs = customEnd ? istDateStringToRangeEndUTC(customEnd).getTime() : Infinity;
           return assignedMs >= startMs && assignedMs <= endMs;
         }
 
@@ -644,7 +660,10 @@ export default function LeadList({ employeeId }: LeadListProps) {
       if (sortBy === "SLA_URGENCY") {
         const aDeadline = a.sla_deadline ? new Date(a.sla_deadline).getTime() : Infinity;
         const bDeadline = b.sla_deadline ? new Date(b.sla_deadline).getTime() : Infinity;
-        return aDeadline - bDeadline;
+        // No deadline sorts last; Infinity - Infinity is NaN, so compare
+        // explicitly and fall back to newest-assigned for ties (2026-10-10).
+        if (aDeadline !== bDeadline) return aDeadline < bDeadline ? -1 : 1;
+        return new Date(b.lead_history[0]?.assigned_at || b.created_at).getTime() - new Date(a.lead_history[0]?.assigned_at || a.created_at).getTime();
       }
 
       const aAssigned = new Date(a.lead_history[0]?.assigned_at || a.created_at).getTime();
@@ -897,8 +916,8 @@ export default function LeadList({ employeeId }: LeadListProps) {
               onChange={(e) => setDateRangeFilter(e.target.value as DateRangeOption)}
             >
               <option value="ALL">Any Time</option>
-              <option value="THIS_WEEK">This Week</option>
-              <option value="THIS_MONTH">This Month</option>
+              <option value="THIS_WEEK">Last 7 days</option>
+              <option value="THIS_MONTH">Last 30 days</option>
               <option value="CUSTOM">Custom</option>
             </FilterSelect>
 

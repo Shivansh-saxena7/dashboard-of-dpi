@@ -646,7 +646,10 @@ export default function CoordinatorDashboard() {
       if (sortBy === "SLA_URGENCY") {
         const aDeadline = a.sla_deadline ? new Date(a.sla_deadline).getTime() : Infinity;
         const bDeadline = b.sla_deadline ? new Date(b.sla_deadline).getTime() : Infinity;
-        return aDeadline - bDeadline;
+        // No deadline sorts last; Infinity - Infinity is NaN, so compare
+        // explicitly and fall back to newest-assigned for ties (2026-10-10).
+        if (aDeadline !== bDeadline) return aDeadline < bDeadline ? -1 : 1;
+        return new Date(b.lead_history?.[0]?.assigned_at || b.created_at).getTime() - new Date(a.lead_history?.[0]?.assigned_at || a.created_at).getTime();
       }
 
       const aAssigned = new Date(a.lead_history?.[0]?.assigned_at || a.created_at).getTime();
@@ -1366,8 +1369,8 @@ export default function CoordinatorDashboard() {
 
               <FilterSelect value={dateRangeFilter} onChange={(e) => setDateRangeFilter(e.target.value as DateRangeOption)}>
                 <option value="ALL">Any Time</option>
-                <option value="THIS_WEEK">This Week</option>
-                <option value="THIS_MONTH">This Month</option>
+                <option value="THIS_WEEK">Last 7 days</option>
+                <option value="THIS_MONTH">Last 30 days</option>
                 <option value="CUSTOM">Custom</option>
               </FilterSelect>
 
@@ -1526,8 +1529,8 @@ export default function CoordinatorDashboard() {
 
             <FilterSelect value={summaryDateRangeFilter} onChange={(e) => setSummaryDateRangeFilter(e.target.value as DateRangeOption)} className="w-36">
               <option value="ALL">Any Time</option>
-              <option value="THIS_WEEK">This Week</option>
-              <option value="THIS_MONTH">This Month</option>
+              <option value="THIS_WEEK">Last 7 days</option>
+              <option value="THIS_MONTH">Last 30 days</option>
               <option value="CUSTOM">Custom</option>
             </FilterSelect>
 
@@ -1818,8 +1821,8 @@ export default function CoordinatorDashboard() {
 
               <FilterSelect value={visitDateRangeFilter} onChange={(e) => setVisitDateRangeFilter(e.target.value as DateRangeOption)}>
                 <option value="ALL">Any Time</option>
-                <option value="THIS_WEEK">This Week</option>
-                <option value="THIS_MONTH">This Month</option>
+                <option value="THIS_WEEK">Last 7 days</option>
+                <option value="THIS_MONTH">Last 30 days</option>
                 <option value="CUSTOM">Custom</option>
               </FilterSelect>
 
@@ -2026,8 +2029,8 @@ export default function CoordinatorDashboard() {
 
               <FilterSelect value={snoozeDateRangeFilter} onChange={(e) => setSnoozeDateRangeFilter(e.target.value as DateRangeOption)}>
                 <option value="ALL">Any Time</option>
-                <option value="THIS_WEEK">This Week</option>
-                <option value="THIS_MONTH">This Month</option>
+                <option value="THIS_WEEK">Last 7 days</option>
+                <option value="THIS_MONTH">Last 30 days</option>
                 <option value="CUSTOM">Custom</option>
               </FilterSelect>
 

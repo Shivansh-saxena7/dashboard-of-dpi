@@ -341,8 +341,11 @@ export default function AdminLeadsPage() {
       q = q.eq("lead_history.is_active", true);
     }
 
-    if (debouncedSearchQuery) {
-      q = q.or(`name.ilike.%${debouncedSearchQuery}%,mobile.ilike.%${debouncedSearchQuery}%,project.ilike.%${debouncedSearchQuery}%`);
+    // PostgREST .or() syntax breaks on , ( ) — strip them so a pasted
+    // "Name, Project" search filters instead of erroring (2026-10-10).
+    const term = debouncedSearchQuery.replace(/[,()]/g, " ").trim();
+    if (term) {
+      q = q.or(`name.ilike.%${term}%,mobile.ilike.%${term}%,project.ilike.%${term}%`);
     }
 
     if (employeeFilter) q = q.eq("current_owner_id", employeeFilter);
@@ -381,13 +384,13 @@ export default function AdminLeadsPage() {
       q = q.gte("lead_history.assigned_at", new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString());
     } else if (dateRangeFilter === "THIS_MONTH") {
       q = q.gte("lead_history.assigned_at", new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
-    } else if (dateRangeFilter === "CUSTOM" && customStart && customEnd) {
+    } else if (dateRangeFilter === "CUSTOM" && (customStart || customEnd)) {
       // IST-aware boundaries (2026-10-01 fix) -- plain `new Date(customStart)`
       // parses a bare "YYYY-MM-DD" as UTC midnight, not IST midnight,
       // shifting both ends of the window 5.5 hours later than intended.
-      q = q
-        .gte("lead_history.assigned_at", istDateStringToRangeStartUTC(customStart).toISOString())
-        .lte("lead_history.assigned_at", istDateStringToRangeEndUTC(customEnd).toISOString());
+      // Either end may be left empty (open-ended range, 2026-10-10).
+      if (customStart) q = q.gte("lead_history.assigned_at", istDateStringToRangeStartUTC(customStart).toISOString());
+      if (customEnd) q = q.lte("lead_history.assigned_at", istDateStringToRangeEndUTC(customEnd).toISOString());
     }
 
     return q;
@@ -404,8 +407,13 @@ export default function AdminLeadsPage() {
     if (sortBy === "SLA_URGENCY") {
       return query.order("sla_deadline", { ascending: true, nullsFirst: false }).order("id", { ascending: true });
     }
+    // Bug fix (2026-10-10): ordering by lead_history.assigned_at with
+    // foreignTable only sorts the embedded rows, not the leads, so the
+    // pages came back in id (random) order. PostgREST can't order parent
+    // rows by a to-many embed; leads.created_at is the closest real
+    // column (an assignment-time order would need a DB view/RPC).
     return query
-      .order("assigned_at", { ascending: sortBy === "OLDEST", foreignTable: "lead_history" })
+      .order("created_at", { ascending: sortBy === "OLDEST" })
       .order("id", { ascending: true });
   }
 
@@ -1065,8 +1073,8 @@ export default function AdminLeadsPage() {
             onChange={(e) => setDateRangeFilter(e.target.value as DateRangeOption)}
           >
             <option value="ALL">Any Time</option>
-            <option value="THIS_WEEK">This Week</option>
-            <option value="THIS_MONTH">This Month</option>
+            <option value="THIS_WEEK">Last 7 days</option>
+            <option value="THIS_MONTH">Last 30 days</option>
             <option value="CUSTOM">Custom</option>
           </FilterSelect>
 

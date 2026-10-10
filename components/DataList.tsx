@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { Search, ChevronDown } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { fetchAllRows } from "@/lib/fetchAllRows";
 import DataCard from "./DataCard";
 import LeadCardSkeleton from "./LeadCardSkeleton";
 import DataDetailModal from "./DataDetailModal";
@@ -123,29 +124,38 @@ export default function DataList({ employeeId }: DataListProps) {
   async function loadLeads() {
     setLoading(true);
 
-    const { data, error } = await supabase
-      .from("leads")
-      .select(
-        `
-        id,
-        name,
-        mobile,
-        source,
-        status,
-        board_stage,
-        created_at,
-        lead_history!inner (
-          id,
-          call_count,
-          assigned_at
-        )
-      `
-      )
-      .eq("current_owner_id", employeeId)
-      .eq("lead_type", "DATA")
-      .eq("lead_history.employee_id", employeeId)
-      .eq("lead_history.is_active", true)
-      .order("created_at", { ascending: false });
+    // fetchAllRows (2026-10-10): an employee's own list had no ceiling and
+    // could pass the 1000-row PostgREST cap (see CLAUDE.md). id tie-break
+    // keeps the paging stable.
+    const { data, error } = await fetchAllRows(
+      () =>
+        supabase
+          .from("leads")
+          .select(
+            `
+            id,
+            name,
+            mobile,
+            source,
+            status,
+            board_stage,
+            created_at,
+            lead_history!inner (
+              id,
+              call_count,
+              assigned_at
+            )
+          `,
+            { count: "exact" }
+          )
+          .eq("current_owner_id", employeeId)
+          .eq("lead_type", "DATA")
+          .eq("lead_history.employee_id", employeeId)
+          .eq("lead_history.is_active", true)
+          .order("created_at", { ascending: false })
+          .order("id"),
+      { anomalyContext: { supabase, source: "DataList:loadLeads" } }
+    );
 
     if (!error && data) {
       setLeads(data);
@@ -218,11 +228,12 @@ export default function DataList({ employeeId }: DataListProps) {
           return nowMs - assignedMs <= MONTH_MS;
         }
 
-        if (dateRangeFilter === "CUSTOM" && customStart && customEnd) {
+        // Either end may be left empty (open-ended range, 2026-10-10).
+        if (dateRangeFilter === "CUSTOM" && (customStart || customEnd)) {
           // IST-aware boundaries (2026-10-01 fix) -- see istTime.ts's
           // own comment for why plain `new Date(customStart)` was wrong.
-          const startMs = istDateStringToRangeStartUTC(customStart).getTime();
-          const endMs = istDateStringToRangeEndUTC(customEnd).getTime();
+          const startMs = customStart ? istDateStringToRangeStartUTC(customStart).getTime() : -Infinity;
+          const endMs = customEnd ? istDateStringToRangeEndUTC(customEnd).getTime() : Infinity;
           return assignedMs >= startMs && assignedMs <= endMs;
         }
 
@@ -382,8 +393,8 @@ export default function DataList({ employeeId }: DataListProps) {
               onChange={(e) => setDateRangeFilter(e.target.value as DateRangeOption)}
             >
               <option value="ALL">Any Time</option>
-              <option value="THIS_WEEK">This Week</option>
-              <option value="THIS_MONTH">This Month</option>
+              <option value="THIS_WEEK">Last 7 days</option>
+              <option value="THIS_MONTH">Last 30 days</option>
               <option value="CUSTOM">Custom</option>
             </FilterSelect>
 

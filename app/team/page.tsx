@@ -826,8 +826,8 @@ export default function TeamPage() {
               onChange={(e) => setReportDateRangeFilter(e.target.value as DateRangeOption)}
             >
               <option value="ALL">Any Time</option>
-              <option value="THIS_WEEK">This Week</option>
-              <option value="THIS_MONTH">This Month</option>
+              <option value="THIS_WEEK">Last 7 days</option>
+              <option value="THIS_MONTH">Last 30 days</option>
               <option value="CUSTOM">Custom</option>
             </FilterSelect>
 
