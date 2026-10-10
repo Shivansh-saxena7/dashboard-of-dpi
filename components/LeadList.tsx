@@ -7,6 +7,7 @@ import { motion } from "framer-motion";
 import { Search, ChevronDown } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/fetchAllRows";
+import { groupProjects, sameProject } from "@/lib/projectGroups";
 import LeadCard from "./LeadCard";
 import LeadDetailModal from "./LeadDetailModal";
 import LeadCardSkeleton from "./LeadCardSkeleton";
@@ -502,10 +503,8 @@ export default function LeadList({ employeeId }: LeadListProps) {
     return counts;
   }, [leads]);
 
-  const projectOptions = useMemo(
-    () => Array.from(new Set(leads.map((l) => l.project).filter(Boolean))) as string[],
-    [leads]
-  );
+  // One option per project, spellings grouped case-insensitively (2026-10-10).
+  const projectOptions = useMemo(() => groupProjects(leads.map((l) => l.project)).map((g) => g.label), [leads]);
 
   const sourceOptions = useMemo(
     () => Array.from(new Set(leads.map((l) => l.source).filter(Boolean))) as string[],
@@ -581,7 +580,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
     }
 
     if (projectFilter) {
-      result = result.filter((lead) => lead.project === projectFilter);
+      result = result.filter((lead) => sameProject(lead.project, projectFilter));
     }
 
     if (sourceFilter) {
@@ -880,23 +879,27 @@ export default function LeadList({ employeeId }: LeadListProps) {
             <button
               type="button"
               onClick={() => setRecyclingSoonFilter((v) => !v)}
+              title="Every lead whose recycle countdown is running, however far away the cutoff is."
+              aria-pressed={recyclingSoonFilter}
               className={`h-11 sm:h-10 rounded-xl px-3 text-xs font-semibold border transition ${
                 recyclingSoonFilter
                   ? "bg-amber-100 border-amber-300 text-amber-700"
                   : "bg-white border-slate-200 text-slate-600"
               }`}
             >
-              ⚠️ Recycling Soon
+              ⚠️ Recycle countdown
             </button>
 
             <button
               type="button"
               onClick={() => setRecyclingTomorrowFilter((v) => !v)}
+              title="Only worth-saving leads whose recycle cutoff falls within the next 24 working hours."
+              aria-pressed={recyclingTomorrowFilter}
               className={`h-11 sm:h-10 rounded-xl px-3 text-xs font-semibold border transition ${
                 recyclingTomorrowFilter ? "bg-rose-100 border-rose-300 text-rose-700" : "bg-white border-slate-200 text-slate-600"
               }`}
             >
-              ⏳ Recycling Tomorrow{recyclingTomorrowCount > 0 ? ` (${recyclingTomorrowCount})` : ""}
+              ⏳ Recycle tomorrow{recyclingTomorrowCount > 0 ? ` (${recyclingTomorrowCount})` : ""}
             </button>
 
             <button

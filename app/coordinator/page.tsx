@@ -22,6 +22,7 @@ import { exportVisitsToExcel, exportVisitsToPDF, VisitExportRow } from "@/lib/ex
 import { exportSnoozesToExcel, exportSnoozesToPDF, SnoozeExportRow } from "@/lib/exportSnoozeReport";
 import { DateRangeOption, isWithinDateRange, dateRangeFilterLabel } from "@/lib/dateRangeFilter";
 import { fetchAllRows } from "@/lib/fetchAllRows";
+import { groupProjects, sameProject } from "@/lib/projectGroups";
 import { normalizeMobile } from "@/lib/normalizeMobile";
 
 type ActiveTab = "LEADS" | "SUMMARY" | "VERIFY" | "SNOOZE" | "LEADERBOARD" | "TICKETS" | "LEGACY";
@@ -567,10 +568,8 @@ export default function CoordinatorDashboard() {
     [employees]
   );
 
-  const projectOptions = useMemo(
-    () => Array.from(new Set(leads.map((l) => l.project).filter(Boolean))) as string[],
-    [leads]
-  );
+  // One option per project, spellings grouped case-insensitively (2026-10-10).
+  const projectOptions = useMemo(() => groupProjects(leads.map((l) => l.project)).map((g) => g.label), [leads]);
 
   const sourceOptions = useMemo(
     () => Array.from(new Set(leads.map((l) => l.source).filter(Boolean))) as string[],
@@ -608,7 +607,7 @@ export default function CoordinatorDashboard() {
     }
 
     if (projectFilter) {
-      result = result.filter((lead) => lead.project === projectFilter);
+      result = result.filter((lead) => sameProject(lead.project, projectFilter));
     }
 
     if (sourceFilter) {

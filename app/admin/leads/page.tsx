@@ -6,6 +6,7 @@ import { Search, ChevronDown, Target, FileSpreadsheet, FileText, Upload, Table2 
 import Link from "next/link";
 import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
+import { groupProjects, projectIlikeOr, projectKey } from "@/lib/projectGroups";
 import AdminLeadCard from "@/components/AdminLeadCard";
 import ExportPreviewTable from "@/components/ExportPreviewTable";
 import ManualLeadEntryModal from "@/components/ManualLeadEntryModal";
@@ -107,6 +108,8 @@ export default function AdminLeadsPage() {
   // Employee filter dropdown.
   const [employees, setEmployees] = useState<{ id: string; name: string; is_active: boolean }[]>([]);
   const [projectOptions, setProjectOptions] = useState<string[]>([]);
+  // Every stored spelling per project key, for the server-side ilike filter.
+  const [projectVariants, setProjectVariants] = useState<Record<string, string[]>>({});
   const [sourceOptions, setSourceOptions] = useState<string[]>([]);
   // Employee Leave/Holiday gap (2026-08-23, Point A) — who's currently
   // on leave, fetched once per page load (not per card) and looked up
@@ -224,7 +227,9 @@ export default function AdminLeadsPage() {
     ]);
 
     if (!projectsError && projects) {
-      setProjectOptions(projects.map((r) => r.project).filter(Boolean));
+      const groups = groupProjects(projects.map((r) => r.project));
+      setProjectOptions(groups.map((g) => g.label));
+      setProjectVariants(Object.fromEntries(groups.map((g) => [g.key, g.variants])));
     }
     if (!sourcesError && sources) {
       setSourceOptions(sources.map((r) => r.source).filter(Boolean));
@@ -349,7 +354,8 @@ export default function AdminLeadsPage() {
     }
 
     if (employeeFilter) q = q.eq("current_owner_id", employeeFilter);
-    if (projectFilter) q = q.eq("project", projectFilter);
+    // Case-insensitive across every stored spelling (2026-10-10).
+    if (projectFilter) q = q.or(projectIlikeOr(projectVariants[projectKey(projectFilter)] ?? [projectFilter]));
     if (sourceFilter) q = q.eq("source", sourceFilter);
     // Personal Leads Only (2026-09-23) — deliberately filters on the
     // authoritative is_personal_lead boolean, not source='Personal'.
@@ -938,7 +944,7 @@ export default function AdminLeadsPage() {
         icon={Target}
         description={
           recyclingSoonFilter
-            ? `Every lead, across every employee — ${cardLeads.length} matching on this page (Recycling Soon total isn't server-computed)`
+            ? `Every lead, across every employee — ${cardLeads.length} matching on this page (the Recycle countdown total isn't server-computed)`
             : `Every lead, across every employee — ${totalCount} matching`
         }
         actions={
@@ -1041,13 +1047,15 @@ export default function AdminLeadsPage() {
           <button
             type="button"
             onClick={() => setRecyclingSoonFilter((v) => !v)}
+            title="Every lead whose recycle countdown is running, however far away the cutoff is. Checks the leads on this page only."
+            aria-pressed={recyclingSoonFilter}
             className={`h-10 rounded-lg px-3 text-xs font-semibold border transition ${
               recyclingSoonFilter
                 ? "bg-amber-100 border-amber-300 text-amber-700"
                 : "bg-slate-50 border-slate-200 text-slate-600"
             }`}
           >
-            ⚠️ Recycling Soon
+            ⚠️ Recycle countdown (Page)
           </button>
 
           <button

@@ -20,6 +20,7 @@ import { BOARD_STAGES } from "@/lib/leadBoardStageDisplay";
 import { exportLeadsToExcel, exportLeadsToPDF } from "@/lib/exportLeadsReport";
 import { DateRangeOption, isWithinDateRange, dateRangeFilterLabel } from "@/lib/dateRangeFilter";
 import { fetchAllRows } from "@/lib/fetchAllRows";
+import { groupProjects, sameProject } from "@/lib/projectGroups";
 import { leadCardFont } from "@/lib/leadCardFont";
 import { FACT_LABEL, FACT_VALUE, FACTS_BOX, NUMBER_INK, CHAMPAGNE, CALL_BUTTON, FACTS, callStyle, cardSurface, GLASS_BOX, HAIRLINE, HEADER_GLASS, INK, NAME_COLOR, NEUTRAL_TAG, PASS, SIZE, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
 import FactIcon from "@/components/FactIcon";
@@ -380,10 +381,8 @@ export default function TeamPage() {
     return ranked[0] || null;
   }, [members, pointsByEmployee]);
 
-  const reportProjectOptions = useMemo(
-    () => Array.from(new Set(reportLeads.map((l) => l.project).filter(Boolean))) as string[],
-    [reportLeads]
-  );
+  // One option per project, spellings grouped case-insensitively (2026-10-10).
+  const reportProjectOptions = useMemo(() => groupProjects(reportLeads.map((l) => l.project)).map((g) => g.label), [reportLeads]);
 
   const reportSourceOptions = useMemo(
     () => Array.from(new Set(reportLeads.map((l) => l.source).filter(Boolean))) as string[],
@@ -398,7 +397,7 @@ export default function TeamPage() {
     }
 
     if (reportProjectFilter) {
-      result = result.filter((lead) => lead.project === reportProjectFilter);
+      result = result.filter((lead) => sameProject(lead.project, reportProjectFilter));
     }
 
     if (reportSourceFilter) {

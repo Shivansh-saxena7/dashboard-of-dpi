@@ -41,7 +41,7 @@ const NOTIFICATION_TYPE_LABELS: Record<string, string> = {
   LEAD_JUNKED: "Lead Junked",
   PROJECT_RULE_STALE: "Project Rule Alert",
   PAUSE_EXPIRY_WARNING: "Pause Ending Soon",
-  RECYCLE_TOMORROW: "Recycling Tomorrow",
+  RECYCLE_TOMORROW: "Recycle tomorrow",
   PAUSE_EXPIRED: "Pause Ended",
   VISIT_VERIFIED: "Visit Verified",
   VISIT_DENIED: "Visit Not Verified",
@@ -117,7 +117,7 @@ const NOTIFICATION_TYPES: Record<string, { label: string; icon: string; group: N
   LEAD_REMINDER: { label: "Follow-up Reminder", icon: "⏰", group: "FOLLOW_UP" },
   // SLA / timers — red (urgent) and amber (heads-up)
   SLA_WARNING: { label: "SLA Warning", icon: "⚠️", group: "SLA_URGENT" },
-  RECYCLE_TOMORROW: { label: "Recycling Tomorrow", icon: "⏳", group: "SLA" },
+  RECYCLE_TOMORROW: { label: "Recycle tomorrow", icon: "⏳", group: "SLA" },
   PAUSE_EXPIRY_WARNING: { label: "Pause Ending Soon", icon: "⏸️", group: "SLA" },
   PAUSE_EXPIRED: { label: "Pause Ended", icon: "▶️", group: "SLA" },
   PROJECT_RULE_STALE: { label: "Project Rule Alert", icon: "📐", group: "SLA" },

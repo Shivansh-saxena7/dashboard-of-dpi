@@ -99,7 +99,7 @@ export async function showFocusReminderToast(employeeId: string, router: Router,
             }}
             className="mt-3 w-full h-10 rounded-xl bg-amber-700 hover:bg-amber-800 text-white text-sm font-semibold transition"
           >
-            Open Recycling Tomorrow ({recycleCount})
+            Open Recycle tomorrow ({recycleCount})
           </button>
         )}
       </div>
