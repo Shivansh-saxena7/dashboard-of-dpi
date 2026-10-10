@@ -12,7 +12,7 @@ import { buildWhatsAppLink } from "@/lib/buildWhatsAppLink";
 import { rememberCalledCard } from "@/lib/lastCalledLead";
 import { leadCardFont } from "@/lib/leadCardFont";
 import {
-  BUTTON_BG,
+  formatMobileDisplay, BUTTON_BG,
   callStyle,
   CALL_BUTTON, FACT_LABEL, FACT_VALUE, FACTS_BOX, NUMBER_INK, CHAMPAGNE, DOCK, FACTS,
   cardSurface, dotStyle,
@@ -161,7 +161,8 @@ function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
             </span>
             <div className="min-w-0 flex-1">
               <p title={lead.name} className={`${SIZE.name} break-words line-clamp-2`} style={{ color: NAME_COLOR }}>{lead.name}</p>
-              {/* Tap the number to copy it (Call button unchanged). */}
+              {/* Tap the number to copy it (Call button unchanged); source chip on the same line. */}
+              <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
               <button
                 type="button"
                 onClick={(e) => {
@@ -169,12 +170,13 @@ function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
                   navigator.clipboard?.writeText(lead.mobile).then(() => toast.success("Number copied"), () => {});
                 }}
                 title="Tap to copy"
-                className={`mt-0.5 block ${SIZE.number} tabular-nums cursor-copy rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300`}
+                className={`block shrink-0 ${SIZE.number} tabular-nums cursor-copy rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300`}
                 style={{ color: NUMBER_INK }}
               >
-                {lead.mobile}
+                {formatMobileDisplay(lead.mobile)}
               </button>
-              <SourceChip source={lead.source} />
+              <SourceChip source={lead.source} inline />
+              </div>
             </div>
           </div>
           <LastLogPanel

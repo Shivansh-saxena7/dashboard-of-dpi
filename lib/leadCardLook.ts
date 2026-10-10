@@ -5,6 +5,7 @@
 // coloured dot. Presentation only: no SLA / recycle rule lives here.
 
 import type { CSSProperties } from "react";
+import { normalizeMobile } from "./normalizeMobile.ts";
 
 export const INK = "#16202e";
 export const TEXT2 = "#475569";
@@ -133,6 +134,13 @@ export function formatRecycleLeft(msLeft: number): string {
   return days > 0 ? `${days}d ${totalHours % 24}h` : `${totalHours}h`;
 }
 
+// Mobile number display (2026-10-10): one format on every card, "98213 95679".
+// Display only — tap-to-copy, tel: and WhatsApp keep using the raw value.
+export function formatMobileDisplay(raw: string | null | undefined): string {
+  const digits = normalizeMobile(raw);
+  return digits.length === 10 ? `${digits.slice(0, 5)} ${digits.slice(5)}` : (raw || "").trim();
+}
+
 export const DOT = {
   slate: "#94a3b8",
   gold: GOLD,
@@ -194,7 +202,7 @@ export const SIZE = {
 // Facts row (Assigned | Calls | Last activity). On a card narrower than 24rem
 // the Assigned date takes the whole first line and the other two share the
 // second; under 18rem every fact gets its own line, so nothing wraps or spills.
-export const FACTS = "grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-4 gap-y-2 @max-[24rem]:grid-cols-[auto_minmax(0,1fr)] @max-[24rem]:gap-x-6 @max-[18rem]:grid-cols-1 @max-[24rem]:[&>*:first-child]:col-span-full rounded-[12px] px-3 py-2";
+export const FACTS = "grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-4 gap-y-2 @max-[24rem]:grid-cols-[auto_minmax(0,1fr)] @max-[24rem]:gap-x-6 @max-[18rem]:grid-cols-1 @max-[24rem]:[&>*:first-child]:col-span-full rounded-[12px] px-3 py-1.5";
 
 // Text hierarchy (2026-10-10): rich neutrals, not all black.
 //   name   #16202e 700 (INK)      number #2c3a4e 600 (cool slate-ink)

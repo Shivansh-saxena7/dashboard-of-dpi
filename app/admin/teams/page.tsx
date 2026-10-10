@@ -10,7 +10,7 @@ import DeleteModal from "../components/DeleteModal";
 import PageHeader from "@/components/PageHeader";
 import LastLogPanel from "@/components/LastLogPanel";
 import { leadCardFont } from "@/lib/leadCardFont";
-import { FACT_LABEL, FACT_VALUE, FACTS_BOX, NUMBER_INK, cardSurface, formatAgo, formatAssignedExact, formatExactTime, GLASS_BOX, headerChip, HEADER_GLASS, INK, MUTED, NAME_COLOR, NEUTRAL_TAG, PASS, SIZE, TAG, TEXT2 } from "@/lib/leadCardLook";
+import { formatMobileDisplay, FACT_LABEL, FACT_VALUE, FACTS_BOX, NUMBER_INK, cardSurface, formatAgo, formatAssignedExact, formatExactTime, GLASS_BOX, headerChip, HEADER_GLASS, INK, MUTED, NAME_COLOR, NEUTRAL_TAG, PASS, SIZE, TAG, TEXT2 } from "@/lib/leadCardLook";
 import FactIcon from "@/components/FactIcon";
 // Admin-only team management — creating teams, assigning a Team
 // Leader, and adding/removing members, all from one team-centric
@@ -709,7 +709,7 @@ export default function AdminTeamsPage() {
                                         className={`mt-0.5 block ${SIZE.number} tabular-nums cursor-copy rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300`}
                                         style={{ color: NUMBER_INK }}
                                       >
-                                        {row.leads.mobile}
+                                        {formatMobileDisplay(row.leads.mobile)}
                                       </button>
                                     )}
                                     {row.leads?.project && <p className={`mt-0.5 ${SIZE.project} font-medium truncate`} style={{ color: look.project }}>{row.leads.project}</p>}

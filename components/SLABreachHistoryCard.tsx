@@ -118,12 +118,15 @@ export default function SLABreachHistoryCard({ entry, index = 0 }: SLABreachHist
             ) : (
               <p className={`${SIZE.name} italic`} style={{ color: MUTED }}>Name unavailable</p>
             )}
-            {entry.project ? (
-              <p className={`mt-0.5 ${SIZE.project} font-medium truncate`} style={{ color: look.project }}>{entry.project}</p>
-            ) : (
-              <p className={`mt-0.5 ${SIZE.project} italic`} style={{ color: MUTED }}>Project unavailable</p>
-            )}
-            <SourceChip source={entry.source} />
+            {/* Source chip and project share one line (2026-10-10). */}
+            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+              <SourceChip source={entry.source} inline />
+              {entry.project ? (
+                <p className={`min-w-0 flex-1 basis-28 ${SIZE.project} font-medium truncate`} style={{ color: look.project }}>{entry.project}</p>
+              ) : (
+                <p className={`min-w-0 flex-1 basis-28 ${SIZE.project} italic truncate`} style={{ color: MUTED }}>Project unavailable</p>
+              )}
+            </div>
           </div>
           <LastLogPanel lookupKey="lead_history_id" id={entry.lead_history_id} className="@[400px]:w-[44%] @[400px]:max-w-[230px] @[400px]:shrink-0" />
         </div>

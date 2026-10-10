@@ -16,7 +16,7 @@ import LeadCardMore, { ExpandSection } from "./LeadCardMore";
 import LastLogPanel from "./LastLogPanel";
 import toast from "react-hot-toast";
 import { leadCardFont } from "@/lib/leadCardFont";
-import { FACT_LABEL, FACT_VALUE, FACTS_BOX, NUMBER_INK, CHAMPAGNE, dotStyle, BUTTON_BG, CALL_BUTTON, cardSurface, DOCK, FACTS, callStyle, GLASS_BOX, NAME_COLOR, clockParts, DOT, formatAgo, formatAssignedExact, formatExactTime, HAIRLINE, headerChip, HEADER_GLASS, ICON_BUTTON, INK, MUTED, NEUTRAL_TAG, PASS, PassTone, SIZE, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
+import { formatMobileDisplay, FACT_LABEL, FACT_VALUE, FACTS_BOX, NUMBER_INK, CHAMPAGNE, dotStyle, BUTTON_BG, CALL_BUTTON, cardSurface, DOCK, FACTS, callStyle, GLASS_BOX, NAME_COLOR, clockParts, DOT, formatAgo, formatAssignedExact, formatExactTime, HAIRLINE, headerChip, HEADER_GLASS, ICON_BUTTON, INK, MUTED, NEUTRAL_TAG, PASS, PassTone, SIZE, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
 import FactIcon from "@/components/FactIcon";
 import SourceChip from "@/components/SourceChip";
 import RecycleChip from "@/components/RecycleChip";
@@ -446,10 +446,15 @@ function AdminLeadCard({
             className={`mt-0.5 block ${SIZE.number} tabular-nums cursor-copy rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300`}
             style={{ color: NUMBER_INK }}
           >
-            {lead.mobile}
+            {formatMobileDisplay(lead.mobile)}
           </button>
-          {lead.project && <p className={`mt-0.5 ${SIZE.project} font-medium truncate`} style={{ color: look.project }}>{lead.project}</p>}
-          <SourceChip source={lead.isPersonalLead ? null : lead.source} />
+          {/* Source chip and project share one line (2026-10-10). */}
+          {(lead.project) || (lead.isPersonalLead ? null : lead.source) ? (
+            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+              <SourceChip source={(lead.isPersonalLead ? null : lead.source)} inline />
+              {lead.project && <p className={`min-w-0 flex-1 basis-28 ${SIZE.project} font-medium truncate`} style={{ color: look.project }}>{lead.project}</p>}
+            </div>
+          ) : null}
           </div>
         </div>
         <LastLogPanel

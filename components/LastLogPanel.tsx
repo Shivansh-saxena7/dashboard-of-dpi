@@ -40,7 +40,8 @@ export default function LastLogPanel({
 
   if (!log) {
     return (
-      <div className={`flex items-center gap-1.5 rounded-[12px] px-2.5 py-2 text-[11.5px] font-semibold ${className}`} style={{ ...box, color: MUTED }}>
+      // Compact (2026-10-10): a small pill instead of a full-width row.
+      <div className="inline-flex w-fit shrink-0 items-center gap-1.5 self-start rounded-full px-2.5 py-1 text-[11px] font-semibold" style={{ ...box, color: MUTED }}>
         <StickyNote size={12} strokeWidth={2} aria-hidden="true" />
         No activity yet
       </div>
