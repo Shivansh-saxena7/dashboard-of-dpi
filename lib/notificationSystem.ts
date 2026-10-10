@@ -47,6 +47,9 @@ const NOTIFICATION_TYPE_LABELS: Record<string, string> = {
   VISIT_DENIED: "Visit Not Verified",
   VISIT_VERIFICATION_OVERDUE: "Visit Verification Overdue",
   BOOKING_CELEBRATION: "Booking! 🎉",
+  BOOKING_REQUESTED: "Booking Request",
+  BOOKING_APPROVED: "Booking Approved",
+  BOOKING_REJECTED: "Booking Not Approved",
   TICKET_RAISED: "New Ticket",
   SYSTEM_ANOMALY_ERROR: "System Error",
   SYSTEM_ANOMALY_WARNING: "System Warning",
@@ -127,6 +130,9 @@ const NOTIFICATION_TYPES: Record<string, { label: string; icon: string; group: N
   // Visits — teal
   VISIT_VERIFIED: { label: "Visit Verified", icon: "📍", group: "VISIT" },
   VISIT_DENIED: { label: "Visit Not Verified", icon: "📍", group: "VISIT" },
+  BOOKING_REQUESTED: { label: "Booking Request", icon: "📝", group: "VISIT" },
+  BOOKING_APPROVED: { label: "Booking Approved", icon: "✅", group: "VISIT" },
+  BOOKING_REJECTED: { label: "Booking Not Approved", icon: "✖️", group: "VISIT" },
   VISIT_VERIFICATION_OVERDUE: { label: "Visit Verification Overdue", icon: "🕒", group: "VISIT" },
   CATCHER_LEAD_VISIT: { label: "Your Lead Was Visited", icon: "🤝", group: "VISIT" },
   // Attendance, HR, expenses, tickets — green

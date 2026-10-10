@@ -256,6 +256,7 @@ export function clockParts(clock: { label: string; value: string; sub?: string }
     return { lead: `${word.charAt(0)}${word.slice(1).toLowerCase()} · `, main: clock.value, tail: null };
   }
   if (clock.label === "VISIT") return { lead: null, main: "Visit pending", tail: null };
+  if (clock.label === "BOOKING") return { lead: null, main: "Booking pending", tail: null };
   if (clock.sub === "until recycle") return { lead: "Recycles in ", main: clock.value, tail: null };
   return { lead: null, main: clock.value, tail: null };
 }

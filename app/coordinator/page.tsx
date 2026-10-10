@@ -21,11 +21,11 @@ import { exportEmployeeSummaryToExcel, exportEmployeeSummaryToPDF, SummaryExport
 import { exportVisitsToExcel, exportVisitsToPDF, VisitExportRow } from "@/lib/exportVisitReport";
 import { exportSnoozesToExcel, exportSnoozesToPDF, SnoozeExportRow } from "@/lib/exportSnoozeReport";
 import { DateRangeOption, isWithinDateRange, dateRangeFilterLabel } from "@/lib/dateRangeFilter";
-import { fetchAllRows } from "@/lib/fetchAllRows";
+import { fetchAllRows } from "@/lib/fetchAllRows"; import BookingRequestsQueue from "@/components/BookingRequestsQueue";
 import { groupProjects, sameProject } from "@/lib/projectGroups";
 import { normalizeMobile } from "@/lib/normalizeMobile";
 
-type ActiveTab = "LEADS" | "SUMMARY" | "VERIFY" | "SNOOZE" | "LEADERBOARD" | "TICKETS" | "LEGACY";
+type ActiveTab = "LEADS" | "SUMMARY" | "VERIFY" | "BOOKINGS" | "SNOOZE" | "LEADERBOARD" | "TICKETS" | "LEGACY";
 type SortOption = "NEWEST" | "OLDEST" | "SLA_URGENCY";
 type VisitStatusFilter = "PENDING" | "VERIFIED" | "DENIED" | "ALL";
 type SnoozeStatusFilter = "ACTIVE" | "EXPIRED" | "CANCELLED" | "ALL";
@@ -164,6 +164,7 @@ function EmptyState({ emoji, text }: { emoji: string; text: string }) {
 export default function CoordinatorDashboard() {
 
   const [activeTab, setActiveTab] = useState<ActiveTab>("LEADS");
+  const [pendingBookingsCount, setPendingBookingsCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   // The logged-in viewer's own role — this page is shared by Admin
@@ -1255,6 +1256,7 @@ export default function CoordinatorDashboard() {
     { key: "LEADS", label: "🎯 All Leads", count: leads.length },
     { key: "SUMMARY", label: "📊 Employee Summary", count: employeeSummary.length },
     { key: "VERIFY", label: "✅ Visit Verification", count: pendingVisitsCount },
+    { key: "BOOKINGS", label: "📝 Booking Requests", count: pendingBookingsCount },
     { key: "SNOOZE", label: "😴 Snooze Activity", count: snoozeLog.length },
     { key: "LEADERBOARD", label: "🏆 Leaderboard" },
     { key: "TICKETS", label: "🎫 Tickets" },
@@ -2139,6 +2141,10 @@ export default function CoordinatorDashboard() {
 
       {/* Legacy Phase 3 (2026-10-08): typed-number lookup + "Make real lead". */}
       {activeTab === "LEGACY" && <LegacyLookup />}
+      {/* Always mounted so the tab badge shows the pending count; hidden unless active. */}
+      <div className={activeTab === "BOOKINGS" ? "" : "hidden"}>
+        <BookingRequestsQueue onPendingCount={setPendingBookingsCount} />
+      </div>
 
       {manualEntryOpen && (
         <ManualLeadEntryModal

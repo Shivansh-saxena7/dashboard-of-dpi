@@ -28,6 +28,7 @@ const menuSections=[
     items:[
       { name:"Leads", href:"/admin/leads", icon:"🎯" },
       { name:"Lead Transfers", href:"/admin/lead-transfers", icon:"🔁" },
+      { name:"Booking Requests", href:"/admin/booking-requests", icon:"📝" },
       { name:"Coordinator View", href:"/coordinator", icon:"🧭" },
       { name:"Teams", href:"/admin/teams", icon:"👥" },
       { name:"Project Rules", href:"/admin/project-rules", icon:"📐" },

@@ -18,6 +18,8 @@ import { leadCardFont } from "@/lib/leadCardFont";
 import { formatMobileDisplay, FACT_LABEL, FACT_VALUE, FACTS_BOX, NUMBER_INK, CHAMPAGNE, dotStyle, BUTTON_BG, CALL_BUTTON, cardSurface, DOCK, FACTS, callStyle, GLASS_BOX, NAME_COLOR, DOT, formatAssignedExact, formatExactTime, clockParts, GOLD, HAIRLINE, headerChip, HEADER_GLASS, ICON_BUTTON, INK, NEUTRAL_TAG, PASS, PassTone, SIZE, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
 import FactIcon from "@/components/FactIcon";
 import SourceChip from "@/components/SourceChip";
+import BookingPendingChip from "@/components/BookingPendingChip";
+import { isBookingPending } from "@/lib/bookingRequests";
 import RecycleChip from "@/components/RecycleChip";
 import LeadCardMore, { ExpandSection } from "./LeadCardMore";
 import WhatsAppIcon from "./WhatsAppIcon";
@@ -47,6 +49,8 @@ interface LeadCardLead {
   last_activity_at?: string | null;
   paused_until?: string | null;
   pause_reason?: string | null;
+  // Display only: tells a pending booking request apart from a pending visit.
+  pause_note?: string | null;
   is_personal_lead?: boolean;
   siblings?: LeadSibling[];
   recycle_reason?: string | null;
@@ -272,6 +276,7 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
     (lead.call_count > 0 ||
       Boolean(lead.last_activity_at && lead.assigned_at && new Date(lead.last_activity_at).getTime() > new Date(lead.assigned_at).getTime()));
 
+  const bookingPending = isBookingPending(lead.pause_reason, lead.pause_note);
   // Header clock: the existing badge text, split into label + value.
   let clock: { label: string; value: string; sub?: string } | null = null;
   if (slaBadge) {
@@ -288,7 +293,9 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
       // "🔒 Locked until Oct 16" / "😴 Snoozed until Oct 16" / "⏳ Pending verification"
       const words = main.split(" ");
       clock =
-        lead.pause_reason === "VISIT_PENDING_VERIFICATION"
+        bookingPending
+          ? { label: "BOOKING", value: "Pending", sub: "approval" }
+          : lead.pause_reason === "VISIT_PENDING_VERIFICATION"
           ? { label: "VISIT", value: "Pending", sub: "verification" }
           : { label: `${(words[1] || "Paused").toUpperCase()} UNTIL`, value: main.replace(/^\S+\s\S+\suntil\s/, "") };
     } else if (recycleCutoff) {
@@ -444,6 +451,7 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
 
         {/* Tags: neutral pill + dot; only Call first / recycle-soon tinted. Empty row collapses. */}
         <div className="flex flex-wrap items-center gap-1.5 min-w-0 [&:not(:has(>:not(:empty)))]:hidden">
+          {bookingPending && <BookingPendingChip />}
           {overdue && <span className={TAG} style={TINT_TAG.callFirst}>Call first</span>}
           {contacted && (
             <span className={TAG} style={NEUTRAL_TAG} title="Called or worked since assignment — on the follow-up clock now">

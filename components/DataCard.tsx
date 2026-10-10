@@ -36,6 +36,7 @@ import {
 } from "@/lib/leadCardLook";
 import FactIcon from "@/components/FactIcon";
 import SourceChip from "@/components/SourceChip";
+import BookingPendingChip from "@/components/BookingPendingChip";
 import LeadCardMore, { ExpandSection } from "./LeadCardMore";
 import LastLogPanel from "./LastLogPanel";
 import WhatsAppIcon from "./WhatsAppIcon";
@@ -50,6 +51,8 @@ interface DataCardLead {
   board_stage?: string | null;
   call_count: number;
   assigned_at?: string | null;
+  // A booking request is waiting for Admin / Sales Coordinator approval.
+  bookingPending?: boolean;
 }
 
 interface DataCardProps {
@@ -220,6 +223,7 @@ function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
 
         {/* Tags: board stage (Data moved past Leads) and the last-attempt warning. Empty row collapses. */}
         <div className="flex flex-wrap items-center gap-1.5 min-w-0 [&:not(:has(>:not(:empty)))]:hidden">
+          {lead.bookingPending && <BookingPendingChip />}
           {showAttemptWarning && <span className={TAG} style={TINT_TAG.callFirst}>Last attempt</span>}
           {stageLabel && (
             <span className={TAG} style={NEUTRAL_TAG}>

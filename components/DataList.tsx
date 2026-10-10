@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import { Search, ChevronDown } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/fetchAllRows";
+import { BOOKING_PENDING_NOTE, isBookingPending } from "@/lib/bookingRequests";
 import DataCard from "./DataCard";
 import LeadCardSkeleton from "./LeadCardSkeleton";
 import DataDetailModal from "./DataDetailModal";
@@ -143,7 +144,9 @@ export default function DataList({ employeeId }: DataListProps) {
             lead_history!inner (
               id,
               call_count,
-              assigned_at
+              assigned_at,
+              pause_reason,
+              pause_note
             )
           `,
             { count: "exact" }
@@ -270,7 +273,8 @@ export default function DataList({ employeeId }: DataListProps) {
         status: lead.status,
         board_stage: lead.board_stage,
         call_count: lead.lead_history[0]?.call_count ?? 0,
-        assigned_at: lead.lead_history[0]?.assigned_at ?? null
+        assigned_at: lead.lead_history[0]?.assigned_at ?? null,
+        bookingPending: isBookingPending(lead.lead_history[0]?.pause_reason, lead.lead_history[0]?.pause_note)
       })),
     [visibleLeads]
   );
@@ -299,6 +303,17 @@ export default function DataList({ employeeId }: DataListProps) {
   // Same idea as LeadList's handleBoardStageChanged. Booking also
   // flips status to CONVERTED locally (log_booking_atomic does this
   // server-side too), matching LeadList's identical handler.
+  // Booking request sent: show it as pending right away (2026-10-10).
+  function handleBookingRequested(leadId: string) {
+    setLeads((prev) =>
+      prev.map((lead) =>
+        lead.id === leadId
+          ? { ...lead, lead_history: [{ ...lead.lead_history[0], pause_reason: "VISIT_PENDING_VERIFICATION", pause_note: BOOKING_PENDING_NOTE }, ...lead.lead_history.slice(1)] }
+          : lead
+      )
+    );
+  }
+
   function handleBoardStageChanged(leadId: string, boardStage: BoardStage) {
     setLeads((prev) =>
       prev.map((lead) =>
@@ -451,8 +466,11 @@ export default function DataList({ employeeId }: DataListProps) {
             mobile: selectedLead.mobile,
             status: selectedLead.status,
             boardStage: (selectedLead.board_stage as BoardStage) || "LEADS",
-            callCount: selectedLead.lead_history[0]?.call_count ?? 0
+            callCount: selectedLead.lead_history[0]?.call_count ?? 0,
+            pauseReason: selectedLead.lead_history[0]?.pause_reason ?? null,
+            pauseNote: selectedLead.lead_history[0]?.pause_note ?? null
           }}
+          onBookingRequested={() => handleBookingRequested(selectedLead.id)}
           onClose={() => setSelectedLeadId(null)}
           onUpdated={(updates) => handleLeadUpdated(selectedLead.id, updates)}
           onBoardStageChanged={(stage) => handleBoardStageChanged(selectedLead.id, stage)}

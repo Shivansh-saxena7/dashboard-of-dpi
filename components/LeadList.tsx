@@ -733,6 +733,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
         last_activity_at: lead.lead_history[0]?.last_activity_at ?? null,
         paused_until: lead.lead_history[0]?.paused_until ?? null,
         pause_reason: lead.lead_history[0]?.pause_reason ?? null,
+        pause_note: lead.lead_history[0]?.pause_note ?? null,
         is_personal_lead: lead.is_personal_lead ?? false,
         siblings: siblingsByLeadId[lead.id]
       })),

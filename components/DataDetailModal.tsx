@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { X, Phone, Loader2, Send, MessageCircle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import BookingRequestForm from "./BookingRequestForm";
+import { isBookingPending } from "@/lib/bookingRequests";
 import toast from "react-hot-toast";
 import { getValidNextLeadStatuses, LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
@@ -19,6 +21,9 @@ export interface DataDetailLead {
   status: LeadStatus;
   callCount: number;
   boardStage: BoardStage;
+  // Display only (2026-10-10): tells a pending booking request apart from a pending visit.
+  pauseReason?: string | null;
+  pauseNote?: string | null;
 }
 
 interface LeadNote {
@@ -32,6 +37,7 @@ interface DataDetailModalProps {
   onClose: () => void;
   onUpdated: (updates: { status?: LeadStatus; callCount: number }) => void;
   onBoardStageChanged: (boardStage: BoardStage) => void;
+  onBookingRequested?: () => void;
 }
 
 // The Data-tab counterpart to LeadDetailModal. Previously had no
@@ -64,7 +70,7 @@ interface DataDetailModalProps {
 // reminder phases: 4/5/6-param versions all still exist), and always
 // matching the exact shape already proven in production avoids any
 // risk of PostgREST resolving to the wrong overload.
-export default function DataDetailModal({ lead, onClose, onUpdated, onBoardStageChanged }: DataDetailModalProps) {
+export default function DataDetailModal({ lead, onClose, onUpdated, onBoardStageChanged, onBookingRequested }: DataDetailModalProps) {
 
   const [notes, setNotes] = useState<LeadNote[]>([]);
   const [loadingNotes, setLoadingNotes] = useState(true);
@@ -180,32 +186,6 @@ export default function DataDetailModal({ lead, onClose, onUpdated, onBoardStage
     }
   }
 
-  async function confirmBooking() {
-    setMoving(true);
-
-    try {
-
-      const { error } = await supabase.rpc("log_booking_atomic", {
-        p_lead_id: lead.id,
-        p_points: LEAD_POINTS.BOOKED
-      });
-
-      if (error) {
-        toast.error(error.message || "Could not log this booking.");
-        return;
-      }
-
-      toast.success("🎉 Booking logged!");
-      setBookingConfirmOpen(false);
-      onBoardStageChanged("BOOKING");
-
-    } catch (err) {
-      console.log(err);
-      toast.error("Something went wrong.");
-    } finally {
-      setMoving(false);
-    }
-  }
 
   async function submitUpdate() {
     setSubmitting(true);
@@ -346,27 +326,19 @@ export default function DataDetailModal({ lead, onClose, onUpdated, onBoardStage
                   </button>
                 </div>
               ) : bookingConfirmOpen ? (
-                <div>
-                  <p className="text-xs text-slate-500 mb-3">
-                    Confirm booking? This closes the lead and notifies the whole team.
-                  </p>
-                  <div className="flex gap-2">
-                    <button
-                      disabled={moving}
-                      onClick={confirmBooking}
-                      className="flex-1 h-10 rounded-xl text-sm font-semibold bg-green-600 text-white disabled:opacity-60"
-                    >
-                      {moving ? "Logging..." : "Confirm Booking"}
-                    </button>
-                    <button
-                      disabled={moving}
-                      onClick={() => setBookingConfirmOpen(false)}
-                      className="flex-1 h-10 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 disabled:opacity-60"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
+                // Booking needs Admin / Sales Coordinator approval (2026-10-10).
+                <BookingRequestForm
+                  leadId={lead.id}
+                  onCancel={() => setBookingConfirmOpen(false)}
+                  onSent={() => {
+                    setBookingConfirmOpen(false);
+                    onBookingRequested?.();
+                  }}
+                />
+              ) : isBookingPending(lead.pauseReason, lead.pauseNote) ? (
+                <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+                  ⏳ Booking pending approval — an Admin or Sales Coordinator will approve or reject it.
+                </p>
               ) : (
                 <div className="flex flex-wrap gap-2">
                   {lead.boardStage !== "FOLLOW_UP" && (
@@ -403,7 +375,7 @@ export default function DataDetailModal({ lead, onClose, onUpdated, onBoardStage
                     onClick={() => setBookingConfirmOpen(true)}
                     className="text-xs font-semibold px-3 py-2 rounded-xl bg-gradient-to-r from-yellow-400 to-amber-500 text-slate-900 hover:opacity-90 disabled:opacity-60"
                   >
-                    ✅ Move to Booking
+                    ✅ Request booking
                   </button>
                 </div>
               )}

@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { X, Phone, Loader2, Send, Repeat, MessageCircle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import BookingRequestForm from "./BookingRequestForm";
+import { BOOKING_PENDING_NOTE, isBookingPending } from "@/lib/bookingRequests";
 import toast from "react-hot-toast";
 import { getValidNextLeadStatuses, LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
@@ -286,33 +288,6 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
     }
   }
 
-  async function confirmBooking() {
-    setMoving(true);
-
-    try {
-
-      const { error } = await supabase.rpc("log_booking_atomic", {
-        p_lead_id: lead.id,
-        p_points: LEAD_POINTS.BOOKED
-      });
-
-      if (error) {
-        toast.error(error.message || "Could not log this booking.");
-        return;
-      }
-
-      toast.success("🎉 Booking logged!");
-      setBookingConfirmOpen(false);
-      onBoardStageChanged("BOOKING");
-
-    } catch (err) {
-      console.log(err);
-      toast.error("Something went wrong.");
-    } finally {
-      setMoving(false);
-    }
-  }
-
   async function submitSnooze() {
 
     if (!snoozeReason.trim()) {
@@ -415,6 +390,7 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
   }
 
   const isPaused = Boolean(lead.pausedUntil && new Date(lead.pausedUntil) > new Date());
+  const bookingPending = isBookingPending(lead.pauseReason, lead.pauseNote);
 
   return (
     <>
@@ -541,27 +517,23 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
                   </button>
                 </div>
               ) : bookingConfirmOpen ? (
-                <div>
-                  <p className="text-xs text-slate-500 mb-3">
-                    Confirm booking? This closes the lead and notifies the whole team.
-                  </p>
-                  <div className="flex gap-2">
-                    <button
-                      disabled={moving}
-                      onClick={confirmBooking}
-                      className="flex-1 h-10 rounded-xl text-sm font-semibold bg-green-600 text-white disabled:opacity-60"
-                    >
-                      {moving ? "Logging..." : "Confirm Booking"}
-                    </button>
-                    <button
-                      disabled={moving}
-                      onClick={() => setBookingConfirmOpen(false)}
-                      className="flex-1 h-10 rounded-xl text-sm font-semibold bg-slate-100 text-slate-700 disabled:opacity-60"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
+                // Booking needs Admin / Sales Coordinator approval (2026-10-10).
+                <BookingRequestForm
+                  leadId={lead.id}
+                  onCancel={() => setBookingConfirmOpen(false)}
+                  onSent={() => {
+                    setBookingConfirmOpen(false);
+                    onPauseChanged({
+                      pausedUntil: new Date(new Date().getTime() + 3 * 24 * 3600000).toISOString(),
+                      pauseReason: "VISIT_PENDING_VERIFICATION",
+                      pauseNote: BOOKING_PENDING_NOTE
+                    });
+                  }}
+                />
+              ) : bookingPending ? (
+                <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+                  ⏳ Booking pending approval — an Admin or Sales Coordinator will approve or reject it.
+                </p>
               ) : (
                 <div className="flex flex-wrap gap-2">
                   {lead.boardStage !== "FOLLOW_UP" && (
@@ -604,7 +576,7 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
                     onClick={() => setBookingConfirmOpen(true)}
                     className="text-xs font-semibold px-3 py-2 rounded-xl bg-gradient-to-r from-yellow-400 to-amber-500 text-slate-900 hover:opacity-90 disabled:opacity-60"
                   >
-                    ✅ Move to Booking
+                    ✅ Request booking
                   </button>
                 </div>
               )}
@@ -612,7 +584,7 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
           )}
 
           {!isTerminal && (
-            isPaused ? (
+            isPaused || bookingPending ? (
               <div
                 className={`rounded-2xl border p-5 ${
                   lead.pauseReason === "VISIT_LOCK"
@@ -623,14 +595,22 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
                 }`}
               >
                 <p className="text-sm font-bold text-slate-800">
-                  {lead.pauseReason === "VISIT_LOCK"
+                  {bookingPending
+                    ? "⏳ Booking Pending Approval"
+                    : lead.pauseReason === "VISIT_LOCK"
                     ? "🔒 Visit-Locked"
                     : lead.pauseReason === "VISIT_PENDING_VERIFICATION"
                     ? "⏳ Visit Pending Verification"
                     : "😴 Snoozed"}
                 </p>
                 <p className="text-sm text-slate-700 mt-1.5 leading-relaxed">
-                  {lead.pauseReason === "VISIT_LOCK" ? (
+                  {bookingPending ? (
+                    <>
+                      Your booking request is with an Admin or Sales Coordinator. The lead moves to Booking once
+                      it&apos;s approved; if it&apos;s rejected you&apos;ll get a notification with the reason. Until then
+                      this lead is held for you (no recycle).
+                    </>
+                  ) : lead.pauseReason === "VISIT_LOCK" ? (
                     <>
                       {lead.pauseVerifiedByName && (
                         <>
