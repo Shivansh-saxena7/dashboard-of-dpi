@@ -119,6 +119,20 @@ export const TINT_TAG = {
   recycleSoon: raised("#fff3dc", "#fbe3b6", "#92400e")
 } satisfies Record<string, CSSProperties>;
 
+// Recycle countdown chip (2026-10-10): far = neutral, within 24h = amber,
+// under 12h = coral. Text >= 5.7:1 on each background.
+export function recycleChipStyle(msLeft: number): CSSProperties {
+  if (msLeft < 12 * 3600000) return TINT_TAG.hot;
+  if (msLeft < 24 * 3600000) return TINT_TAG.warm;
+  return NEUTRAL_TAG;
+}
+export function formatRecycleLeft(msLeft: number): string {
+  const totalHours = Math.floor(Math.max(0, msLeft) / 3600000);
+  if (totalHours < 1) return "<1h";
+  const days = Math.floor(totalHours / 24);
+  return days > 0 ? `${days}d ${totalHours % 24}h` : `${totalHours}h`;
+}
+
 export const DOT = {
   slate: "#94a3b8",
   gold: GOLD,

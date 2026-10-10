@@ -18,6 +18,7 @@ import { leadCardFont } from "@/lib/leadCardFont";
 import { FACT_LABEL, FACT_VALUE, FACTS_BOX, NUMBER_INK, CHAMPAGNE, dotStyle, BUTTON_BG, CALL_BUTTON, cardSurface, DOCK, FACTS, callStyle, GLASS_BOX, NAME_COLOR, DOT, formatAssignedExact, formatExactTime, clockParts, GOLD, HAIRLINE, headerChip, HEADER_GLASS, ICON_BUTTON, INK, NEUTRAL_TAG, PASS, PassTone, SIZE, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
 import FactIcon from "@/components/FactIcon";
 import SourceChip from "@/components/SourceChip";
+import RecycleChip from "@/components/RecycleChip";
 import LeadCardMore, { ExpandSection } from "./LeadCardMore";
 import WhatsAppIcon from "./WhatsAppIcon";
 import LastLogPanel from "./LastLogPanel";
@@ -318,7 +319,14 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
     lead.recycle_reason || lead.recycle_count > 0
       ? `Recycled${lead.recycle_count > 0 ? ` ${lead.recycle_count}×` : ""}${recycledFrom ? ` · from ${recycledFrom}` : ""}`
       : null;
-  const showRecycleChip = Boolean(recycleCutoff) && recycleMsLeft !== null && recycleMsLeft > 0 && !overdue && !recycleInClock;
+  // Recycle countdown chip (2026-10-10): the existing cutoff, or — for a new,
+  // not-yet-contacted lead — its first-call SLA deadline, the moment the
+  // recycle sweep picks it up. Never on personal leads.
+  const recycleAt: { at: Date; why: string } | null = recycleCutoff
+    ? { at: recycleCutoff.cutoffAt, why: (recycleReason || "recycle rule").toLowerCase() }
+    : lead.status === "NEW" && !lead.is_personal_lead && !contacted && slaStatus === "WITHIN_SLA" && lead.sla_deadline
+    ? { at: new Date(lead.sla_deadline), why: "if it isn't called before the first-call deadline" }
+    : null;
   const timersRunning = Boolean(recycleCutoff) || (slaStatus === "WITHIN_SLA" && Boolean(lead.sla_deadline));
   const clockTitle = [clock ? `${clock.label} ${clock.value}` : null, clock?.sub, recycleTitle].filter(Boolean).join(" · ") || undefined;
   // Header chip text; words drop on a narrow card (full label in the tooltip).
@@ -438,12 +446,6 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
               Contacted
             </span>
           )}
-          {showRecycleChip && recycleMsLeft !== null && (
-            <span title={recycleTitle} className={`${TAG} tabular-nums`} style={recycleMsLeft < 12 * 3600000 ? TINT_TAG.recycleSoon : NEUTRAL_TAG}>
-              <Timer size={11} strokeWidth={2} aria-hidden="true" />
-              Recycles in {formatDaysHoursLeft(recycleMsLeft).replace(/ left$/, "")}
-            </span>
-          )}
           {lead.is_personal_lead && (
             <span className={TAG} style={NEUTRAL_TAG}>
               {dot(DOT.slate)}
@@ -462,6 +464,7 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
               <span className="truncate">{recycledText}</span>
             </span>
           )}
+          <RecycleChip at={recycleAt?.at ?? null} why={recycleAt?.why ?? ""} nowMs={now.getTime()} />
           {lead.siblings && lead.siblings.length > 0 && (
             <span className={TAG} style={NEUTRAL_TAG}>
               {dot(DOT.gold)}

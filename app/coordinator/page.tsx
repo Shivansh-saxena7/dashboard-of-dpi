@@ -697,6 +697,7 @@ export default function CoordinatorDashboard() {
         priority: lead.priority,
         boardStage: lead.board_stage || "LEADS",
         recycleCount: lead.recycle_count,
+        slaDeadline: lead.sla_deadline ?? null,
         recycleReason: lead.lead_history?.[0]?.recycle_reason ?? null,
         recycledFromStatus: lead.lead_history?.[0]?.recycled_from_status ?? null,
         recycledFromStage: lead.lead_history?.[0]?.recycled_from_stage ?? null,

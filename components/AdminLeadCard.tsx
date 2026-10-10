@@ -19,6 +19,7 @@ import { leadCardFont } from "@/lib/leadCardFont";
 import { FACT_LABEL, FACT_VALUE, FACTS_BOX, NUMBER_INK, CHAMPAGNE, dotStyle, BUTTON_BG, CALL_BUTTON, cardSurface, DOCK, FACTS, callStyle, GLASS_BOX, NAME_COLOR, clockParts, DOT, formatAgo, formatAssignedExact, formatExactTime, HAIRLINE, headerChip, HEADER_GLASS, ICON_BUTTON, INK, MUTED, NEUTRAL_TAG, PASS, PassTone, SIZE, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
 import FactIcon from "@/components/FactIcon";
 import SourceChip from "@/components/SourceChip";
+import RecycleChip from "@/components/RecycleChip";
 import ExistingClientBadge from "./ExistingClientBadge";
 import RecycledBadge from "./RecycledBadge";
 import TimerPausedBadge from "./TimerPausedBadge";
@@ -48,6 +49,8 @@ interface AdminLeadCardLead {
   priority: LeadPriority;
   boardStage: BoardStage;
   recycleCount: number;
+  // Display only (already fetched): a new lead's first-call deadline.
+  slaDeadline?: string | null;
   ownerName: string | null;
   currentOwnerId?: string | null;
   catcherName?: string | null;
@@ -335,6 +338,16 @@ function AdminLeadCard({
   // Old card could show a pause badge and a stale/cooldown badge together:
   // the clock shows the stale/cooldown one, the pause becomes a tag.
   const clock = staleClock || pauseClock;
+  // Recycle countdown chip (2026-10-10): the cutoff computed above, or a new,
+  // not-yet-contacted lead's first-call SLA deadline. Never personal/paused.
+  const newUntouched =
+    lead.status === "NEW" && lead.leadType !== "DATA" && !lead.isPersonalLead && !isPaused && !isTerminal &&
+    !(lead.lastActivityAt && lead.assignedAt && new Date(lead.lastActivityAt).getTime() > new Date(lead.assignedAt).getTime());
+  const recycleAt: { at: Date; why: string } | null = recycleCutoff
+    ? { at: recycleCutoff.cutoffAt, why: RECYCLE_REASON_LABEL[recycleCutoff.reason].toLowerCase() }
+    : newUntouched && lead.slaDeadline
+    ? { at: new Date(lead.slaDeadline), why: "if it isn't called before the first-call deadline" }
+    : null;
   const pauseAsTag = staleClock && pauseClock ? pauseClock : null;
   const chip = clockParts(clock);
   const recycleReason = recycleCutoff ? RECYCLE_REASON_LABEL[recycleCutoff.reason] : null;
@@ -550,6 +563,7 @@ function AdminLeadCard({
               <RecycledBadge reason={lead.recycleReason} fromStage={lead.recycledFromStage} fromStatus={lead.recycledFromStatus} count={lead.recycleCount} fullDetail />
             </span>
           )}
+          <RecycleChip at={recycleAt?.at ?? null} why={recycleAt?.why ?? ""} nowMs={nowMs} />
           {lead.siblings && lead.siblings.length > 0 && (
             <span className={`inline-flex ${NEUTRALIZE} [&>span>button]:h-[22px]! [&>span>button]:text-[11px]!`}>
               <ExistingClientBadge siblings={lead.siblings} fullDetail />

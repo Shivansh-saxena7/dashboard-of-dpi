@@ -13,6 +13,7 @@ import { MemberAttendanceStatus } from "./TeamMemberCard";
 import RecycledBadge from "./RecycledBadge";
 import TimerPausedBadge from "./TimerPausedBadge";
 import { getRecycleCutoff } from "@/lib/calculateSLAStatus";
+import RecycleChip from "@/components/RecycleChip";
 import { leadCardFont } from "@/lib/leadCardFont";
 import { FACT_LABEL, FACT_VALUE, FACTS_BOX, CHAMPAGNE, dotStyle, CALL_BUTTON, callStyle, cardSurface, formatAgo, formatAssignedExact, GLASS_BOX, HAIRLINE, HEADER_GLASS, INK, NAME_COLOR, NEUTRAL_TAG, PASS, PassTone, SIZE, statusPillStyle, TAG, TEXT2 } from "@/lib/leadCardLook";
 import FactIcon from "@/components/FactIcon";
@@ -40,6 +41,8 @@ interface MemberLead {
   recycledFromStage: string | null;
   // Step 8: recycle/SLA clock running (for the "Timer paused" badge).
   clockRunning: boolean;
+  recycleAt: string | null;
+  recycleWhy: string | null;
   // Display only (already fetched): facts row.
   assignedAt: string | null;
   lastActivityAt: string | null;
@@ -152,6 +155,27 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
 
       const mapped = (data as unknown as RawLead[]).map((lead) => {
         const activeHistory = lead.lead_history?.[0] || null;
+        // Same rule as the employee/admin cards: a recycle cutoff exists
+        // (null for paused/locked/personal/terminal leads), or a NEW
+        // lead's SLA deadline is still ahead and the lead isn't paused.
+        const cutoff = getRecycleCutoff(
+          {
+            status: lead.status,
+            sla_deadline: lead.sla_deadline,
+            recycle_count: lead.recycle_count ?? 0,
+            lead_type: lead.lead_type,
+            board_stage: lead.board_stage,
+            paused_until: activeHistory?.paused_until ?? null,
+            last_activity_at: activeHistory?.last_activity_at ?? null,
+            pause_reason: activeHistory?.pause_reason ?? null,
+            assigned_at: activeHistory?.assigned_at ?? null
+          },
+          activeHistory?.outcome_at ?? null,
+          Boolean(lead.is_personal_lead)
+        );
+        const newSlaRunning =
+          lead.status === "NEW" && !lead.is_personal_lead && Boolean(lead.sla_deadline) && new Date(lead.sla_deadline as string) > new Date() &&
+          !(activeHistory?.paused_until && new Date(activeHistory.paused_until) > new Date());
         return {
           id: lead.id,
           name: lead.name,
@@ -168,27 +192,11 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
           recycledFromStage: activeHistory?.recycled_from_stage ?? null,
           assignedAt: activeHistory?.assigned_at ?? null,
           lastActivityAt: activeHistory?.last_activity_at ?? null,
-          // Same rule as the employee/admin cards: a recycle cutoff exists
-          // (null for paused/locked/personal/terminal leads), or a NEW
-          // lead's SLA deadline is still ahead and the lead isn't paused.
-          clockRunning:
-            getRecycleCutoff(
-              {
-                status: lead.status,
-                sla_deadline: lead.sla_deadline,
-                recycle_count: lead.recycle_count ?? 0,
-                lead_type: lead.lead_type,
-                board_stage: lead.board_stage,
-                paused_until: activeHistory?.paused_until ?? null,
-                last_activity_at: activeHistory?.last_activity_at ?? null,
-                pause_reason: activeHistory?.pause_reason ?? null,
-                assigned_at: activeHistory?.assigned_at ?? null
-              },
-              activeHistory?.outcome_at ?? null,
-              Boolean(lead.is_personal_lead)
-            ) !== null ||
-            (lead.status === "NEW" && !lead.is_personal_lead && Boolean(lead.sla_deadline) && new Date(lead.sla_deadline as string) > new Date() &&
-              !(activeHistory?.paused_until && new Date(activeHistory.paused_until) > new Date()))
+          clockRunning: cutoff !== null || newSlaRunning,
+          // Recycle countdown chip (2026-10-10): the same cutoff, or the new
+          // lead's first-call deadline.
+          recycleAt: cutoff ? cutoff.cutoffAt.toISOString() : newSlaRunning ? lead.sla_deadline : null,
+          recycleWhy: cutoff ? cutoff.reason : newSlaRunning ? "FIRST_CALL" : null
         };
       });
 
@@ -412,6 +420,11 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
                             <RecycledBadge reason={lead.recycleReason} fromStage={lead.recycledFromStage} fromStatus={lead.recycledFromStatus} />
                           </div>
                         )}
+                        <RecycleChip
+                          at={lead.recycleAt ? new Date(lead.recycleAt) : null}
+                          why={lead.recycleWhy === "FIRST_CALL" ? "if it isn't called before the first-call deadline" : (lead.recycleWhy || "recycle rule").toLowerCase().replace(/_/g, " ")}
+                          nowMs={nowMs}
+                        />
 
                         {reassignOptions.length > 0 && (
                           <>
