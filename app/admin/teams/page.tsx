@@ -680,9 +680,9 @@ export default function AdminTeamsPage() {
                               {/* 3px accent line + slim header: what happened | how long ago */}
                               <div className="h-[3px]" style={{ background: look.line }} aria-hidden="true" />
                               <div className={`flex items-center justify-between gap-2 px-3.5 py-1.5 ${HEADER_GLASS}`} style={{ background: look.header }}>
-                                <span className={TAG} style={NEUTRAL_TAG}>
-                                  <Repeat size={11} strokeWidth={2} style={{ color: look.accent }} aria-hidden="true" />
-                                  Team Leader assignment
+                                <span className={`${TAG} min-w-0`} style={NEUTRAL_TAG} title="Team Leader assignment">
+                                  <Repeat size={11} strokeWidth={2} className="shrink-0" style={{ color: look.accent }} aria-hidden="true" />
+                                  <span className="truncate">Team Leader assignment</span>
                                 </span>
                                 <span
                                   className="inline-flex h-[24px] shrink-0 items-center rounded-full bg-white px-2.5 text-[12px] font-extrabold tabular-nums"
@@ -718,7 +718,7 @@ export default function AdminTeamsPage() {
                                 </div>
 
                                 {/* Facts row: Assigned to / Assigned (exact · ago) */}
-                                <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 rounded-[12px] px-3 py-2" style={GLASS_BOX}>
+                                <dl className="grid grid-cols-1 gap-y-1.5 @[19rem]:grid-cols-[auto_minmax(0,1fr)] gap-x-4 rounded-[12px] px-3 py-2" style={GLASS_BOX}>
                                   <div className="min-w-0">
                                     <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Assigned to</dt>
                                     <dd className={`${SIZE.factValue} font-bold truncate`} style={{ color: INK }}>{row.employee?.name || "Unknown"}</dd>

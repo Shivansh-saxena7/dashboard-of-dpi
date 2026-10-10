@@ -417,7 +417,7 @@ export default function DataList({ employeeId }: DataListProps) {
               <p className="text-sm text-slate-600 mt-1 max-w-xs">Try clearing the search or filters above.</p>
             </div>
           ) : (
-            <div className="mt-4 mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 items-start gap-4 mx-auto w-[calc(100%-2rem)] max-w-[1400px] rounded-[24px] bg-[linear-gradient(180deg,#f3f6fb_0%,#e9eef6_100%)] p-3 sm:p-4">
+            <div className="mt-4 mb-6 grid grid-cols-[repeat(auto-fill,minmax(min(100%,19rem),1fr))] items-start gap-4 mx-auto w-[calc(100%-2rem)] max-w-[1400px] rounded-[24px] bg-[linear-gradient(180deg,#f3f6fb_0%,#e9eef6_100%)] p-3 sm:p-4">
               {cardLeads.map((cardLead, index) => (
                 <DataCard
                   key={cardLead.id}

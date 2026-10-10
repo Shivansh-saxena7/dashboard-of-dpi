@@ -939,7 +939,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
             </p>
           </div>
         ) : (
-          <div className="mt-4 mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 items-start gap-4 mx-auto w-[calc(100%-2rem)] max-w-[1400px] rounded-[24px] bg-[linear-gradient(180deg,#f3f6fb_0%,#e9eef6_100%)] p-3 sm:p-4">
+          <div className="mt-4 mb-6 grid grid-cols-[repeat(auto-fill,minmax(min(100%,19rem),1fr))] items-start gap-4 mx-auto w-[calc(100%-2rem)] max-w-[1400px] rounded-[24px] bg-[linear-gradient(180deg,#f3f6fb_0%,#e9eef6_100%)] p-3 sm:p-4">
             {slaBreachHistory.map((entry: any, index: number) => (
               <SLABreachHistoryCard key={entry.lead_history_id} entry={entry} index={index} />
             ))}
@@ -955,7 +955,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
           <p className="text-sm text-slate-600 mt-1 max-w-xs">{(EMPTY_STATE[activeTab as BoardStage] || EMPTY_STATE.LEADS).text}</p>
         </div>
       ) : (
-        <div className="mt-4 mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 items-start gap-4 mx-auto w-[calc(100%-2rem)] max-w-[1400px] rounded-[24px] bg-[linear-gradient(180deg,#f3f6fb_0%,#e9eef6_100%)] p-3 sm:p-4">
+        <div className="mt-4 mb-6 grid grid-cols-[repeat(auto-fill,minmax(min(100%,19rem),1fr))] items-start gap-4 mx-auto w-[calc(100%-2rem)] max-w-[1400px] rounded-[24px] bg-[linear-gradient(180deg,#f3f6fb_0%,#e9eef6_100%)] p-3 sm:p-4">
           {cardLeads.map((cardLead, index) => (
             <LeadCard
               key={cardLead.id}

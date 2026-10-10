@@ -33,7 +33,7 @@ export default function ExistingClientBadge({ siblings, fullDetail = false }: { 
           e.stopPropagation();
           setOpen((v) => !v);
         }}
-        className={pill}
+        className={`${pill} relative after:absolute after:inset-x-0 after:-inset-y-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400`}
       >
         👥 {siblings.length} other lead{siblings.length === 1 ? "" : "s"}
       </button>

@@ -94,12 +94,12 @@ export default function SLABreachHistoryCard({ entry, index = 0 }: SLABreachHist
     >
       {/* 3px accent line + slim header: what ended the assignment | source, last 4 digits */}
       <div className="h-[3px]" style={{ background: look.line }} aria-hidden="true" />
-      <div className={`flex items-center justify-between gap-2 px-3.5 py-1.5 ${HEADER_GLASS}`} style={{ background: look.header }}>
+      <div className={`flex flex-wrap items-center justify-between gap-x-2 gap-y-1 px-3.5 py-1.5 ${HEADER_GLASS}`} style={{ background: look.header }}>
         <span className={`${TAG} tracking-[.02em]`} style={headerChip(look.accent)}>
           <Icon size={11} strokeWidth={2} aria-hidden="true" />
           {badge.label}
         </span>
-        <div className="flex min-w-0 items-center gap-1.5">
+        <div className="ml-auto flex min-w-0 items-center gap-1.5">
           {entry.source && (
             <span className={`${TAG} min-w-0 max-w-[130px]`} style={NEUTRAL_TAG} title={entry.source}>
               <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={dotStyle(sourceDot(entry.source))} aria-hidden="true" />

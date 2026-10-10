@@ -21,7 +21,7 @@ import { exportLeadsToExcel, exportLeadsToPDF } from "@/lib/exportLeadsReport";
 import { DateRangeOption, isWithinDateRange, dateRangeFilterLabel } from "@/lib/dateRangeFilter";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 import { leadCardFont } from "@/lib/leadCardFont";
-import { dotStyle, CALL_BUTTON, callStyle, cardSurface, GLASS_BOX, HAIRLINE, HEADER_GLASS, INK, MUTED, NAME_COLOR, NEUTRAL_TAG, PASS, SIZE, sourceDot, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
+import { CHAMPAGNE, dotStyle, CALL_BUTTON, FACTS, callStyle, cardSurface, GLASS_BOX, HAIRLINE, HEADER_GLASS, INK, MUTED, NAME_COLOR, NEUTRAL_TAG, PASS, SIZE, sourceDot, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const ALL_STATUSES = Object.keys(LEAD_STATUS_DISPLAY);
@@ -600,7 +600,7 @@ export default function TeamPage() {
           </p>
 
           {/* Pending (team-reserved, unassigned) leads — lead-card look (2026-10-09), presentation only. */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 items-start gap-4 rounded-[24px] bg-[linear-gradient(180deg,#f3f6fb_0%,#e9eef6_100%)] p-3 sm:p-4">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,19rem),1fr))] items-start gap-4 rounded-[24px] bg-[linear-gradient(180deg,#f3f6fb_0%,#e9eef6_100%)] p-3 sm:p-4">
             {pendingLeads.map((lead) => {
               const isAssigning = assigningLeadId === lead.id;
               const look = PASS.NEW;
@@ -648,7 +648,7 @@ export default function TeamPage() {
                     </div>
 
                     {/* Facts row — a pending lead has no owner, calls or activity yet. */}
-                    <dl className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-4 rounded-[12px] px-3 py-2" style={GLASS_BOX}>
+                    <dl className={FACTS} style={GLASS_BOX}>
                       <div className="min-w-0">
                         <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Assigned</dt>
                         <dd className={`${SIZE.factValue} font-bold`} style={{ color: INK }}>Not yet</dd>
@@ -663,7 +663,7 @@ export default function TeamPage() {
                       </div>
                     </dl>
 
-                    <div className="border-t border-dashed" style={{ borderColor: HAIRLINE }} aria-hidden="true" />
+                    <div className="border-t border-dashed" style={{ borderColor: CHAMPAGNE.line }} aria-hidden="true" />
 
                     {!isAssigning ? (
                       <button
@@ -674,7 +674,7 @@ export default function TeamPage() {
                           setAssignNote("");
                         }}
                         style={callStyle("NEW")}
-                        className={`${CALL_BUTTON} ${SIZE.button} w-full`}
+                        className={`${CALL_BUTTON} ${SIZE.button} w-full flex-none!`}
                       >
                         <UserPlus size={16} strokeWidth={2} />
                         Assign to a team member

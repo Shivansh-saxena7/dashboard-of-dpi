@@ -15,7 +15,7 @@ import { rememberCalledCard } from "@/lib/lastCalledLead";
 import type { LeadSibling } from "@/lib/useLeadSiblings";
 import { recycledFromText } from "@/lib/recycleReasonDisplay";
 import { leadCardFont } from "@/lib/leadCardFont";
-import { dotStyle, BUTTON_BG, CALL_BUTTON, cardSurface, callStyle, GLASS_BOX, NAME_COLOR, DOT, formatAssignedExact, formatExactTime, clockParts, GOLD, HAIRLINE, headerChip, HEADER_GLASS, ICON_BUTTON, INK, MUTED, NEUTRAL_TAG, PASS, PassTone, SIZE, sourceDot, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
+import { CHAMPAGNE, dotStyle, BUTTON_BG, CALL_BUTTON, cardSurface, DOCK, FACTS, callStyle, GLASS_BOX, NAME_COLOR, DOT, formatAssignedExact, formatExactTime, clockParts, GOLD, HAIRLINE, headerChip, HEADER_GLASS, ICON_BUTTON, INK, MUTED, NEUTRAL_TAG, PASS, PassTone, SIZE, sourceDot, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
 import LeadCardMore, { ExpandSection } from "./LeadCardMore";
 import WhatsAppIcon from "./WhatsAppIcon";
 import LastLogPanel from "./LastLogPanel";
@@ -338,7 +338,7 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
       <div className={`flex items-center justify-between gap-2 px-3.5 py-1.5 ${HEADER_GLASS}`} style={{ background: look.header }}>
         <div data-header-tags className="flex min-w-0 flex-wrap @[340px]:flex-nowrap items-center gap-1 @[360px]:gap-1.5 overflow-hidden [&>span:not(:first-child)]:shrink-0 @max-[420px]:[&>span]:px-1.5">
           {/* Position in the current list — a visual count, not a lead ID. */}
-          <span className="text-[11px] font-bold tabular-nums" style={{ color: MUTED }}>#{index + 1}</span>
+          <span className="text-[11px] font-bold tabular-nums" style={{ color: CHAMPAGNE.text }}>#{index + 1}</span>
           {source && (
             <span className={`${TAG} min-w-0 max-w-[120px] shrink!`} style={NEUTRAL_TAG} title={source}>
               {dot(sourceDot(source))}
@@ -406,7 +406,7 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
         </div>
 
         {/* Facts row: label small muted, value bold. Assigned = exact time · how long ago. */}
-        <dl className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-4 rounded-[12px] px-3 py-2" style={GLASS_BOX}>
+        <dl className={FACTS} style={GLASS_BOX}>
           <div className="min-w-0">
             <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Assigned</dt>
             <dd className={`${SIZE.factValue} font-bold tabular-nums`} style={{ color: INK }} title={assignedValue}>
@@ -497,8 +497,8 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
         )}
 
         {/* Perforated tear line, then the action stub */}
-        <div className="border-t border-dashed" style={{ borderColor: HAIRLINE }} aria-hidden="true" />
-        <div className="flex items-center gap-2">
+        <div className="border-t border-dashed" style={{ borderColor: CHAMPAGNE.line }} aria-hidden="true" />
+        <div className={DOCK}>
           <motion.a
             href={`tel:${lead.mobile}`}
             onClick={handleCallClick}

@@ -14,7 +14,7 @@ import RecycledBadge from "./RecycledBadge";
 import TimerPausedBadge from "./TimerPausedBadge";
 import { getRecycleCutoff } from "@/lib/calculateSLAStatus";
 import { leadCardFont } from "@/lib/leadCardFont";
-import { dotStyle, CALL_BUTTON, callStyle, cardSurface, formatAgo, formatAssignedExact, GLASS_BOX, HAIRLINE, HEADER_GLASS, INK, MUTED, NAME_COLOR, NEUTRAL_TAG, PASS, PassTone, SIZE, statusPillStyle, TAG, TEXT2 } from "@/lib/leadCardLook";
+import { CHAMPAGNE, dotStyle, CALL_BUTTON, callStyle, cardSurface, formatAgo, formatAssignedExact, GLASS_BOX, HAIRLINE, HEADER_GLASS, INK, MUTED, NAME_COLOR, NEUTRAL_TAG, PASS, PassTone, SIZE, statusPillStyle, TAG, TEXT2 } from "@/lib/leadCardLook";
 interface TeamMemberDetailModalProps {
   member: { id: string; name: string };
   teamLeaderId: string;
@@ -349,7 +349,7 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
                     <div
                       key={lead.id}
                       style={cardSurface(tone)}
-                      className={`${leadCardFont.className} relative w-full min-w-0 overflow-hidden rounded-[18px] border shadow-[var(--card-shadow)]`}
+                      className={`${leadCardFont.className} @container relative w-full min-w-0 overflow-hidden rounded-[18px] border shadow-[var(--card-shadow)]`}
                     >
                       {/* 3px accent line + slim header: status, board stage, timer paused */}
                       <div className="h-[3px]" style={{ background: look.line }} aria-hidden="true" />
@@ -377,7 +377,7 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
                         </div>
 
                         {/* Facts row: Assigned (exact · ago) / Last activity / Assigned by */}
-                        <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1.5 rounded-[12px] px-3 py-2" style={GLASS_BOX}>
+                        <dl className="grid grid-cols-[minmax(0,1fr)_auto] @max-[20rem]:grid-cols-1 gap-x-4 gap-y-1.5 rounded-[12px] px-3 py-2" style={GLASS_BOX}>
                           <div className="min-w-0">
                             <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Assigned</dt>
                             <dd className={`${SIZE.factValue} font-bold tabular-nums`} style={{ color: INK }}>
@@ -398,7 +398,7 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
                             </dd>
                           </div>
                           {lead.assignedByName && (
-                            <div className="col-span-2 min-w-0">
+                            <div className="col-span-full min-w-0">
                               <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Assigned by</dt>
                               <dd className={`${SIZE.factValue} font-semibold truncate`} style={{ color: TEXT2 }}>{lead.assignedByName}</dd>
                             </div>
@@ -414,7 +414,7 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
 
                         {reassignOptions.length > 0 && (
                           <>
-                            <div className="border-t border-dashed" style={{ borderColor: HAIRLINE }} aria-hidden="true" />
+                            <div className="border-t border-dashed" style={{ borderColor: CHAMPAGNE.line }} aria-hidden="true" />
                             {!isReassigning ? (
                               <button
                                 type="button"
@@ -424,7 +424,7 @@ export default function TeamMemberDetailModal({ member, teamLeaderId, teamId, te
                                   setReassignNote("");
                                 }}
                                 style={callStyle(tone)}
-                                className={`${CALL_BUTTON} ${SIZE.button} w-full`}
+                                className={`${CALL_BUTTON} ${SIZE.button} w-full flex-none!`}
                               >
                                 <Repeat size={15} strokeWidth={2} />
                                 Reassign

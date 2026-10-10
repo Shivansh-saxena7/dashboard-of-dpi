@@ -16,7 +16,7 @@ import LeadCardMore, { ExpandSection } from "./LeadCardMore";
 import LastLogPanel from "./LastLogPanel";
 import toast from "react-hot-toast";
 import { leadCardFont } from "@/lib/leadCardFont";
-import { dotStyle, BUTTON_BG, CALL_BUTTON, cardSurface, callStyle, GLASS_BOX, NAME_COLOR, clockParts, DOT, formatAgo, formatAssignedExact, formatExactTime, HAIRLINE, headerChip, HEADER_GLASS, ICON_BUTTON, INK, MUTED, NEUTRAL_TAG, PASS, PassTone, SIZE, sourceDot, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
+import { CHAMPAGNE, dotStyle, BUTTON_BG, CALL_BUTTON, cardSurface, DOCK, FACTS, callStyle, GLASS_BOX, NAME_COLOR, clockParts, DOT, formatAgo, formatAssignedExact, formatExactTime, HAIRLINE, headerChip, HEADER_GLASS, ICON_BUTTON, INK, MUTED, NEUTRAL_TAG, PASS, PassTone, SIZE, sourceDot, statusPillStyle, TAG, TEXT2, TINT_TAG } from "@/lib/leadCardLook";
 import ExistingClientBadge from "./ExistingClientBadge";
 import RecycledBadge from "./RecycledBadge";
 import TimerPausedBadge from "./TimerPausedBadge";
@@ -452,7 +452,7 @@ function AdminLeadCard({
         </div>
 
         {/* Facts row: Assigned (exact · ago) / Calls / Last activity */}
-        <dl className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-4 rounded-[12px] px-3 py-2" style={GLASS_BOX}>
+        <dl className={FACTS} style={GLASS_BOX}>
           <div className="min-w-0">
             <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Assigned</dt>
             <dd className={`${SIZE.factValue} font-bold tabular-nums`} style={{ color: INK }}>
@@ -564,9 +564,9 @@ function AdminLeadCard({
         </div>
 
         {/* Dashed divider, then the action stub: View history, JUNK Reassign (Admin only), expand */}
-        <div className="border-t border-dashed" style={{ borderColor: HAIRLINE }} aria-hidden="true" />
-        <div className="flex items-center gap-2">
-          <button type="button" onClick={() => setHistoryOpen(true)} style={callStyle(tone)} className={`${CALL_BUTTON} ${SIZE.button}`}>
+        <div className="border-t border-dashed" style={{ borderColor: CHAMPAGNE.line }} aria-hidden="true" />
+        <div className={DOCK}>
+          <button type="button" onClick={() => setHistoryOpen(true)} style={callStyle(tone)} className={`${CALL_BUTTON} ${SIZE.button} @max-[20rem]:basis-full`}>
             <History size={16} strokeWidth={2} />
             View history
           </button>
@@ -574,7 +574,7 @@ function AdminLeadCard({
             <button
               type="button"
               onClick={() => setReassignOpen(true)}
-              className="shrink-0 h-11 px-3.5 rounded-[13px] text-[13px] font-extrabold transition-[filter] hover:brightness-[.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-400"
+              className="shrink-0 h-11 px-3.5 rounded-[13px] text-[13px] font-extrabold @max-[20rem]:flex-1 transition-[filter] hover:brightness-[.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-400"
               style={{ background: "#e9f8f5", color: "#0f766e" }}
             >
               Reassign

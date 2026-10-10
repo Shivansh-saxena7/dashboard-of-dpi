@@ -14,7 +14,7 @@ import { leadCardFont } from "@/lib/leadCardFont";
 import {
   BUTTON_BG,
   callStyle,
-  CALL_BUTTON,
+  CALL_BUTTON, CHAMPAGNE, DOCK, FACTS,
   cardSurface, dotStyle,
   formatAgo,
   formatAssignedExact,
@@ -135,7 +135,7 @@ function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
       <div className={`flex items-center justify-between gap-2 px-3.5 py-1.5 ${HEADER_GLASS}`} style={{ background: look.header }}>
         <div data-header-tags className="flex min-w-0 flex-wrap @[340px]:flex-nowrap items-center gap-1 @[360px]:gap-1.5 overflow-hidden [&>span:not(:first-child)]:shrink-0 @max-[420px]:[&>span]:px-1.5">
           {/* Position in the current list — a visual count, not a lead ID. */}
-          <span className="text-[11px] font-bold tabular-nums" style={{ color: MUTED }}>#{index + 1}</span>
+          <span className="text-[11px] font-bold tabular-nums" style={{ color: CHAMPAGNE.text }}>#{index + 1}</span>
           {lead.source && (
             <span className={`${TAG} min-w-0 max-w-[140px] shrink!`} style={NEUTRAL_TAG} title={lead.source}>
               {dot(sourceDot(lead.source))}
@@ -194,7 +194,7 @@ function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
         </div>
 
         {/* Facts row: Assigned (exact · ago) / Calls / Attempts left */}
-        <dl className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-4 rounded-[12px] px-3 py-2" style={GLASS_BOX}>
+        <dl className={FACTS} style={GLASS_BOX}>
           <div className="min-w-0">
             <dt className={`${SIZE.factLabel} font-bold`} style={{ color: MUTED }}>Assigned</dt>
             <dd className={`${SIZE.factValue} font-bold tabular-nums`} style={{ color: INK }}>
@@ -234,8 +234,8 @@ function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
         </div>
 
         {/* Dashed divider, then the action stub */}
-        <div className="border-t border-dashed" style={{ borderColor: HAIRLINE }} aria-hidden="true" />
-        <div className="flex items-center gap-2">
+        <div className="border-t border-dashed" style={{ borderColor: CHAMPAGNE.line }} aria-hidden="true" />
+        <div className={DOCK}>
           <motion.a href={`tel:${lead.mobile}`} onClick={handleCallClick} whileTap={{ scale: 0.98 }} style={callStyle(tone)} className={`${CALL_BUTTON} ${SIZE.button}`}>
             <Phone size={16} strokeWidth={2} />
             Call now

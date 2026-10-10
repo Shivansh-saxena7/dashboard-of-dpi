@@ -109,7 +109,7 @@ export default function LeadCardMore({
       </p>
 
       {times.length > 0 && (
-        <dl className="mb-2.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[12.5px]">
+        <dl className="mb-2.5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-[12.5px]">
           {times.map((t) => (
             <div key={t.label} className="contents">
               <dt className="font-semibold" style={{ color: "#64748b" }}>{t.label}</dt>
@@ -138,7 +138,7 @@ export default function LeadCardMore({
             <div className="grid grid-cols-2 gap-2">
               {data.tiles.map((tile) => (
                 <div key={tile.title} className="min-w-0 rounded-[13px] px-2.5 py-[9px]" style={{ background: "#f5f7fb" }}>
-                  <p className="text-[10px] font-extrabold tracking-[.4px] uppercase" style={{ color: "#64748b" }}>{tile.title}</p>
+                  <p className="truncate text-[10px] font-extrabold tracking-[.4px] uppercase" style={{ color: "#64748b" }} title={tile.title}>{tile.title}</p>
                   <p className="text-[13.5px] font-extrabold break-words line-clamp-2" style={{ color: "#0f172a" }}>{tile.value}</p>
                 </div>
               ))}

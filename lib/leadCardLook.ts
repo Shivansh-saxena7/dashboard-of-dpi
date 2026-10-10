@@ -6,12 +6,15 @@
 
 import type { CSSProperties } from "react";
 
-export const INK = "#0f172a";
+export const INK = "#16202e";
 export const TEXT2 = "#475569";
 // Muted labels: neutral slate dark enough for AA (>= 4.9:1) on every card tint (was #94a3b8, 2.4:1).
 export const MUTED = "#5b6779";
 export const HAIRLINE = "#e8edf3";
-export const GOLD = "#b7791f";
+export const GOLD = "#9a7733";
+// Champagne detail (2026-10-10): tiny accents only, never body text colour.
+// text #7d6028 is >= 5.0:1 on every card tint; icon #9a7733 is >= 3.5:1 (graphics).
+export const CHAMPAGNE = { text: "#7d6028", icon: "#9a7733", line: "#e6d9bb" };
 
 // Raised surface (2026-10-09 depth pass 2): a soft gloss on the top half over
 // a white-to-tint gradient, a 1px white highlight on top, a slightly darker
@@ -55,7 +58,7 @@ export const PASS: Record<
     accent: "#2563eb",
     header: "linear-gradient(180deg, rgba(37,99,235,.13) 0px, rgba(37,99,235,0) 7px), linear-gradient(112deg, rgba(255,255,255,0) 28%, rgba(255,255,255,.6) 44%, rgba(37,99,235,.06) 60%, rgba(37,99,235,0) 78%), linear-gradient(180deg, rgba(255,255,255,.75) 0%, rgba(255,255,255,0) 55%), linear-gradient(0deg, rgba(37,99,235,.06) 0%, rgba(37,99,235,0) 70%), linear-gradient(90deg, #f2f7ff 0%, #ffffff 100%)",
     line: "linear-gradient(180deg, rgba(255,255,255,.7) 0px, rgba(255,255,255,0) 1.5px), linear-gradient(90deg, rgba(96,165,250,.25) 0%, #60a5fa 14%, #2563eb 45%, #06b6d4 82%, rgba(34,211,238,.25) 100%)",
-    project: "#1e40af",
+    project: "#475569",
     call: "linear-gradient(135deg, #2f6df6 0%, #1e55d8 100%)",
     callShadow: "0 8px 16px -10px rgba(37,99,235,.55)",
     update: raised("#eef4ff", "rgba(37,99,235,.22)", "#1d4ed8")
@@ -64,7 +67,7 @@ export const PASS: Record<
     accent: "#0d9488",
     header: "linear-gradient(180deg, rgba(13,148,136,.13) 0px, rgba(13,148,136,0) 7px), linear-gradient(112deg, rgba(255,255,255,0) 28%, rgba(255,255,255,.6) 44%, rgba(13,148,136,.06) 60%, rgba(13,148,136,0) 78%), linear-gradient(180deg, rgba(255,255,255,.75) 0%, rgba(255,255,255,0) 55%), linear-gradient(0deg, rgba(13,148,136,.06) 0%, rgba(13,148,136,0) 70%), linear-gradient(90deg, #effcf9 0%, #ffffff 100%)",
     line: "linear-gradient(180deg, rgba(255,255,255,.7) 0px, rgba(255,255,255,0) 1.5px), linear-gradient(90deg, rgba(94,234,212,.3) 0%, #5eead4 14%, #0d9488 48%, #22d3ee 84%, rgba(34,211,238,.25) 100%)",
-    project: "#0f766e",
+    project: "#475569",
     call: "linear-gradient(135deg, #14b8a6 0%, #0d9488 100%)",
     callShadow: "0 8px 16px -10px rgba(13,148,136,.55)",
     update: raised("#e9f8f5", "rgba(13,148,136,.24)", "#0f766e")
@@ -73,7 +76,7 @@ export const PASS: Record<
     accent: "#d1343a",
     header: "linear-gradient(180deg, rgba(229,72,77,.13) 0px, rgba(229,72,77,0) 7px), linear-gradient(112deg, rgba(255,255,255,0) 28%, rgba(255,255,255,.6) 44%, rgba(229,72,77,.06) 60%, rgba(229,72,77,0) 78%), linear-gradient(180deg, rgba(255,255,255,.75) 0%, rgba(255,255,255,0) 55%), linear-gradient(0deg, rgba(229,72,77,.06) 0%, rgba(229,72,77,0) 70%), linear-gradient(90deg, #fff4f0 0%, #ffffff 100%)",
     line: "linear-gradient(180deg, rgba(255,255,255,.7) 0px, rgba(255,255,255,0) 1.5px), linear-gradient(90deg, rgba(253,186,116,.3) 0%, #fdba74 14%, #f97316 42%, #e5484d 78%, rgba(239,68,68,.25) 100%)",
-    project: "#b42318",
+    project: "#475569",
     call: "linear-gradient(135deg, #f0663a 0%, #dc3545 100%)",
     callShadow: "0 8px 16px -10px rgba(220,53,69,.55)",
     update: raised("#fff1ee", "rgba(209,52,58,.22)", "#b42318")
@@ -82,7 +85,7 @@ export const PASS: Record<
     accent: "#64748b",
     header: "linear-gradient(180deg, rgba(100,116,139,.13) 0px, rgba(100,116,139,0) 7px), linear-gradient(112deg, rgba(255,255,255,0) 28%, rgba(255,255,255,.6) 44%, rgba(100,116,139,.06) 60%, rgba(100,116,139,0) 78%), linear-gradient(180deg, rgba(255,255,255,.75) 0%, rgba(255,255,255,0) 55%), linear-gradient(0deg, rgba(100,116,139,.06) 0%, rgba(100,116,139,0) 70%), linear-gradient(90deg, #f4f6f9 0%, #ffffff 100%)",
     line: "linear-gradient(180deg, rgba(255,255,255,.7) 0px, rgba(255,255,255,0) 1.5px), linear-gradient(90deg, rgba(203,213,225,.3) 0%, #cbd5e1 16%, #64748b 50%, #cbd5e1 84%, rgba(203,213,225,.3) 100%)",
-    project: "#334155",
+    project: "#475569",
     call: "linear-gradient(135deg, #64748b 0%, #475569 100%)",
     callShadow: "0 8px 16px -10px rgba(71,85,105,.5)",
     update: raised("#f1f5f9", "rgba(100,116,139,.24)", "#334155")
@@ -145,10 +148,21 @@ export const SIZE = {
   button: "text-[14px]"
 };
 
+// Action row (dock). On a card narrower than 20rem (a 320px phone, or larger
+// browser text) Call takes the full first line and the icon buttons share the
+// second line equally, so nothing is squeezed or pushed out of the card. rem so
+// it follows the browser text size.
+// Facts row (Assigned | Calls | Last activity). On a card narrower than 20rem
+// the Assigned date takes the whole first line and the other two share the
+// second, so the date never runs into the next column.
+export const FACTS = "grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-4 gap-y-1.5 @max-[20rem]:grid-cols-2 @max-[20rem]:[&>*:first-child]:col-span-2 rounded-[12px] px-3 py-2";
+
+export const DOCK = "flex flex-wrap items-center gap-2 @max-[20rem]:[&>*]:flex-1 @max-[20rem]:[&>*:first-child]:basis-full";
+
 export const ICON_BUTTON =
   "shrink-0 h-11 w-11 rounded-[13px] flex items-center justify-center transition-[filter,transform] hover:-translate-y-px hover:brightness-[.98] active:translate-y-0 active:scale-95 motion-reduce:transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-400";
 export const CALL_BUTTON =
-  "flex-1 min-w-0 h-11 rounded-[13px] flex items-center justify-center gap-1.5 font-bold whitespace-nowrap transition-[filter,transform] hover:-translate-y-px hover:brightness-[.97] active:translate-y-0 active:scale-[.98] motion-reduce:transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-500";
+  "flex-1 min-w-0 h-11 rounded-[13px] flex items-center justify-center gap-1.5 font-bold whitespace-nowrap [&_svg]:shrink-0 [&_svg]:text-(--call-icon) transition-[filter,transform] hover:-translate-y-px hover:brightness-[.97] active:translate-y-0 active:scale-[.98] motion-reduce:transform-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-500";
 export const BUTTON_BG = {
   whatsapp: raised("#e2f7eb", "#c9ecd8"),
   quickDial: raised("#eef2f7", "#e2e8f0", "#334155"),
@@ -234,7 +248,8 @@ export function callStyle(tone: PassTone): CSSProperties {
   const c = CALL_TONE[tone];
   return {
     background: `linear-gradient(180deg, ${c.from} 0%, ${c.to} 100%)`,
-    color: c.text,
+    color: INK,
+    ["--call-icon" as string]: c.text,
     boxShadow: `inset 0 1px 0 rgba(255,255,255,.9), inset 0 0 0 1px ${c.ring}, 0 1px 2px rgba(15,23,42,.05), 0 6px 14px -8px ${c.glow}`
   };
 }
