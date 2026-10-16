@@ -267,6 +267,23 @@ async function main() {
     ["J13 rc=5 (past cap), personal lead -> never", calculateSLAStatus({ ...rc3, recycle_count: 5, sla_deadline: hoursFromNow(-1) }, null, 0, false, true, null), "NOT_APPLICABLE"]
   );
 
+  // Kill switches + junk circuit breaker (2026-10-16). Missing columns
+  // (migration not applied yet) must behave exactly like today.
+  const { autoJunkDecision, autoRecycleEnabled, DEFAULT_MAX_AUTO_JUNK_PER_SWEEP } = loadLib("autoJunkGuard.ts");
+  cases.push(
+    ["K1 no columns yet -> junk allowed", autoJunkDecision({}, 0), "JUNK"],
+    ["K2 no columns yet -> recycle allowed", autoRecycleEnabled({}), true],
+    ["K3 default cap is 20", DEFAULT_MAX_AUTO_JUNK_PER_SWEEP, 20],
+    ["K4 19 junked, default cap -> junk", autoJunkDecision({}, 19), "JUNK"],
+    ["K5 20 junked, default cap -> breaker", autoJunkDecision({}, 20), "SKIP_BREAKER"],
+    ["K6 auto_junk_enabled=false -> disabled even at 0", autoJunkDecision({ auto_junk_enabled: false }, 0), "SKIP_DISABLED"],
+    ["K7 custom cap 5, 5 junked -> breaker", autoJunkDecision({ max_auto_junk_per_sweep: 5 }, 5), "SKIP_BREAKER"],
+    ["K8 cap -1 = no breaker", autoJunkDecision({ max_auto_junk_per_sweep: -1 }, 500), "JUNK"],
+    ["K9 null settings -> junk allowed", autoJunkDecision(null, 0), "JUNK"],
+    ["K10 auto_recycle_enabled=false -> off", autoRecycleEnabled({ auto_recycle_enabled: false }), false],
+    ["K11 auto_recycle_enabled=null -> on", autoRecycleEnabled({ auto_recycle_enabled: null }), true]
+  );
+
   let failures = 0;
   for (const [name, got, expected] of cases) {
     if (got !== expected) {

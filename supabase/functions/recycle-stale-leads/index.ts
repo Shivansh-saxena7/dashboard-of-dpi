@@ -11,6 +11,7 @@ import { logAnomaly } from "../../../lib/logAnomaly.ts";
 import { isNotificationWindowOpen, loadJobWorkingCalendar, nonWorkingStatusAt, timerCalendar, timerMsUntil } from "../../../lib/workingCalendar.ts";
 import { isWithinRecycleHours } from "../../../lib/recycleHours.ts";
 import { buildPreviousOwnerEndTimes, pickRecycleOwner } from "../../../lib/pickRecycleOwner.ts";
+import { autoJunkDecision, autoRecycleEnabled, DEFAULT_MAX_AUTO_JUNK_PER_SWEEP } from "../../../lib/autoJunkGuard.ts";
 
 // Minutes after sla_office_end_time that recycled leads may still be
 // handed out (Option A Phase 1, 2026-10-08). 0 = none.
@@ -548,6 +549,7 @@ serve(withMonitoring("recycle-stale-leads", async () => {
 
     let recycledCount = 0;
     let junkedCount = 0;
+    let junkBreakerSkipped = 0;
     let warnedCount = 0;
     let pointerEmployeeId = settings.round_robin_pointer_employee_id;
     // Restricted-pool pointer-skip fix (2026-09-25) — see
@@ -858,6 +860,16 @@ serve(withMonitoring("recycle-stale-leads", async () => {
 
       if (slaStatus === "JUNK_ELIGIBLE") {
 
+        // Kill switch + per-sweep circuit breaker (2026-10-16) — see
+        // lib/autoJunkGuard.ts. A skipped lead stays with its owner
+        // unchanged and is re-evaluated on the next sweep.
+        const junkDecision = autoJunkDecision(settings, junkedCount);
+        if (junkDecision !== "JUNK") {
+          if (junkDecision === "SKIP_BREAKER") junkBreakerSkipped++;
+          diagnostics.push({ leadId: lead.id, action: "SKIPPED", reason: junkDecision, slaStatus });
+          continue;
+        }
+
         const { error: junkError } = await supabase.rpc("mark_lead_junk_atomic", {
           p_lead_id: lead.id,
           p_lead_history_id: activeHistory.id,
@@ -951,6 +963,13 @@ serve(withMonitoring("recycle-stale-leads", async () => {
         slaStatus !== "FOLLOWUP_INACTIVITY_RECYCLE_READY"
       ) {
         diagnostics.push({ leadId: lead.id, action: "SKIPPED", reason: `slaStatus=${slaStatus}` });
+        continue;
+      }
+
+      // Auto-recycle kill switch (2026-10-16) — covers both the
+      // project-rule and the round-robin recycle paths below.
+      if (!autoRecycleEnabled(settings)) {
+        diagnostics.push({ leadId: lead.id, action: "SKIPPED", reason: "AUTO_RECYCLE_DISABLED", slaStatus });
         continue;
       }
 
@@ -1283,6 +1302,17 @@ serve(withMonitoring("recycle-stale-leads", async () => {
 
     }
 
+    // Junk circuit breaker tripped (2026-10-16): one critical anomaly per
+    // sweep; the skipped leads are listed in diagnostics.
+    if (junkBreakerSkipped > 0) {
+      await logAnomaly(supabase, {
+        source: "recycle_auto_junk_breaker",
+        severity: "error",
+        message: `Auto-junk stopped after ${junkedCount} leads this sweep; ${junkBreakerSkipped} more were left as they are`,
+        context: { junkedCount, skipped: junkBreakerSkipped, cap: settings.max_auto_junk_per_sweep ?? DEFAULT_MAX_AUTO_JUNK_PER_SWEEP }
+      });
+    }
+
     // Previous-owner fallback (2026-10-09): every eligible person had
     // already owned the lead, so it went to the longest-ago owner. One
     // anomaly row per sweep, not per lead.
@@ -1318,6 +1348,7 @@ serve(withMonitoring("recycle-stale-leads", async () => {
         cappedRecycleAttempts,
         withinRecycleHours,
         junkedCount,
+        junkBreakerSkipped,
         warnedCount,
         totalChecked: (leads || []).length,
         diagnostics
