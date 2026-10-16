@@ -245,6 +245,28 @@ async function main() {
     ["E1 sweep early exit ON, Tue 10:00 = weekly off until Wed 00:00", (() => { const st = nonWorkingStatusAt(tuesdayOff, ist("2026-10-13T10:00")); return st.isNonWorking ? st.until.getTime() : -1; })(), ist("2026-10-14T00:00")]
   );
 
+  // Max-recycles JUNK (2026-10-16): the 3rd recycle's new owner gets a full
+  // window; JUNK only replaces the 4th recycle. J1 is lead 7ea78721 (junked
+  // 15 min after its 3rd recycle while the new owner was calling).
+  const hoursFromNow = (h) => new Date(Date.now() + h * 3600000).toISOString();
+  const rc3 = { status: "NEW", recycle_count: 3, lead_type: "LEAD", board_stage: "LEADS", sla_deadline: hoursFromNow(24), assigned_at: hoursFromNow(-0.25), last_activity_at: hoursFromNow(-0.25), call_count: 0 };
+  const slaJ = (lead, outcomeAt = null, ni = 0) => calculateSLAStatus(lead, outcomeAt, ni, false, false, null);
+  cases.push(
+    ["J1 rc=3, 15 min after the 3rd recycle, SLA running -> not junk", slaJ(rc3), "WITHIN_SLA"],
+    ["J2 rc=3, new owner called (activity after assignment) -> follow-up window, not junk", slaJ({ ...rc3, last_activity_at: hoursFromNow(-0.1) }), "FOLLOWUP_WITHIN_WINDOW"],
+    ["J3 rc=3, own SLA breached -> junk instead of a 4th recycle", slaJ({ ...rc3, sla_deadline: hoursFromNow(-1) }), "JUNK_ELIGIBLE"],
+    ["J4 rc=3, NOT_CONNECTED cooldown still running -> not junk", slaJ({ ...rc3, status: "NOT_CONNECTED" }, hoursFromNow(-24)), "COOLDOWN"],
+    ["J5 rc=3, NOT_CONNECTED cooldown over -> junk", slaJ({ ...rc3, status: "NOT_CONNECTED" }, hoursFromNow(-24 * 4)), "JUNK_ELIGIBLE"],
+    ["J6 rc=3, follow-up inactivity 6+ days in LEADS -> junk", slaJ({ ...rc3, assigned_at: hoursFromNow(-24 * 8), last_activity_at: hoursFromNow(-24 * 7) }), "JUNK_ELIGIBLE"],
+    ["J7 rc=3 but CONNECTED -> keeps recycling, never junk", slaJ({ ...rc3, status: "CONNECTED", assigned_at: hoursFromNow(-24 * 8), last_activity_at: hoursFromNow(-24 * 7) }), "FOLLOWUP_INACTIVITY_RECYCLE_READY"],
+    ["J8 rc=3 but moved to FOLLOW_UP -> not junk", slaJ({ ...rc3, board_stage: "FOLLOW_UP", sla_deadline: hoursFromNow(-1) }), "FOLLOWUP_WITHIN_WINDOW"],
+    ["J9 rc=2, own SLA breached -> normal recycle (becomes the 3rd)", slaJ({ ...rc3, recycle_count: 2, sla_deadline: hoursFromNow(-1) }), "SLA_BREACHED"],
+    ["J10 repeat NOT_INTERESTED still junks at once, rc=0", slaJ({ ...rc3, recycle_count: 0, status: "NOT_INTERESTED" }, hoursFromNow(-1), 2), "JUNK_ELIGIBLE"],
+    ["J11 rc=3, DATA with 4 attempts -> junk", slaJ({ ...rc3, lead_type: "DATA", sla_deadline: null, call_count: 4 }), "JUNK_ELIGIBLE"],
+    ["J12 rc=3, DATA with 1 attempt -> not junk", slaJ({ ...rc3, lead_type: "DATA", sla_deadline: null, call_count: 1 }), "WITHIN_SLA"],
+    ["J13 rc=5 (past cap), personal lead -> never", calculateSLAStatus({ ...rc3, recycle_count: 5, sla_deadline: hoursFromNow(-1) }, null, 0, false, true, null), "NOT_APPLICABLE"]
+  );
+
   let failures = 0;
   for (const [name, got, expected] of cases) {
     if (got !== expected) {

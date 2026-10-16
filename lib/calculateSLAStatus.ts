@@ -70,7 +70,49 @@ interface LeadForSLA {
   assigned_at?: string | null;
 }
 
+// Statuses at which the sweep would hand the lead to someone else.
+const RECYCLE_DUE_STATUSES = new Set<SLAStatus>([
+  "SLA_BREACHED",
+  "RECYCLE_READY",
+  "FOLLOWUP_INACTIVITY_RECYCLE_READY",
+  "DATA_MAX_ATTEMPTS_REACHED"
+]);
+
+// Max-recycles JUNK (2026-10-16 fix) — a lead that has already been
+// recycled MAX_RECYCLES times is junked at the moment it would be
+// recycled AGAIN, not on the very next sweep. Before this, the 3rd
+// recycle handed the lead to a new owner (recycle_count -> 3) and the
+// next 15-min sweep junked it while that owner was still calling it
+// (158 leads on 15 Oct, 76 on 16 Oct). Now the last owner gets the
+// same full SLA / cooldown / follow-up window as every earlier owner,
+// and the count still never goes past MAX_RECYCLES: when that window
+// runs out, JUNK_ELIGIBLE replaces the 4th recycle. Same "genuine
+// progress" exclusions as before (CONNECTED / CONVERTED / moved past
+// LEADS keep recycling normally). Repeat NOT_INTERESTED is unchanged
+// — it is the current owner's own outcome, so it still junks at once
+// (inside calculateBaseSLAStatus).
 export function calculateSLAStatus(
+  lead: LeadForSLA,
+  lastOutcomeAt: string | null,
+  notInterestedCount: number = 0,
+  isOwnerOnLeave: boolean = false,
+  isPersonalLead: boolean = false,
+  calendar: WorkingCalendar | null = null
+): SLAStatus {
+  const base = calculateBaseSLAStatus(lead, lastOutcomeAt, notInterestedCount, isOwnerOnLeave, isPersonalLead, calendar);
+  if (
+    lead.recycle_count >= MAX_RECYCLES &&
+    lead.status !== "CONNECTED" &&
+    lead.status !== "CONVERTED" &&
+    !(lead.board_stage && lead.board_stage !== "LEADS") &&
+    RECYCLE_DUE_STATUSES.has(base)
+  ) {
+    return "JUNK_ELIGIBLE";
+  }
+  return base;
+}
+
+function calculateBaseSLAStatus(
   lead: LeadForSLA,
   lastOutcomeAt: string | null,
   notInterestedCount: number = 0,
@@ -151,7 +193,7 @@ export function calculateSLAStatus(
     lead.status !== "CONNECTED" &&
     lead.status !== "CONVERTED" &&
     !(lead.board_stage && lead.board_stage !== "LEADS") &&
-    (lead.recycle_count >= MAX_RECYCLES || notInterestedCount >= MAX_NOT_INTERESTED)
+    notInterestedCount >= MAX_NOT_INTERESTED
   ) {
     return "JUNK_ELIGIBLE";
   }
