@@ -8,6 +8,7 @@ import toast from "react-hot-toast";
 import DeleteModal from "../components/DeleteModal";
 
 import PageHeader from "@/components/PageHeader";
+import { migrateSummaryText } from "@/lib/positiveLead";
 const NEW_PROJECT_SENTINEL = "__new__";
 
 interface Rule {
@@ -110,6 +111,8 @@ export default function ProjectRulesPage() {
   const [migrateTarget, setMigrateTarget] = useState<{ project: string; fromEmployeeId: string } | null>(null);
   const [migrateToEmployeeId, setMigrateToEmployeeId] = useState("");
   const [migrating, setMigrating] = useState(false);
+  const [migrateIncludePositive, setMigrateIncludePositive] = useState(false);
+  const [migrateCounts, setMigrateCounts] = useState<{ total: number; positive: number } | null>(null);
 
   const [deleteProjectTarget, setDeleteProjectTarget] = useState<string | null>(null);
   const [deletingProject, setDeletingProject] = useState(false);
@@ -442,7 +445,8 @@ export default function ProjectRulesPage() {
     const { data, error } = await supabase.rpc("reassign_project_leads_atomic", {
       p_project: migrateTarget.project,
       p_old_employee_id: migrateTarget.fromEmployeeId,
-      p_new_employee_id: migrateToEmployeeId
+      p_new_employee_id: migrateToEmployeeId,
+      p_include_positive: migrateIncludePositive
     });
 
     if (error) {
@@ -457,6 +461,23 @@ export default function ProjectRulesPage() {
     setMigrateToEmployeeId("");
     setMigrating(false);
   }
+
+  // Positive leads (follow-up, visit, booking, connected) stay with the
+  // current employee unless Admin ticks "include" (G4, 2026-10-17).
+  // Counts come from the DB so the UI and the move use one definition.
+  useEffect(() => {
+    setMigrateIncludePositive(false);
+    setMigrateCounts(null);
+    if (!migrateTarget) return;
+    let cancelled = false;
+    supabase
+      .rpc("count_project_reassign_leads", { p_project: migrateTarget.project, p_old_employee_id: migrateTarget.fromEmployeeId })
+      .then(({ data, error }) => {
+        if (cancelled || error || !data) return;
+        setMigrateCounts({ total: Number(data.total) || 0, positive: Number(data.positive) || 0 });
+      });
+    return () => { cancelled = true; };
+  }, [migrateTarget]);
 
   return (
     <div className="space-y-6">
@@ -922,6 +943,21 @@ export default function ProjectRulesPage() {
                         Cancel
                       </button>
                     </div>
+                    {migrateCounts && (
+                      <p className="text-[11px] text-slate-600">
+                        {migrateSummaryText(migrateCounts.total, migrateCounts.positive, migrateIncludePositive)}
+                      </p>
+                    )}
+                    {migrateCounts && migrateCounts.positive > 0 && (
+                      <label className="flex items-center gap-2 text-[11px] text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={migrateIncludePositive}
+                          onChange={(e) => setMigrateIncludePositive(e.target.checked)}
+                        />
+                        Also move the {migrateCounts.positive} lead(s) in follow-up, visit or connected
+                      </label>
+                    )}
                   </div>
                 )}
               </motion.div>
