@@ -1000,11 +1000,18 @@ serve(withMonitoring("recycle-stale-leads", async () => {
       // someone, so this copy must not go to a third employee. Runs
       // before both recycle paths below. Shadow mode only records what
       // it would do; enforce acts and skips the normal recycle.
-      const siblingDecision = decideSiblingGuard(lead, holdersByMobile, onLeaveEmployeeIds, siblingGuardMode);
+      const siblingDecision = decideSiblingGuard(
+        { ...lead, pause_reason: activeHistory.pause_reason },
+        holdersByMobile,
+        onLeaveEmployeeIds,
+        siblingGuardMode
+      );
       if (siblingDecision.action !== "NONE") {
         const holder = siblingDecision.holder;
         const event: Record<string, unknown> = {
           lead: lead.id.slice(0, 8),
+          leadOwner: lead.current_owner_id,
+          project: lead.project,
           action: siblingDecision.action,
           holder: holder.lead_id.slice(0, 8),
           holderOwner: holder.owner_id,
@@ -1376,12 +1383,14 @@ serve(withMonitoring("recycle-stale-leads", async () => {
     // did (enforce) or would have done (shadow).
     if (siblingGuardEvents.length > 0) {
       const failed = siblingGuardEvents.filter((e) => String(e.result ?? "").startsWith("failed"));
+      const bothPositive = siblingGuardEvents.filter((e) => e.reason === "BOTH_POSITIVE").length;
+      const reviewNote = bothPositive > 0 ? ` — ${bothPositive} with two positive copies held for Admin review` : "";
       await logAnomaly(supabase, {
         source: siblingGuardMode === "enforce" ? "recycle_sibling_guard" : "recycle_sibling_guard_shadow",
         severity: failed.length > 0 ? "error" : "warning",
         message: siblingGuardMode === "enforce"
-          ? `Sibling guard acted on ${siblingGuardEvents.length} lead(s) this sweep (${failed.length} failed)`
-          : `Sibling guard would have acted on ${siblingGuardEvents.length} lead(s) this sweep`,
+          ? `Sibling guard acted on ${siblingGuardEvents.length} lead(s) this sweep (${failed.length} failed)${reviewNote}`
+          : `Sibling guard would have acted on ${siblingGuardEvents.length} lead(s) this sweep${reviewNote}`,
         context: { mode: siblingGuardMode, events: siblingGuardEvents.slice(0, 20) }
       });
     }

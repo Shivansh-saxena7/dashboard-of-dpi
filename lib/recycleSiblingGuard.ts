@@ -8,9 +8,13 @@
 //                      this client gets the other project's lead too)
 //   - holder is the stale copy's own owner -> KEEP (no recycle)
 //   - holder inactive or on leave -> HOLD (no recycle, logged)
+//   - the stale copy is positive too -> HOLD BOTH_POSITIVE (nothing
+//     moves; logged for Admin)
 // Mode comes from lead_engine_settings.recycle_sibling_guard_mode:
 // "off" (or missing column) = old behavior, "shadow" = decide + log
 // only, "enforce" = act.
+
+import { isPositiveLead } from "./positiveLead.ts";
 
 export type SiblingGuardMode = "off" | "shadow" | "enforce";
 
@@ -29,12 +33,15 @@ export interface RecycleCandidate {
   project: string | null;
   current_owner_id: string | null;
   lead_type?: string | null;
+  status?: string | null;
+  board_stage?: string | null;
+  pause_reason?: string | null; // from the active lead_history row
 }
 
 export type SiblingDecision =
   | { action: "NONE" }
   | { action: "MERGE_INTO" | "ASSIGN_TO_HOLDER" | "KEEP"; holder: PositiveHolder }
-  | { action: "HOLD"; holder: PositiveHolder; reason: "HOLDER_INACTIVE" | "HOLDER_ON_LEAVE" };
+  | { action: "HOLD"; holder: PositiveHolder; reason: "BOTH_POSITIVE" | "HOLDER_INACTIVE" | "HOLDER_ON_LEAVE" };
 
 export function guardMode(value: unknown): SiblingGuardMode {
   return value === "shadow" || value === "enforce" ? value : "off";
@@ -73,6 +80,9 @@ export function decideSiblingGuard(
     Number(b.project_key === key) - Number(a.project_key === key) || a.rank - b.rank || a.lead_id.localeCompare(b.lead_id)
   )[0];
 
+  // Both copies are positive (2026-10-17): a positive lead never leaves
+  // its owner because of a sibling — nothing moves, Admin reviews it.
+  if (isPositiveLead(lead)) return { action: "HOLD", holder, reason: "BOTH_POSITIVE" };
   if (holder.owner_id === lead.current_owner_id) return { action: "KEEP", holder };
   if (!holder.owner_active) return { action: "HOLD", holder, reason: "HOLDER_INACTIVE" };
   if (onLeaveEmployeeIds.has(holder.owner_id)) return { action: "HOLD", holder, reason: "HOLDER_ON_LEAVE" };
