@@ -12,6 +12,7 @@ import { isNotificationWindowOpen, loadJobWorkingCalendar, nonWorkingStatusAt, t
 import { isWithinRecycleHours } from "../../../lib/recycleHours.ts";
 import { buildPreviousOwnerEndTimes, pickRecycleOwner } from "../../../lib/pickRecycleOwner.ts";
 import { autoJunkDecision, autoRecycleEnabled, DEFAULT_MAX_AUTO_JUNK_PER_SWEEP } from "../../../lib/autoJunkGuard.ts";
+import { buildHolderIndex, decideSiblingGuard, guardMode, type PositiveHolder } from "../../../lib/recycleSiblingGuard.ts";
 
 // Minutes after sla_office_end_time that recycled leads may still be
 // handed out (Option A Phase 1, 2026-10-08). 0 = none.
@@ -497,6 +498,7 @@ serve(withMonitoring("recycle-stale-leads", async () => {
             `
         id,
         project,
+        mobile_normalized,
         status,
         sla_deadline,
         recycle_count,
@@ -557,6 +559,27 @@ serve(withMonitoring("recycle-stale-leads", async () => {
     // nextRestrictedPoolPointerEmployeeId. Threaded through this sweep's
     // loop the same in-memory-then-persist way pointerEmployeeId already is.
     let restrictedPoolPointerEmployeeId = settings.restricted_pool_pointer_employee_id;
+
+    // Recycle sibling guard (G1, 2026-10-17) — see lib/recycleSiblingGuard.ts.
+    // Every positive lead's number, loaded once per sweep as one jsonb
+    // value (no row cap). If loading fails the guard is skipped for this
+    // sweep and an anomaly is logged; recycling itself is not blocked.
+    const siblingGuardMode = guardMode(settings.recycle_sibling_guard_mode);
+    let holdersByMobile = new Map<string, PositiveHolder[]>();
+    if (siblingGuardMode !== "off") {
+      const { data: holderRows, error: holderError } = await supabase.rpc("get_positive_number_holders");
+      if (holderError) {
+        await logAnomaly(supabase, {
+          source: "recycle_sibling_guard",
+          severity: "error",
+          message: `Sibling guard skipped this sweep: positive holders could not be loaded (${holderError.message})`,
+          context: { mode: siblingGuardMode }
+        });
+      } else {
+        holdersByMobile = buildHolderIndex((holderRows || []) as PositiveHolder[]);
+      }
+    }
+    const siblingGuardEvents: Array<Record<string, unknown>> = [];
     const diagnostics: any[] = [];
 
     // Every NOT_INTERESTED outcome, fetched once per sweep (~1k rows)
@@ -973,6 +996,53 @@ serve(withMonitoring("recycle-stale-leads", async () => {
         continue;
       }
 
+      // Recycle sibling guard (G1) — the same number is positive with
+      // someone, so this copy must not go to a third employee. Runs
+      // before both recycle paths below. Shadow mode only records what
+      // it would do; enforce acts and skips the normal recycle.
+      const siblingDecision = decideSiblingGuard(lead, holdersByMobile, onLeaveEmployeeIds, siblingGuardMode);
+      if (siblingDecision.action !== "NONE") {
+        const holder = siblingDecision.holder;
+        const event: Record<string, unknown> = {
+          lead: lead.id.slice(0, 8),
+          action: siblingDecision.action,
+          holder: holder.lead_id.slice(0, 8),
+          holderOwner: holder.owner_id,
+          slaStatus
+        };
+        if (siblingDecision.action === "HOLD") event.reason = siblingDecision.reason;
+        siblingGuardEvents.push(event);
+
+        if (siblingGuardMode === "enforce") {
+          if (siblingDecision.action === "MERGE_INTO") {
+            const { error: mergeError } = await supabase.rpc("merge_recycled_copy_into_holder", {
+              p_keep_lead_id: holder.lead_id,
+              p_drop_lead_id: lead.id
+            });
+            event.result = mergeError ? `failed: ${mergeError.message}` : "merged";
+            diagnostics.push({ leadId: lead.id, action: mergeError ? "SIBLING_MERGE_FAILED" : "SIBLING_MERGED", holderLeadId: holder.lead_id, error: mergeError?.message });
+          } else if (siblingDecision.action === "ASSIGN_TO_HOLDER") {
+            // Pointers are passed through unchanged — the holder was not
+            // picked by rotation, so nobody's turn is used up.
+            const { error: assignError } = await supabase.rpc("recycle_lead_atomic", {
+              p_lead_id: lead.id,
+              p_old_lead_history_id: activeHistory.id,
+              p_new_employee_id: holder.owner_id,
+              p_next_pointer_employee_id: pointerEmployeeId,
+              p_next_restricted_pool_pointer_employee_id: restrictedPoolPointerEmployeeId,
+              p_recycle_reason: slaStatus
+            });
+            event.result = assignError ? `failed: ${assignError.message}` : "assigned";
+            if (!assignError) recycledCount++;
+            diagnostics.push({ leadId: lead.id, action: assignError ? "SIBLING_ASSIGN_FAILED" : "SIBLING_ASSIGNED", newEmployeeId: holder.owner_id, error: assignError?.message });
+          } else {
+            event.result = "not recycled";
+            diagnostics.push({ leadId: lead.id, action: "SKIPPED", reason: siblingDecision.action === "HOLD" ? `SIBLING_HOLD_${siblingDecision.reason}` : "SIBLING_KEEP", slaStatus });
+          }
+          continue;
+        }
+      }
+
       // sla_deadline itself is computed inside recycle_lead_atomic now
       // (working-hours-aware, via compute_working_hours_sla_deadline;
       // stays null for lead_type='DATA', same as before — DATA leads
@@ -1302,6 +1372,20 @@ serve(withMonitoring("recycle-stale-leads", async () => {
 
     }
 
+    // Recycle sibling guard (G1): one anomaly per sweep listing what it
+    // did (enforce) or would have done (shadow).
+    if (siblingGuardEvents.length > 0) {
+      const failed = siblingGuardEvents.filter((e) => String(e.result ?? "").startsWith("failed"));
+      await logAnomaly(supabase, {
+        source: siblingGuardMode === "enforce" ? "recycle_sibling_guard" : "recycle_sibling_guard_shadow",
+        severity: failed.length > 0 ? "error" : "warning",
+        message: siblingGuardMode === "enforce"
+          ? `Sibling guard acted on ${siblingGuardEvents.length} lead(s) this sweep (${failed.length} failed)`
+          : `Sibling guard would have acted on ${siblingGuardEvents.length} lead(s) this sweep`,
+        context: { mode: siblingGuardMode, events: siblingGuardEvents.slice(0, 20) }
+      });
+    }
+
     // Junk circuit breaker tripped (2026-10-16): one critical anomaly per
     // sweep; the skipped leads are listed in diagnostics.
     if (junkBreakerSkipped > 0) {
@@ -1349,6 +1433,7 @@ serve(withMonitoring("recycle-stale-leads", async () => {
         withinRecycleHours,
         junkedCount,
         junkBreakerSkipped,
+        siblingGuard: { mode: siblingGuardMode, events: siblingGuardEvents.length },
         warnedCount,
         totalChecked: (leads || []).length,
         diagnostics

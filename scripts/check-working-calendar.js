@@ -284,6 +284,46 @@ async function main() {
     ["K11 auto_recycle_enabled=null -> on", autoRecycleEnabled({ auto_recycle_enabled: null }), true]
   );
 
+  // Positive leads (2026-10-17): G1 recycle sibling guard, G4 migrate text.
+  const { isPositiveLead, migrateSummaryText } = loadLib("positiveLead.ts");
+  const { buildHolderIndex, decideSiblingGuard, guardMode } = loadLib("recycleSiblingGuard.ts");
+  const M = "9876543210";
+  const holder = (over = {}) => ({ lead_id: "H1", mobile: M, project_key: "la residentia", owner_id: "A", owner_active: true, rank: 3, ...over });
+  const stale = (over = {}) => ({ id: "L1", mobile_normalized: M, project: "La Residentia ", current_owner_id: "B", ...over });
+  const decide = (holders, lead = stale(), mode = "enforce", onLeave = new Set()) => {
+    const d = decideSiblingGuard(lead, buildHolderIndex(holders), onLeave, mode);
+    return d.action + (d.holder ? ":" + d.holder.lead_id : "") + (d.reason ? ":" + d.reason : "");
+  };
+  cases.push(
+    ["P1 FOLLOW_UP is positive", isPositiveLead({ status: "NOT_CONNECTED", board_stage: "FOLLOW_UP" }), true],
+    ["P2 BOOKING is positive", isPositiveLead({ status: "NEW", board_stage: "BOOKING" }), true],
+    ["P3 CONNECTED in LEADS is positive", isPositiveLead({ status: "CONNECTED", board_stage: "LEADS" }), true],
+    ["P4 VISIT_LOCK pause is positive", isPositiveLead({ status: "NEW", board_stage: "LEADS", pause_reason: "VISIT_LOCK" }), true],
+    ["P5 NOT_CONNECTED in LEADS is not", isPositiveLead({ status: "NOT_CONNECTED", board_stage: "LEADS" }), false],
+    ["P6 JUNK is never positive", isPositiveLead({ status: "JUNK", board_stage: "FOLLOW_UP" }), false],
+    ["G1 no sibling -> normal recycle", decide([]), "NONE"],
+    ["G2 sibling positive, same project -> merge into it, not a third employee", decide([holder()]), "MERGE_INTO:H1"],
+    ["G3 sibling positive, other project -> give to its owner", decide([holder({ project_key: "crc sublimis" })]), "ASSIGN_TO_HOLDER:H1"],
+    ["G4 holder owner inactive -> hold (no recycle, logged)", decide([holder({ owner_active: false })]), "HOLD:H1:HOLDER_INACTIVE"],
+    ["G5 holder owner on leave -> hold (no recycle, logged)", decide([holder()], stale(), "enforce", new Set(["A"])), "HOLD:H1:HOLDER_ON_LEAVE"],
+    ["G6 holder is the stale copy's own owner -> keep", decide([holder({ owner_id: "B" })]), "KEEP:H1"],
+    ["G7 flag off -> old behavior", decide([holder()], stale(), "off"), "NONE"],
+    ["G8 missing column -> off", guardMode(undefined), "off"],
+    ["G9 unknown value -> off", guardMode("block"), "off"],
+    ["G10 shadow still decides (caller only logs)", decide([holder()], stale(), "shadow"), "MERGE_INTO:H1"],
+    ["G11 the lead itself is not its own sibling", decide([holder({ lead_id: "L1" })]), "NONE"],
+    ["G12 same-project holder preferred over a visit in another project", decide([holder({ lead_id: "H2", project_key: "crc sublimis", rank: 1 }), holder({ rank: 4 })]), "MERGE_INTO:H1"],
+    ["G13 two same-project holders -> visit beats follow-up", decide([holder({ lead_id: "H2", rank: 3 }), holder({ lead_id: "H3", rank: 1 })]), "MERGE_INTO:H3"],
+    ["G14 bad mobile never matches", decide([holder({ mobile: "12345" })], stale({ mobile_normalized: "12345" })), "NONE"],
+    ["G15 no mobile on the lead -> normal recycle", decide([holder()], stale({ mobile_normalized: null })), "NONE"],
+    ["G16 DATA copy is never touched (Admin DATA policy)", decide([holder()], stale({ lead_type: "DATA" })), "NONE"],
+    ["G17 LEAD copy with explicit type still guarded", decide([holder()], stale({ lead_type: "LEAD" })), "MERGE_INTO:H1"],
+    ["R1 migrate text, positive excluded", migrateSummaryText(10, 3, false), "7 active lead(s) will move. 3 in follow-up, visit or connected stay with the current employee."],
+    ["R2 migrate text, positive included", migrateSummaryText(10, 3, true), "10 active lead(s) will move, including 3 in follow-up, visit or connected."],
+    ["R3 migrate text, none positive", migrateSummaryText(4, 0, false), "4 active lead(s) will move."],
+    ["R4 migrate text, nothing to move", migrateSummaryText(0, 0, false), "No active leads to migrate."]
+  );
+
   let failures = 0;
   for (const [name, got, expected] of cases) {
     if (got !== expected) {
