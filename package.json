@@ -10,7 +10,9 @@
     "lint": "eslint",
     "check:unbounded-queries": "node scripts/check-unbounded-queries.js",
     "check:working-calendar": "node scripts/check-working-calendar.js",
-    "check:working-calendar-parity": "node --env-file=.env.local scripts/check-working-calendar-parity.mjs"
+    "check:working-calendar-parity": "node --env-file=.env.local scripts/check-working-calendar-parity.mjs",
+    "check:recycle-deploy": "node scripts/check-recycle-deploy.js",
+    "deploy:recycle": "node scripts/check-recycle-deploy.js && npx supabase functions deploy recycle-stale-leads --use-api"
   },
   "dependencies": {
     "@supabase/auth-helpers-nextjs": "^0.15.0",
