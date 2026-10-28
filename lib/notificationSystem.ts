@@ -106,6 +106,9 @@ const NOTIFICATION_TYPES: Record<string, { label: string; icon: string; group: N
   PAUSE_EXPIRED: { label: "Pause Ended", icon: "▶️", group: "SLA" },
   PROJECT_RULE_STALE: { label: "Project Rule Alert", icon: "📐", group: "SLA" },
   STATUS_UPDATE_NO_CONTACT_CLICK: { label: "Status Updated Without a Call", icon: "📵", group: "SLA" },
+  // Call Quality (2026-10-28) — send_call_outcome_nudges / send_call_quality_daily_summary
+  CALL_OUTCOME_MISSING: { label: "Outcome Not Logged", icon: "📞", group: "SLA" },
+  CALL_QUALITY_DAILY: { label: "Today's Call Summary", icon: "📊", group: "PEOPLE" },
   // Junk / recycle — slate
   LEAD_JUNKED: { label: "Lead Junked", icon: "♻️", group: "JUNK" },
   // Visits — teal
@@ -177,7 +180,9 @@ const CALL_ACTION_TYPES = new Set([
   "SLA_WARNING",
   "PAUSE_EXPIRY_WARNING",
   "PAUSE_EXPIRED",
-  "RECYCLE_TOMORROW"
+  "RECYCLE_TOMORROW",
+  // a call was dialed but no outcome logged — Call/View Lead is exactly the fix
+  "CALL_OUTCOME_MISSING"
 ]);
 
 export function hasCallAction(type: string | null | undefined): boolean {

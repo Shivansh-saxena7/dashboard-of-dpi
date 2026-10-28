@@ -7,6 +7,8 @@ import { Copy, Send, Phone } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import toast from "react-hot-toast";
 import { buildWorkReportMessage } from "@/lib/buildWorkReportMessage";
+import { logCallClick } from "@/lib/logCallClick";
+import { formatScore, scoreTone } from "@/lib/callQuality";
 
 interface DetailEntry {
   leadName: string;
@@ -45,6 +47,13 @@ interface WorkReportData {
   stuckLeadsDetails: StuckLeadEntry[];
   personalLeads: number;
   personalLeadDetails: DetailEntry[];
+  // Call Quality (2026-10-28) — added keys; absent until the DB part is applied.
+  dial_clicks?: number;
+  logged_calls?: number;
+  genuine_score?: number | null;
+  call_quality_flags?: Record<string, number>;
+  call_quality_estimated?: boolean;
+  call_quality_visible?: boolean;
 }
 
 interface WorkReportViewProps {
@@ -238,11 +247,7 @@ export default function WorkReportView({ employeeId, employeeName, date, whatsap
   // modal effect LeadList.tsx already has (built for the Personal Lead
   // creation flow) rather than duplicating LeadDetailModal here.
   function handleStuckLeadCallClick(entry: StuckLeadEntry) {
-    supabase
-      .rpc("log_call_click_atomic", { p_lead_history_id: entry.leadHistoryId })
-      .then(({ error }) => {
-        if (error) console.error("log_call_click_atomic failed:", error.message);
-      });
+    logCallClick(entry.leadHistoryId, entry.leadId);
     router.push(`/leads?openLead=${entry.leadId}`);
   }
 
@@ -265,8 +270,23 @@ export default function WorkReportView({ employeeId, employeeName, date, whatsap
   const expandedMetric = METRICS.find((m) => m.key === expanded);
   const expandedDetails = expandedMetric ? (report[expandedMetric.detailKey] as DetailEntry[]) : [];
 
+  const showCallQuality = report.call_quality_visible === true && typeof report.dial_clicks === "number";
+
   return (
     <div className="space-y-3">
+      {/* Call Quality (2026-10-28): Dial clicks / Logged calls / Connected as three
+          separate numbers. "Calls" below stays exactly what it always was (Call taps). */}
+      {showCallQuality && (
+        <div className="rounded-2xl border border-slate-100 bg-white p-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm shadow-[0_2px_10px_rgba(15,23,42,0.04)]">
+          <span className="text-slate-500">Dial clicks <b className="text-slate-800 tabular-nums">{report.dial_clicks}</b></span>
+          <span className="text-slate-500">Logged calls <b className="text-slate-800 tabular-nums">{report.logged_calls}</b></span>
+          <span className="text-slate-500">Connected <b className="text-slate-800 tabular-nums">{report.connected}</b></span>
+          <span className="text-slate-500">
+            Genuine score <b className={`tabular-nums ${scoreTone(report.genuine_score ?? null)}`}>{formatScore(report.genuine_score ?? null)}</b>
+            {report.call_quality_estimated && <span className="text-[11px] text-slate-400"> (Estimated)</span>}
+          </span>
+        </div>
+      )}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
         {METRICS.map((m) => {
           const count = report[m.key] as number;

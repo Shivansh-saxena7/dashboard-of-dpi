@@ -9,6 +9,7 @@ import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { MAX_DATA_ATTEMPTS } from "@/lib/calculateSLAStatus";
 import { buildWhatsAppLink } from "@/lib/buildWhatsAppLink";
 import { rememberCalledCard } from "@/lib/lastCalledLead";
+import { logCallClick } from "@/lib/logCallClick";
 
 interface DataCardLead {
   id: string;
@@ -74,11 +75,7 @@ function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
   function handleCallClick(e: React.MouseEvent) {
     e.stopPropagation();
     rememberCalledCard(lead.id);
-    supabase
-      .rpc("log_call_click_atomic", { p_lead_history_id: lead.leadHistoryId })
-      .then(({ error }) => {
-        if (error) console.error("log_call_click_atomic failed:", error.message);
-      });
+    logCallClick(lead.leadHistoryId, lead.id);
   }
 
   function handleWhatsAppClick(e: React.MouseEvent) {

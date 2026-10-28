@@ -15,6 +15,7 @@ import { LeadStatus, EMPLOYEE_SELECTABLE_STATUSES } from "@/lib/getValidNextLead
 import { getRecycleCutoff } from "@/lib/calculateSLAStatus";
 import { normalizeMobile } from "@/lib/normalizeMobile";
 import { consumeRecentlyCalledCardId, scrollToAndHighlightCard, consumeQuickDialNumber } from "@/lib/lastCalledLead";
+import { usePendingOutcomeSheet } from "@/lib/usePendingOutcomeSheet";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
 import { istDateStringToRangeStartUTC, istDateStringToRangeEndUTC } from "@/lib/istTime";
@@ -208,6 +209,10 @@ export default function LeadList({ employeeId }: LeadListProps) {
     const id = consumeRecentlyCalledCardId();
     if (id) scrollToAndHighlightCard(`lead-card-${id}`);
   }, [loading]);
+
+  // Call Quality (2026-10-28) — back from a call: open that lead so its
+  // outcome gets logged. See lib/usePendingOutcomeSheet.ts.
+  usePendingOutcomeSheet(loading, leads, setSelectedLeadId);
 
   // Notification-Call-Action "View Lead" (2026-09-23) — same
   // auto-open-after-landing shape as handlePersonalLeadCreated above,

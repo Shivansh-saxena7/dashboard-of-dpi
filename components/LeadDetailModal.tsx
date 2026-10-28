@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { X, Phone, Loader2, Send, Repeat, MessageCircle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { logCallClick } from "@/lib/logCallClick";
 import toast from "react-hot-toast";
 import { getValidNextLeadStatuses, LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
@@ -148,11 +149,7 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
   // click from here (rather than the card) never recorded
   // first_call_at/first_whatsapp_at.
   function handleCallClick() {
-    supabase
-      .rpc("log_call_click_atomic", { p_lead_history_id: lead.leadHistoryId })
-      .then(({ error }) => {
-        if (error) console.error("log_call_click_atomic failed:", error.message);
-      });
+    logCallClick(lead.leadHistoryId, lead.id);
   }
 
   function handleWhatsAppClick() {
