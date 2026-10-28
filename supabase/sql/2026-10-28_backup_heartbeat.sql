@@ -1,4 +1,4 @@
--- 2026-10-28 — heartbeat for the nightly DB dump. NOT APPLIED (needs a separate "haan").
+-- 2026-10-28 — heartbeat for the nightly DB dump. APPLIED 2026-10-28 13:31 IST after the first PASS run.
 -- Rollback: 2026-10-28_backup_heartbeat_rollback.sql
 --
 -- The workflow calls record_backup_heartbeat() after a successful encrypted upload. The existing hourly
