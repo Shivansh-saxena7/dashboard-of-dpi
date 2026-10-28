@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import WorkReportView from "@/components/WorkReportView";
+import CallQualityOverview from "@/components/CallQualityOverview";
 import { todayKey } from "@/lib/leaderboardWeek";
 
 import PageHeader from "@/components/PageHeader";
@@ -192,6 +193,9 @@ export default function AdminWorkReportsPage() {
           </div>
         )}
       </div>
+
+      {/* Call Quality (2026-10-28) — team view, its own 7/30-day range, not tied to the date picker below. */}
+      <CallQualityOverview />
 
       <div className="bg-white rounded-2xl border border-slate-100 shadow-md p-4 mb-4 flex flex-col sm:flex-row gap-3">
         <div className="flex-1">
