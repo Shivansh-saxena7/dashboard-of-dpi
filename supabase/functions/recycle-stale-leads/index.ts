@@ -1010,6 +1010,7 @@ serve(withMonitoring("recycle-stale-leads", async () => {
         const holder = siblingDecision.holder;
         const event: Record<string, unknown> = {
           lead: lead.id.slice(0, 8),
+          leadId: lead.id,
           leadOwner: lead.current_owner_id,
           project: lead.project,
           action: siblingDecision.action,
@@ -1393,6 +1394,32 @@ serve(withMonitoring("recycle-stale-leads", async () => {
           : `Sibling guard would have acted on ${siblingGuardEvents.length} lead(s) this sweep${reviewNote}`,
         context: { mode: siblingGuardMode, events: siblingGuardEvents.slice(0, 20) }
       });
+
+      // Row-per-decision record (2026-10-28): the anomaly above merges by
+      // the hour, lead_guard_events keeps every decision for Admin
+      // (get_guard_events / positive_conflicts). Failure here never
+      // affects the sweep.
+      const { error: guardLogError } = await supabase.from("lead_guard_events").insert(
+        siblingGuardEvents.map((e) => ({
+          source: "recycle_sibling_guard",
+          action: e.reason ? `${e.action}:${e.reason}` : String(e.action),
+          lead_id: e.leadId,
+          holder_lead_id8: e.holder,
+          lead_owner_id: e.leadOwner ?? null,
+          holder_owner_id: e.holderOwner ?? null,
+          project: e.project ?? null,
+          mode: siblingGuardMode,
+          detail: e
+        }))
+      );
+      if (guardLogError) {
+        await logAnomaly(supabase, {
+          source: "recycle_sibling_guard_log",
+          severity: "warning",
+          message: `Could not record ${siblingGuardEvents.length} guard decision(s): ${guardLogError.message}`,
+          context: { mode: siblingGuardMode }
+        });
+      }
     }
 
     // Junk circuit breaker tripped (2026-10-16): one critical anomaly per

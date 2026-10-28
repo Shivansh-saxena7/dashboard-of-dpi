@@ -80,10 +80,12 @@ export function decideSiblingGuard(
     Number(b.project_key === key) - Number(a.project_key === key) || a.rank - b.rank || a.lead_id.localeCompare(b.lead_id)
   )[0];
 
+  // Same owner holds both copies: nothing to decide and nothing for Admin
+  // to review (2026-10-28, checked before BOTH_POSITIVE).
+  if (holder.owner_id === lead.current_owner_id) return { action: "KEEP", holder };
   // Both copies are positive (2026-10-17): a positive lead never leaves
   // its owner because of a sibling — nothing moves, Admin reviews it.
   if (isPositiveLead(lead)) return { action: "HOLD", holder, reason: "BOTH_POSITIVE" };
-  if (holder.owner_id === lead.current_owner_id) return { action: "KEEP", holder };
   if (!holder.owner_active) return { action: "HOLD", holder, reason: "HOLDER_INACTIVE" };
   if (onLeaveEmployeeIds.has(holder.owner_id)) return { action: "HOLD", holder, reason: "HOLDER_ON_LEAVE" };
   return { action: holder.project_key === key ? "MERGE_INTO" : "ASSIGN_TO_HOLDER", holder };
