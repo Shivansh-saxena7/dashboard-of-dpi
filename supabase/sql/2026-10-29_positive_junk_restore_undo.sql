@@ -4,7 +4,7 @@
 -- For each restore that is not undone yet: if the lead is still with the employee it was given to and that
 -- assignment is still active, the lead goes back exactly to its saved previous state (prev_state: status,
 -- board stage, owner, recycle count, last_unjunked_at, sla_deadline), the restore assignment is closed with
--- ended_reason RESTORE_UNDONE, and the log row is marked undone. If the lead moved on since (new owner,
+-- ended_reason ADMIN_REASSIGNED (note says "restore undone"), and the log row is marked undone. If the lead moved on since (new owner,
 -- new assignment), it is skipped and reported — never forced back.
 begin;
 do $$
@@ -17,7 +17,10 @@ begin
   for r in select * from lead_restore_log where id = any(v_ids) and undone_at is null for update loop
     if exists (select 1 from leads l where l.id = r.lead_id and l.current_owner_id = r.to_employee_id)
        and exists (select 1 from lead_history h where h.id = r.new_lead_history_id and h.is_active) then
-      update lead_history set is_active = false, ended_reason = 'RESTORE_UNDONE' where id = r.new_lead_history_id;
+      -- ended_reason has a fixed list (lead_history_ended_reason_check); the undo is recorded in the note
+      update lead_history set is_active = false, ended_reason = 'ADMIN_REASSIGNED',
+             reassign_note = coalesce(reassign_note, '') || ' | restore undone ' || to_char(now() at time zone 'Asia/Kolkata', 'DD Mon HH24:MI')
+      where id = r.new_lead_history_id;
       update leads set
         status = r.prev_state->>'status',
         board_stage = r.prev_state->>'board_stage',
