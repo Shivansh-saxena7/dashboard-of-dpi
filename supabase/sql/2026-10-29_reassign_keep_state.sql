@@ -1,4 +1,4 @@
--- Reassign a lead to another employee WITHOUT resetting it (2026-10-29).
+-- Reassign a lead to another employee WITHOUT resetting it (2026-10-29). APPLIED 2026-10-29 18:00:57 IST (owner's "haan", LF copy, md5 c6966b74); grants: anon/public none, authenticated + service_role.
 -- force_reassign_lead_atomic puts every non-terminal lead back to NEW / Leads and drops its pause; this one keeps
 -- status, stage, recycle count and the pause, and gives the new owner a fresh clock plus the same protection window
 -- the positive-junk restore uses (lead_restore_log.protected_until, read by auto_junk_window_check).
