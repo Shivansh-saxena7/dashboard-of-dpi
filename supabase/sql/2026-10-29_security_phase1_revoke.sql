@@ -1,4 +1,4 @@
--- 2026-10-29 — Security Phase 1. NOT APPLIED — apply only after the owner's "haan".
+-- 2026-10-29 — Security Phase 1. APPLIED 2026-10-29 12:03 IST (owner's "haan"); verified: 12:15 sweep ok, 0 new errors, 0 permission denied.
 -- Rollback: 2026-10-29_security_phase1_revoke_rollback.sql
 --
 -- Three SECURITY DEFINER functions that write data without checking who is calling were executable by
