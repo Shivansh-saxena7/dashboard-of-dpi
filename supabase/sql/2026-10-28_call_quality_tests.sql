@@ -235,7 +235,14 @@ insert into _t select 42, 'admin can change a threshold and the share line', qui
 update lead_engine_settings set call_quality_live_since = now() - interval '2 hours' where id = 1;
 delete from contact_click_log where employee_id = (select emp from _ctx) and clicked_at >= pg_temp.ist('2026-01-01 00:00:00') and clicked_at < pg_temp.ist('2026-02-01 00:00:00');
 insert into contact_click_log (id, lead_id, lead_history_id, employee_id, click_type, clicked_at)
-select '00000000-0000-4000-8000-00000000c0de', lead3, lh3, emp, 'CALL', now() - interval '40 minutes' from _ctx;
+-- a lead of the same employee with nothing done on it in the last 3 hours (live data keeps moving during the day)
+select '00000000-0000-4000-8000-00000000c0de', h.lead_id, h.id, h.employee_id, 'CALL', now() - interval '40 minutes'
+from lead_history h, _ctx c
+where h.employee_id = c.emp and h.is_active
+  and not exists (select 1 from lead_activity_log a where a.lead_id = h.lead_id and a.employee_id = h.employee_id and a.created_at > now() - interval '3 hours')
+  and not exists (select 1 from lead_notes n where n.lead_id = h.lead_id and n.employee_id = h.employee_id and n.created_at > now() - interval '3 hours')
+  and not exists (select 1 from contact_click_log k where k.lead_id = h.lead_id and k.employee_id = h.employee_id and k.clicked_at > now() - interval '3 hours')
+limit 1;
 create temp table _n on commit drop as select send_call_outcome_nudges() sent;
 insert into _t select 43, 'reminder after 30 min for a tap with nothing saved',
   (select outcome_nudged_at is not null from contact_click_log where id = '00000000-0000-4000-8000-00000000c0de')

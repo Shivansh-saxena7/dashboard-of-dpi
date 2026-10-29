@@ -346,7 +346,9 @@ begin
   end if;
 end;
 $function$;
-grant execute on function public.log_lead_update_atomic(uuid, uuid, text, text, integer, text) to anon, authenticated, service_role;
+-- back to the grants live since Security Phase 2 (2026-10-29): authenticated + service_role, no PUBLIC / anon
+revoke all on function public.log_lead_update_atomic(uuid, uuid, text, text, integer, text) from public, anon;
+grant execute on function public.log_lead_update_atomic(uuid, uuid, text, text, integer, text) to authenticated, service_role;
 
 -- call click: back to RETURNS void, same grants as before (authenticated, service_role; no PUBLIC/anon)
 drop function public.log_call_click_atomic(uuid);

@@ -330,7 +330,9 @@ begin
   end if;
 end;
 $function$;
-grant execute on function public.log_lead_update_atomic(uuid, uuid, text, text, integer, text, text) to anon, authenticated, service_role;
+-- Grants as live since Security Phase 2 (2026-10-29): no PUBLIC / anon.
+revoke all on function public.log_lead_update_atomic(uuid, uuid, text, text, integer, text, text) from public, anon;
+grant execute on function public.log_lead_update_atomic(uuid, uuid, text, text, integer, text, text) to authenticated, service_role;
 
 -- ---------------------------------------------------------------- 5) per-call rows (every flag comes from here, never from the app)
 -- Bounded by employee and time so the RPCs stay fast; reads 1 day before p_from (previous tap, burst, repeat count)
