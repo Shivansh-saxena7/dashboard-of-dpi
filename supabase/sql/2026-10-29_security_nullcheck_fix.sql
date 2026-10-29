@@ -1,4 +1,4 @@
--- 2026-10-29 — NULL-safe role checks (39 functions). NOT APPLIED — apply only after the owner's "haan" (from an LF copy).
+-- 2026-10-29 — NULL-safe role checks (39 functions). APPLIED 2026-10-29 16:37 IST (owner's "haan", LF copy of 654fa72); live verify 7/7.
 -- Rollback: 2026-10-29_security_nullcheck_fix_rollback.sql (byte-exact copy outside git: C:/work/reports/nullcheck_rollback_exact.sql)
 --
 -- `if <role> not in ('admin', ...) then raise` does NOT raise when the role is NULL (no employee row, or no login),
