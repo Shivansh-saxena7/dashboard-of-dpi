@@ -322,9 +322,9 @@ export function flagReason(flag: CallQualityFlag, row: CallQualityRow, s: CallQu
     case "REPEAT_DIALS":
       return `Dial number ${row.nth_on_lead_today} on this lead today.`;
     case "OUTSIDE_HOURS":
-      return `Outside office hours (${hhmm(s.office_start)}–${hhmm(s.office_end)}) or the weekly off.`;
+      return `Office hours are ${hhmm(s.office_start)}–${hhmm(s.office_end)}; the weekly off counts as outside too.`;
     case "NO_SHIFT_START":
-      return "No shift start that day.";
+      return "The shift was not started in the CRM that day.";
     case "REDIAL":
       return "Dialed this lead again soon after; this dial is left out of the score.";
   }

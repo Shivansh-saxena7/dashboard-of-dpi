@@ -67,7 +67,7 @@ export default function CallQualityOverview() {
           {summary.employees.length === 0 ? (
             <p className="text-sm text-slate-400">No dials in this range.</p>
           ) : (
-            <div className="overflow-x-auto -mx-1">
+            <div className="w-0 min-w-full overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs text-slate-400">

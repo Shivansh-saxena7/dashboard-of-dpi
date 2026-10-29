@@ -38,8 +38,7 @@ export default function MyCallQuality({ employeeId }: { employeeId: string }) {
   const [summary, setSummary] = useState<CallQualitySummary | null>(null);
   const [details, setDetails] = useState<CallQualityDetails | null>(null);
   const [hidden, setHidden] = useState(false);
-  const [day, setDay] = useState(istDayKey(0));
-  const [introStep, setIntroStep] = useState<number | null>(null);
+  const [showIntro, setShowIntro] = useState(false);
 
   const from = istDayKey(6);
   const to = istDayKey(0);
@@ -61,7 +60,7 @@ export default function MyCallQuality({ employeeId }: { employeeId: string }) {
       setDetails(d.data as CallQualityDetails);
       setHidden(false);
       try {
-        if (!localStorage.getItem(INTRO_KEY)) setIntroStep(0);
+        setShowIntro(!localStorage.getItem(INTRO_KEY));
       } catch {
         // storage blocked: just skip the intro
       }
@@ -71,8 +70,7 @@ export default function MyCallQuality({ employeeId }: { employeeId: string }) {
     };
   }, [employeeId, from, to]);
 
-  function closeIntro() {
-    setIntroStep(null);
+  function introSeen() {
     try {
       localStorage.setItem(INTRO_KEY, "1");
     } catch {
@@ -81,6 +79,30 @@ export default function MyCallQuality({ employeeId }: { employeeId: string }) {
   }
 
   if (hidden || !summary || !details) return null;
+  return <MyCallQualityView summary={summary} details={details} showIntro={showIntro} onIntroDone={introSeen} />;
+}
+
+// Pure view (no fetching), so the same screen can be previewed with sample data.
+export function MyCallQualityView({
+  summary,
+  details,
+  showIntro = false,
+  onIntroDone,
+  openFirstCard = false
+}: {
+  summary: CallQualitySummary;
+  details: CallQualityDetails;
+  showIntro?: boolean;
+  onIntroDone?: () => void;
+  openFirstCard?: boolean;
+}) {
+  const [day, setDay] = useState(istDayKey(0));
+  const [introStep, setIntroStep] = useState<number | null>(showIntro ? 0 : null);
+
+  function closeIntro() {
+    setIntroStep(null);
+    onIntroDone?.();
+  }
   const s = summary.settings;
   const me = summary.employees[0];
   const lead = me?.by_card_type.LEAD;
@@ -141,15 +163,15 @@ export default function MyCallQuality({ employeeId }: { employeeId: string }) {
       {flagsPresent.length > 0 && (
         <div className="space-y-2">
           <p className="text-[15px] font-bold text-slate-800 px-1">What needs attention (last 7 days)</p>
-          {flagsPresent.map((f) => (
-            <FlagCard key={f} flag={f} rows={rows} today={today} details={details} />
+          {flagsPresent.map((f, i) => (
+            <FlagCard key={f} flag={f} rows={rows} today={today} details={details} defaultOpen={openFirstCard && i === 0} />
           ))}
         </div>
       )}
 
       <div className="rounded-2xl bg-white border border-slate-100 shadow-md p-4 space-y-3">
         <p className="text-lg font-bold text-slate-900">My day</p>
-        <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
+        <div className="w-0 min-w-full flex gap-1.5 overflow-x-auto pb-1">
           {days.map((d) => (
             <button
               key={d}
@@ -184,7 +206,7 @@ export default function MyCallQuality({ employeeId }: { employeeId: string }) {
   );
 }
 
-function FlagCard({ flag, rows, today, details }: { flag: CallQualityFlag; rows: CallQualityRow[]; today: string; details: CallQualityDetails }) {
+function FlagCard({ flag, rows, today, details, defaultOpen = false }: { flag: CallQualityFlag; rows: CallQualityRow[]; today: string; details: CallQualityDetails; defaultOpen?: boolean }) {
   const s = details.settings;
   const meta = flagMetaFor(flag, s);
   const withFlag = rows.filter((r) => r.flags.includes(flag));
@@ -193,6 +215,7 @@ function FlagCard({ flag, rows, today, details }: { flag: CallQualityFlag; rows:
   const example = (todays.length > 0 ? todays : withFlag)[todays.length > 0 ? 0 : withFlag.length - 1];
   return (
     <Collapsible
+      defaultOpen={defaultOpen}
       tone={lowers ? "red" : "grey"}
       title={
         <span className="flex items-center gap-2">
