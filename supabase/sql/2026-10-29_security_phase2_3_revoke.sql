@@ -1,4 +1,4 @@
--- 2026-10-29 — Security Phase 2 + 3. NOT APPLIED — apply only after the owner's "haan" (from an LF copy).
+-- 2026-10-29 — Security Phase 2 + 3. APPLIED 2026-10-29 16:03 IST (owner's "haan", from the LF copy of a8f9802); verified 14/14.
 -- Rollback: 2026-10-29_security_phase2_3_revoke_rollback.sql
 --
 -- Found 2026-10-29 by calling each function as anon (no login, only the public anon key): get_meta_dataset_credentials
