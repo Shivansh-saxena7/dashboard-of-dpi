@@ -63,21 +63,27 @@ Recommended: send the notice → deploy the app → apply the SQL after 18:45 IS
 
 > **Call Quality in the CRM — starting <date>**
 >
-> From <date>, the CRM shows a Call Quality score next to your work report.
+> From <date>, My Report shows a Call Quality score.
 >
-> **What the CRM records:** only what you do inside the CRM: when you tap a Call or WhatsApp button, and when you
-> log a call outcome or a note. Times come from the server. The CRM does not read your phone's call log, does not
-> record calls, and never sees personal calls.
+> **What the CRM records:** only what you do inside the CRM: when you tap the Call or WhatsApp button, and when you
+> save a result or a note on a lead. The times come from the CRM's own clock. The CRM does not read your phone's call
+> list, does not record calls, and never sees your personal calls.
 >
-> **Why:** so that the work report shows real calling work fairly. Simply tapping Call should not count the same as
-> a real call, and genuine effort should be visible.
+> **Why:** so the work report is fair. A real call followed by a saved result should count; just tapping Call should not.
+> Your manager and you see the same numbers.
 >
-> **What you will see:** on My Report, your score, your Dial clicks, Logged calls and Connected calls, and any flags
-> with their exact times. When you come back from a call, the lead opens so you can log the outcome. If you dial and
-> do not save anything for 30 minutes, the CRM reminds you. If the customer called you or you used another phone,
-> pick that under "How did you talk?" when you save the result.
+> **What you will see on My Report:** your score (Green, Amber or Red), how many dials you made, how many results you
+> saved, and how many were connected. Anything that needs attention is shown with your own example and how to fix it.
+> "My day" lists every dial with its time.
 >
-> **The first week is a learning week:** the score is not used for evaluation. Use it to build the habit: dial from
-> the CRM, log every outcome right after the call. A dropped call that you redial never counts against you.
+> **What to do:**
+> - Dial from the Call button in the CRM.
+> - Save the result right after the call. When you come back to the CRM, the lead opens for you.
+> - Customer called you, or you used another phone or a WhatsApp call? Pick that under "How did you talk?" when you
+>   save the result.
+> - Call got cut? Just dial again. A redial never counts against you.
+> - If you dial and save nothing for 30 minutes, the CRM reminds you.
+>
+> **The first week is a learning week:** no action is taken on this score. We will tell you before anything changes.
 >
 > Questions? Ask <admin name>.
