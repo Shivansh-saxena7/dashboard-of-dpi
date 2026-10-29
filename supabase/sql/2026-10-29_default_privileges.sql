@@ -1,4 +1,4 @@
--- 2026-10-29 — Default privileges for new functions. NOT APPLIED — apply only after the owner's "haan" (from an LF copy).
+-- 2026-10-29 — Default privileges for new functions. APPLIED 2026-10-29 16:3x IST (owner's "haan", LF copy of 8d769f7); verified on a rolled-back test function, existing ACLs unchanged (md5 6fe0bd67…).
 -- Rollback: 2026-10-29_default_privileges_rollback.sql
 --
 -- Today every function postgres creates in public gets EXECUTE for PUBLIC (built-in) and anon (Supabase default), so each
