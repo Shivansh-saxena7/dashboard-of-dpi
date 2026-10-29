@@ -5,6 +5,9 @@ begin;
 select cron.unschedule(jobid) from cron.job where jobname in ('call-outcome-nudges', 'call-quality-daily-summary');
 
 drop function if exists public.send_call_outcome_nudges();
+drop function if exists public.call_quality_week(uuid, date);
+drop function if exists public.call_quality_settings_json();
+drop function if exists public.call_quality_band(integer);
 drop function if exists public.send_call_quality_daily_summary();
 drop function if exists public.update_call_quality_settings(jsonb);
 drop function if exists public.get_call_quality_summary(uuid, date, date);
@@ -12,9 +15,11 @@ drop function if exists public.get_call_quality_details(uuid, date, date);
 drop function if exists public.call_quality_assert_access(uuid);
 drop function if exists public.call_quality_totals_json(jsonb, integer);
 drop function if exists public.call_quality_daily(uuid, date, date);
-drop function if exists public.call_quality_score(bigint, bigint, bigint, integer);
+drop function if exists public.call_quality_score(bigint, bigint, bigint, bigint, integer);
 drop view if exists public.call_quality_flags;
 drop view if exists public.call_quality_clicks;
+drop function if exists public.call_quality_click_rows(uuid, timestamptz, timestamptz);
+drop function if exists public.call_quality_outcome_rows(uuid, timestamptz, timestamptz);
 
 -- work report and status update: previous bodies (they reference nothing created above once restored)
 CREATE OR REPLACE FUNCTION public.get_employee_work_report(p_employee_id uuid, p_date date)
@@ -185,7 +190,9 @@ begin
 end;
 $function$;
 
-CREATE OR REPLACE FUNCTION public.log_lead_update_atomic(p_lead_id uuid, p_lead_history_id uuid, p_new_status text, p_note text, p_reminder_value integer DEFAULT NULL::integer, p_reminder_unit text DEFAULT NULL::text)
+-- status update: back to the 6-argument function, same grants as before
+drop function public.log_lead_update_atomic(uuid, uuid, text, text, integer, text, text);
+CREATE FUNCTION public.log_lead_update_atomic(p_lead_id uuid, p_lead_history_id uuid, p_new_status text, p_note text, p_reminder_value integer DEFAULT NULL::integer, p_reminder_unit text DEFAULT NULL::text)
  RETURNS void
  LANGUAGE plpgsql
  SECURITY DEFINER
@@ -339,6 +346,7 @@ begin
   end if;
 end;
 $function$;
+grant execute on function public.log_lead_update_atomic(uuid, uuid, text, text, integer, text) to anon, authenticated, service_role;
 
 -- call click: back to RETURNS void, same grants as before (authenticated, service_role; no PUBLIC/anon)
 drop function public.log_call_click_atomic(uuid);
@@ -397,19 +405,27 @@ alter table contact_click_log
   drop column if exists outcome_at,
   drop column if exists gap_seconds,
   drop column if exists outcome_nudged_at;
+alter table lead_activity_log drop column if exists contact_method;
 
 alter table lead_engine_settings drop constraint if exists lead_engine_settings_call_quality_ranges;
 alter table lead_engine_settings
-  drop column if exists quick_outcome_seconds,
-  drop column if exists rapid_click_seconds,
-  drop column if exists outcome_window_minutes,
   drop column if exists outcome_link_minutes,
+  drop column if exists reminder_after_minutes,
+  drop column if exists quick_connected_seconds,
+  drop column if exists quick_not_interested_seconds,
+  drop column if exists outcome_floor_seconds,
+  drop column if exists rapid_click_seconds,
   drop column if exists burst_window_minutes,
   drop column if exists burst_min_clicks,
+  drop column if exists burst_data_min_clicks,
+  drop column if exists burst_result_share_pct,
   drop column if exists repeat_clicks_per_day,
-  drop column if exists call_quality_min_sample,
+  drop column if exists no_dial_share_pct,
+  drop column if exists declared_other_share_pct,
+  drop column if exists score_min_clicks,
   drop column if exists call_quality_visible_to_employees,
   drop column if exists call_quality_enforced,
+  drop column if exists call_quality_share_line,
   drop column if exists call_quality_live_since;
 
 notify pgrst, 'reload schema';
