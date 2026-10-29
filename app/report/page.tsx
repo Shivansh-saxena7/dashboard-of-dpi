@@ -7,6 +7,7 @@ import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import EmployeeTabBar from "@/components/EmployeeTabBar";
 import WorkReportView from "@/components/WorkReportView";
+import MyCallQuality from "@/components/MyCallQuality";
 import { todayKey } from "@/lib/leaderboardWeek";
 
 // Employee's own "My Report" tab (Point 4, 2026-08-19 live-production
@@ -107,6 +108,9 @@ export default function MyReportPage() {
             whatsappGroupLabel={whatsappGroupLabel}
             canTakeAction
           />
+          <div className="mt-3">
+            <MyCallQuality employeeId={employee.id} />
+          </div>
         </div>
       )}
       <Footer />

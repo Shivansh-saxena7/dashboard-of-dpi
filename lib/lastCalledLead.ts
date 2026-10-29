@@ -59,6 +59,47 @@ export function scrollToAndHighlightCard(domId: string) {
   }, 2000);
 }
 
+// Call Quality (2026-10-28) — "log what happened on this call" sheet. Same
+// sessionStorage pattern; checked on visibilitychange AND once the list has
+// loaded (a tab the browser reloaded while the dialer was open never fires
+// visibilitychange). 30 minutes = the default outcome window, after which
+// the server-side nudge takes over.
+const PENDING_OUTCOME_STORAGE_KEY = "pendingCallOutcome";
+export const PENDING_OUTCOME_MAX_AGE_MS = 30 * 60 * 1000;
+
+export function rememberPendingOutcome(leadId: string, clickId: string | null) {
+  try {
+    sessionStorage.setItem(PENDING_OUTCOME_STORAGE_KEY, JSON.stringify({ leadId, clickId, at: Date.now() }));
+  } catch {
+    // UX nicety only, same as above.
+  }
+}
+
+// One-time consume. Returns the lead id when a call was placed from this
+// tab within the window, otherwise null.
+export function consumePendingOutcome(): string | null {
+  try {
+    const raw = sessionStorage.getItem(PENDING_OUTCOME_STORAGE_KEY);
+    if (!raw) return null;
+    sessionStorage.removeItem(PENDING_OUTCOME_STORAGE_KEY);
+    return parsePendingOutcome(raw, Date.now());
+  } catch {
+    return null;
+  }
+}
+
+// Pure part, known-answer tested in scripts/check-call-quality.js.
+export function parsePendingOutcome(raw: string, now: number): string | null {
+  try {
+    const { leadId, at } = JSON.parse(raw);
+    if (typeof leadId !== "string" || typeof at !== "number") return null;
+    if (now - at < 0 || now - at > PENDING_OUTCOME_MAX_AGE_MS) return null;
+    return leadId;
+  } catch {
+    return null;
+  }
+}
+
 // Quick Dial (2026-09-23) — same sessionStorage/timestamp/try-catch
 // shape as rememberCalledCard/consumeRecentlyCalledCardId above (one
 // module, one family of "remember something before a tel: link

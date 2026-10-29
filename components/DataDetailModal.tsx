@@ -4,6 +4,10 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { X, Phone, Loader2, Send, MessageCircle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { logCallClick } from "@/lib/logCallClick";
+import { logLeadUpdate } from "@/lib/logLeadUpdate";
+import type { ContactMethod } from "@/lib/callQuality";
+import HowDidYouTalk from "@/components/HowDidYouTalk";
 import toast from "react-hot-toast";
 import { getValidNextLeadStatuses, LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
@@ -69,6 +73,8 @@ export default function DataDetailModal({ lead, onClose, onUpdated, onBoardStage
   const [notes, setNotes] = useState<LeadNote[]>([]);
   const [loadingNotes, setLoadingNotes] = useState(true);
   const [selectedStatus, setSelectedStatus] = useState<LeadStatus | null>(null);
+  // Call Quality "How did you talk?" (2026-10-29), sent with the status.
+  const [contactMethod, setContactMethod] = useState<ContactMethod>("CRM_CALL");
   const [noteText, setNoteText] = useState("");
   const [reminderValue, setReminderValue] = useState("");
   const [reminderUnit, setReminderUnit] = useState<"hours" | "days" | "months">("days");
@@ -99,11 +105,7 @@ export default function DataDetailModal({ lead, onClose, onUpdated, onBoardStage
   }
 
   function handleCallClick() {
-    supabase
-      .rpc("log_call_click_atomic", { p_lead_history_id: lead.leadHistoryId })
-      .then(({ error }) => {
-        if (error) console.error("log_call_click_atomic failed:", error.message);
-      });
+    logCallClick(lead.leadHistoryId, lead.id);
   }
 
   function handleWhatsAppClick() {
@@ -212,14 +214,14 @@ export default function DataDetailModal({ lead, onClose, onUpdated, onBoardStage
 
     try {
 
-      const { error } = await supabase.rpc("log_lead_update_atomic", {
+      const { error } = await logLeadUpdate({
         p_lead_id: lead.id,
         p_lead_history_id: lead.leadHistoryId,
         p_new_status: selectedStatus,
         p_note: noteText.trim() || null,
         p_reminder_value: reminderValue ? parseInt(reminderValue, 10) : null,
         p_reminder_unit: reminderValue ? reminderUnit : null
-      });
+      }, contactMethod);
 
       if (error) {
         toast.error(error.message || "Could not log this update.");
@@ -237,6 +239,7 @@ export default function DataDetailModal({ lead, onClose, onUpdated, onBoardStage
       setReminderValue("");
       setReminderUnit("days");
       setSelectedStatus(null);
+      setContactMethod("CRM_CALL");
       loadNotes();
 
     } catch (err) {
@@ -433,6 +436,8 @@ export default function DataDetailModal({ lead, onClose, onUpdated, onBoardStage
                   </button>
                 ))}
               </div>
+
+              {selectedStatus && <HowDidYouTalk value={contactMethod} onChange={setContactMethod} />}
 
               <textarea
                 value={noteText}
