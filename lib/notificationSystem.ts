@@ -107,8 +107,8 @@ const NOTIFICATION_TYPES: Record<string, { label: string; icon: string; group: N
   PROJECT_RULE_STALE: { label: "Project Rule Alert", icon: "📐", group: "SLA" },
   STATUS_UPDATE_NO_CONTACT_CLICK: { label: "Status Updated Without a Call", icon: "📵", group: "SLA" },
   // Call Quality (2026-10-28) — send_call_outcome_nudges / send_call_quality_daily_summary
-  CALL_OUTCOME_MISSING: { label: "Outcome Not Logged", icon: "📞", group: "SLA" },
-  CALL_QUALITY_DAILY: { label: "Today's Call Summary", icon: "📊", group: "PEOPLE" },
+  CALL_OUTCOME_MISSING: { label: "No Result Saved", icon: "📞", group: "SLA" },
+  CALL_QUALITY_DAILY: { label: "Today's Calls", icon: "📊", group: "PEOPLE" },
   // Junk / recycle — slate
   LEAD_JUNKED: { label: "Lead Junked", icon: "♻️", group: "JUNK" },
   // Visits — teal

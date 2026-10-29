@@ -1,28 +1,27 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Info } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { useState } from "react";
+import { ChevronDown, Info } from "lucide-react";
 import {
-  CallQualityDetailRow,
+  CallQualityRow,
   CallQualitySettings,
   CallQualityTotals,
   FLAG_CHIPS,
-  flagMeta,
-  formatClock,
-  formatScore,
+  bandClasses,
+  bandMeaning,
+  bandOf,
+  flagMetaFor,
   scoreExplanation,
-  scoreTone
+  scoreText,
+  timelineLine
 } from "@/lib/callQuality";
 
-// Small shared pieces of the Call Quality UI (2026-10-28), used by the Admin
-// overview (CallQualityOverview) and the employee's own panel (MyCallQuality).
+// Shared pieces of the Call Quality UI (2026-10-28, plain-language 2026-10-29), used by the Admin
+// overview, the Dispute view and the employee's own panel — one wording for everyone.
 
-export function FlagChip({ flag, count, active, onClick }: { flag: string; count?: number; active?: boolean; onClick?: () => void }) {
-  const meta = flagMeta(flag);
-  const cls = `inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border ${meta.chipClass} ${
-    active ? "ring-2 ring-offset-1 ring-amber-400" : ""
-  }`;
+export function FlagChip({ flag, settings, count, active, onClick }: { flag: string; settings: CallQualitySettings; count?: number; active?: boolean; onClick?: () => void }) {
+  const meta = flagMetaFor(flag, settings);
+  const cls = `inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full border ${meta.chipClass} ${active ? "ring-2 ring-offset-1 ring-amber-400" : ""}`;
   const body = (
     <>
       {meta.label}
@@ -30,55 +29,80 @@ export function FlagChip({ flag, count, active, onClick }: { flag: string; count
     </>
   );
   return onClick ? (
-    <button type="button" title={meta.hint} onClick={onClick} className={cls}>
+    <button type="button" title={meta.what} onClick={onClick} className={cls}>
       {body}
     </button>
   ) : (
-    <span title={meta.hint} className={cls}>
+    <span title={meta.what} className={cls}>
       {body}
     </span>
   );
 }
 
-export function FlagChipRow({ totals, active, onPick }: { totals: CallQualityTotals; active?: string | null; onPick?: (flag: string | null) => void }) {
+export function FlagChipRow({ totals, settings }: { totals: CallQualityTotals; settings: CallQualitySettings }) {
   const shown = FLAG_CHIPS.filter((c) => (totals.flags[c.key] ?? 0) > 0);
-  if (shown.length === 0) return <span className="text-xs text-emerald-600 font-semibold">No flags</span>;
+  if (shown.length === 0) return <span className="text-xs text-emerald-600 font-semibold">Nothing flagged</span>;
   return (
     <div className="flex flex-wrap gap-1">
       {shown.map((c) => (
-        <FlagChip
-          key={c.key}
-          flag={c.flag}
-          count={totals.flags[c.key]}
-          active={active === c.flag}
-          onClick={onPick ? () => onPick(active === c.flag ? null : c.flag) : undefined}
-        />
+        <FlagChip key={c.key} flag={c.flag} settings={settings} count={totals.flags[c.key]} />
       ))}
     </div>
   );
 }
 
-export function ScoreBadge({ score, size = "md" }: { score: number | null; size?: "md" | "lg" }) {
+// Traffic light: dot + score + band word (+ one-line meaning when `explain`).
+export function ScoreLight({ score, settings, explain = false, label }: { score: number | null; settings: CallQualitySettings; explain?: boolean; label?: string }) {
+  const band = bandOf(score);
+  const c = bandClasses(band);
   return (
-    <span className={`font-extrabold tabular-nums ${scoreTone(score)} ${size === "lg" ? "text-3xl" : "text-lg"}`} title={score === null ? "Not enough judged calls yet" : undefined}>
-      {formatScore(score)}
+    <div>
+      {label && <p className="text-xs font-semibold text-slate-500">{label}</p>}
+      <div className="flex items-center gap-2">
+        <span className={`inline-block w-3 h-3 rounded-full ${c.dot}`} />
+        <span className={`text-2xl font-extrabold tabular-nums ${c.text}`}>{scoreText(score)}</span>
+        <span className={`text-sm font-bold ${c.text}`}>{band ?? "Not enough data yet"}</span>
+      </div>
+      {explain && <p className="text-sm text-slate-600 mt-0.5">{bandMeaning(band, settings)}</p>}
+    </div>
+  );
+}
+
+export function SmallScore({ score }: { score: number | null }) {
+  const band = bandOf(score);
+  const c = bandClasses(band);
+  return (
+    <span className={`inline-flex items-center gap-1 font-bold tabular-nums ${c.text}`} title={band ?? "Not enough data yet"}>
+      <span className={`inline-block w-2 h-2 rounded-full ${c.dot}`} />
+      {scoreText(score)}
     </span>
   );
 }
 
 export function StatusNotes({ estimated, enforced }: { estimated: boolean; enforced: boolean }) {
+  if (enforced && !estimated) return null;
   return (
     <div className="flex flex-wrap gap-1.5">
       {!enforced && (
-        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">
-          Learning week — the score is not used for evaluation yet
-        </span>
+        <span className="text-xs font-semibold px-2 py-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200">Learning week: no action is taken on this score</span>
       )}
       {estimated && (
-        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
-          Estimated — includes days before Call Quality went live
-        </span>
+        <span className="text-xs font-semibold px-2 py-1 rounded-full bg-slate-100 text-slate-600 border border-slate-200">Estimated: some days are from before this started</span>
       )}
+    </div>
+  );
+}
+
+export function Collapsible({ title, children, defaultOpen = false, tone = "plain" }: { title: React.ReactNode; children: React.ReactNode; defaultOpen?: boolean; tone?: "plain" | "red" | "grey" }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const border = tone === "red" ? "border-red-200" : tone === "grey" ? "border-slate-200" : "border-slate-100";
+  return (
+    <div className={`rounded-2xl border ${border} bg-white`}>
+      <button type="button" onClick={() => setOpen((v) => !v)} className="w-full flex items-center justify-between gap-2 p-3 text-left">
+        <span className="text-[15px] font-semibold text-slate-800">{title}</span>
+        <ChevronDown size={18} className={`shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && <div className="px-3 pb-3">{children}</div>}
     </div>
   );
 }
@@ -87,11 +111,11 @@ export function HowCalculated({ settings }: { settings: CallQualitySettings }) {
   const [open, setOpen] = useState(false);
   return (
     <div>
-      <button type="button" onClick={() => setOpen((v) => !v)} className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-700">
-        <Info size={13} /> How is this calculated?
+      <button type="button" onClick={() => setOpen((v) => !v)} className="inline-flex items-center gap-1 text-sm font-semibold text-slate-500 hover:text-slate-700">
+        <Info size={14} /> How is this calculated?
       </button>
       {open && (
-        <ul className="mt-2 space-y-1.5 text-xs text-slate-600 list-disc pl-4">
+        <ul className="mt-2 space-y-1.5 text-sm text-slate-600 list-disc pl-5">
           {scoreExplanation(settings).map((line, i) => (
             <li key={i}>{line}</li>
           ))}
@@ -101,100 +125,53 @@ export function HowCalculated({ settings }: { settings: CallQualitySettings }) {
   );
 }
 
-// Per-day score bars (oldest left). Days without enough judged calls show as a grey stub.
+// Per-day score bars (oldest left); grey stub = no dials or nothing counted yet.
 export function TrendBars({ days }: { days: (CallQualityTotals & { date: string })[] }) {
-  if (days.length === 0) return <span className="text-xs text-slate-400">No calls in this range.</span>;
+  if (days.length === 0) return <span className="text-xs text-slate-400">No dials</span>;
   return (
-    <div className="flex items-end gap-0.5 h-10" aria-label="Daily genuine score">
+    <div className="flex items-end gap-0.5 h-10" aria-label="Daily score">
       {days.map((d) => {
         const s = d.genuine_score;
-        const h = s === null ? 8 : Math.max(8, Math.round((s / 100) * 40));
-        const color = s === null ? "bg-slate-200" : s >= 80 ? "bg-emerald-400" : s >= 60 ? "bg-amber-400" : "bg-red-400";
-        return <div key={d.date} title={`${d.date}: ${formatScore(s)} · ${d.dial_clicks} dial clicks`} className={`w-2 rounded-sm ${color}`} style={{ height: h }} />;
+        const h = s === null ? 6 : Math.max(6, Math.round((s / 100) * 40));
+        const dot = bandClasses(bandOf(s)).dot;
+        return <div key={d.date} title={`${d.date}: ${scoreText(s)} · ${d.dial_clicks} dials`} className={`w-2 rounded-sm ${dot}`} style={{ height: h }} />;
       })}
     </div>
   );
 }
 
-// Drill-down: every call click (and every outcome without a click) for one employee.
-export function CallQualityDetails({ employeeId, from, to, onlyFlagged = false }: { employeeId: string; from: string; to: string; onlyFlagged?: boolean }) {
-  // Result is kept with the request it answers, so a changed range shows "Loading" instead of stale rows.
-  const requestKey = `${employeeId}|${from}|${to}`;
-  const [result, setResult] = useState<{ key: string; rows: CallQualityDetailRow[] | null; error: string | null } | null>(null);
-  const [flagFilter, setFlagFilter] = useState<string | null>(null);
+const STATUS_STYLE = {
+  ok: { mark: "✓", cls: "text-emerald-600" },
+  bad: { mark: "!", cls: "text-red-600" },
+  info: { mark: "•", cls: "text-slate-400" },
+  waiting: { mark: "…", cls: "text-slate-400" }
+};
 
-  useEffect(() => {
-    let cancelled = false;
-    supabase.rpc("get_call_quality_details", { p_employee_id: employeeId, p_from: from, p_to: to }).then(({ data, error }) => {
-      if (cancelled) return;
-      setResult({ key: requestKey, rows: error ? null : ((data as CallQualityDetailRow[]) ?? []), error: error ? error.message : null });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [requestKey, employeeId, from, to]);
-
-  if (!result || result.key !== requestKey) return <p className="text-sm text-slate-400">Loading calls...</p>;
-  if (result.error || !result.rows) return <p className="text-sm text-red-600">Could not load the call list: {result.error}</p>;
-  const rows = result.rows;
-
-  const scoreFlags = (r: CallQualityDetailRow) => r.flags.filter((f) => flagMeta(f).affectsScore);
-  let shown = onlyFlagged ? rows.filter((r) => scoreFlags(r).length > 0) : rows;
-  if (flagFilter) shown = shown.filter((r) => r.flags.includes(flagFilter as never));
-  const present = Array.from(new Set(rows.flatMap((r) => r.flags)));
-
+// "My day" / Dispute / admin drill-down: one line per dial, oldest first.
+export function Timeline({ rows, settings, showLowersScore = false }: { rows: CallQualityRow[]; settings: CallQualitySettings; showLowersScore?: boolean }) {
+  if (rows.length === 0) return <p className="text-sm text-slate-400">No dials on this day.</p>;
   return (
-    <div className="space-y-2">
-      {present.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {present.map((f) => (
-            <FlagChip key={f} flag={f} active={flagFilter === f} onClick={() => setFlagFilter(flagFilter === f ? null : f)} />
-          ))}
-        </div>
-      )}
-      {shown.length === 0 ? (
-        <p className="text-sm text-slate-400">{onlyFlagged ? "No flagged calls in this range." : "No calls in this range."}</p>
-      ) : (
-        <div className="overflow-x-auto -mx-1">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-left text-slate-400">
-                <th className="px-1 py-1 font-semibold">Lead</th>
-                <th className="px-1 py-1 font-semibold">Click time</th>
-                <th className="px-1 py-1 font-semibold">Outcome</th>
-                <th className="px-1 py-1 font-semibold">Outcome time</th>
-                <th className="px-1 py-1 font-semibold text-right">Gap (s)</th>
-                <th className="px-1 py-1 font-semibold">Flags</th>
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map((r, i) => (
-                <tr key={r.click_id ?? `o-${i}`} className="border-t border-slate-50 align-top">
-                  <td className="px-1 py-1.5 max-w-[140px]">
-                    <p className="font-medium text-slate-700 truncate">{r.lead_name ?? "—"}</p>
-                    <p className="text-[10px] text-slate-400">
-                      {r.card_type ?? "LEAD"}
-                      {r.estimated ? " · Estimated" : ""}
-                      {r.pending ? " · Waiting for outcome" : ""}
-                    </p>
-                  </td>
-                  <td className="px-1 py-1.5 whitespace-nowrap text-slate-600">{r.kind === "CLICK" ? formatClock(r.clicked_at) : "No click"}</td>
-                  <td className="px-1 py-1.5 text-slate-700">{r.outcome ? r.outcome.replace(/_/g, " ") : "—"}</td>
-                  <td className="px-1 py-1.5 whitespace-nowrap text-slate-600">{formatClock(r.outcome_at)}</td>
-                  <td className="px-1 py-1.5 text-right tabular-nums text-slate-700">{r.gap_seconds ?? "—"}</td>
-                  <td className="px-1 py-1.5">
-                    <div className="flex flex-wrap gap-1">
-                      {r.flags.map((f) => (
-                        <FlagChip key={f} flag={f} />
-                      ))}
-                    </div>
-                  </td>
-                </tr>
+    <ol className="space-y-2">
+      {rows.map((row, i) => {
+        const line = timelineLine(row, settings);
+        const st = STATUS_STYLE[line.status];
+        return (
+          <li key={row.click_id ?? `n-${i}`} className="flex gap-2 text-[15px] leading-snug">
+            <span className="shrink-0 w-12 font-semibold tabular-nums text-slate-500">{line.time}</span>
+            <div className="min-w-0 flex-1">
+              <p className="text-slate-800">
+                {line.text} <span className={`font-bold ${st.cls}`}>{st.mark}</span>
+              </p>
+              {line.notes.map((n) => (
+                <p key={n.flag} className={`text-sm mt-0.5 ${n.lowersScore ? "text-red-600" : "text-slate-500"}`}>
+                  {n.text}
+                  {showLowersScore && <span className="font-semibold">{n.lowersScore ? " · lowers score" : " · context only"}</span>}
+                </p>
               ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
   );
 }

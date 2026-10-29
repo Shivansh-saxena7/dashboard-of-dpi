@@ -12,43 +12,43 @@ Makes the work report show which calls have a believable record. Built 2026-10-2
 
 `call_count` is unchanged everywhere (recycle, SLA and DataCard attempts depend on it).
 
-## Flags (DB views `call_quality_clicks`, `call_quality_flags`)
-| Flag | Rule (default) | Lowers score |
+## Flags (rules of 2026-10-29; DB functions `call_quality_click_rows` / `call_quality_outcome_rows`)
+One plain name for employees and admins alike.
+| Name (code) | Rule (default) | Lowers score |
 |---|---|---|
-| Quick outcome | outcome < 10 s after the tap | yes |
-| Click without outcome | nothing logged on the lead (status, board move, note, WhatsApp tap) within 30 min | yes |
-| Outcome without click | status with no Call/WhatsApp tap on that lead in the 60 min before | yes |
-| Rapid clicks | Call tap < 20 s after the previous Call tap | yes |
-| Burst | 8+ Call taps within 5 min | yes |
-| Repeat clicks | 4th+ dial of the same lead in a day | yes |
-| Outside office hours | outside SLA office hours or on the weekly off | no (context) |
-| No shift start | no Shift Start that day | no (context) |
-| Redial | same lead dialed again within 30 min with nothing logged in between | no, left out entirely |
+| No result saved (NO_RESULT) | no status / follow-up move / note / WhatsApp tap on the lead within 60 min (reminder at 30 min) | yes |
+| Result saved too fast (TOO_FAST) | Connected/Converted < 25 s after the tap | yes |
+| | Not interested < 10 s; any other status < 3 s | no (context) |
+| Many dials in a row (MANY_DIALS) | tap < 20 s after a tap that had no result yet, or 8+ taps in 5 min (Data cards 12+) with < 50% of them saved | yes |
+| Result without a dial (NO_DIAL) | status with no Call/WhatsApp tap in the 60 min before; "Customer called me / Called from another phone / WhatsApp call" never count | only on a day where it is 20%+ of that day's results |
+| Same lead dialed many times (REPEAT_DIALS) | 4th+ dial of one lead in a day | no |
+| Outside office hours / No shift start | as named | no |
+| Dialed again (REDIAL) | same lead dialed again within 60 min, nothing saved between | left out entirely |
 
-**Genuine score** = clean judged calls ÷ (judged calls + outcomes without a click). A call is judged once its
-30-min window has passed and it is not a redial. Below `call_quality_min_sample` (10) the score is not shown.
+**Score** = clean dials ÷ (counted dials + "result without a dial" on pattern days). Leads and Data cards are scored
+separately. Fewer than 30 dials in the period → "Not enough data yet". Green 80+, Amber 60–79, Red below 60.
+**"How did you talk?"** chip on the outcome sheet saves `lead_activity_log.contact_method` (server time = the row's
+`created_at`). Admin sees an info note when "Customer called me"/"another phone" is 20%+ of an employee's results.
 All thresholds are columns on `lead_engine_settings`, editable in Admin → Settings → Call Quality.
 
-Before go-live (`call_quality_live_since`) there are no stored links; the views match outcomes to clicks by time
-and every such number is labelled **Estimated**. No old row is updated.
-
 ## Where it shows
-- Admin → Work Reports: team table (7 / 30 days, Leads / Data split), score, Dial clicks / Logged calls / Connected,
-  flag chips, daily trend; a row opens the call-by-call list with times, gap and flags. "How is this calculated?"
-- Employee → My Report: own score (Today / 7 days), own flags with exact times, tips. Own data only.
-- Work report (both): a strip with Dial clicks / Logged calls / Connected / Genuine score. Old tiles unchanged.
-- Back from a call, the lead's detail opens so the outcome can be logged.
-- In-app: "You dialed <lead> N minutes ago and have not logged an outcome." (every 5 min, 10:30–20:25 IST,
-  once per click, grouped when more than 3) and a day-end summary at 18:45 IST.
+- Admin → Work Reports: team table (7 / 30 days): Leads score, Data score, Dials, Results saved, Connected, flag chips,
+  info notes, daily trend. A row opens that employee's day, dial by dial, with the reason for every flag, and
+  "Open dispute view" → `/admin/work-reports/dispute?employee=…&date=…` (printable).
+- Employee → My Report: first-time 4-step intro, "Why does the CRM show this?", traffic-light score (7 days),
+  "What needs attention" cards (what / why / your example / how to fix), "My day" (any of the last 7 days), FAQ.
+- Work report strip (both) and one extra WhatsApp line "Dials 20 | Results saved 18 | Score 90 (Green)" (setting).
+- Back from a call, the lead's detail opens; reminder after 30 min; day-end summary 18:45 IST.
 
 ## Rollout switches
 - `call_quality_visible_to_employees` (default ON): employee panel, work-report strip for employees, nudges and the
   day-end summary. OFF hides all of them; Admin still sees everything.
+- `call_quality_share_line` (default ON): the extra WhatsApp line.
 - `call_quality_enforced` (default OFF): only a label today ("Learning week — the score is not used for evaluation
   yet"). Nothing is blocked by Call Quality in Phase 1.
 
 ## Files
-- SQL: `supabase/sql/2026-10-28_call_quality.sql` (apply), `_rollback.sql`, `_tests.sql` (35 known answers, dry-run only).
+- SQL: `supabase/sql/2026-10-28_call_quality.sql` (apply), `_rollback.sql`, `_tests.sql` (47 known answers, dry-run only).
 - App: `lib/callQuality.ts`, `lib/logCallClick.ts` (the one owner of the Call-click RPC), `lib/usePendingOutcomeSheet.ts`,
   `components/CallQuality*.tsx`, `components/MyCallQuality.tsx`.
 - Build check: `scripts/check-call-quality.js` (in prebuild).
@@ -74,7 +74,8 @@ Recommended: send the notice → deploy the app → apply the SQL after 18:45 IS
 >
 > **What you will see:** on My Report, your score, your Dial clicks, Logged calls and Connected calls, and any flags
 > with their exact times. When you come back from a call, the lead opens so you can log the outcome. If you dial and
-> do not log anything for 30 minutes, the CRM reminds you.
+> do not save anything for 30 minutes, the CRM reminds you. If the customer called you or you used another phone,
+> pick that under "How did you talk?" when you save the result.
 >
 > **The first week is a learning week:** the score is not used for evaluation. Use it to build the habit: dial from
 > the CRM, log every outcome right after the call. A dropped call that you redial never counts against you.

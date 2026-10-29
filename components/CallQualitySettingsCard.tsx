@@ -10,27 +10,34 @@ import { supabase } from "@/lib/supabase";
 // range-checked by a DB constraint). Office hours are not here: Call Quality
 // reuses the SLA office hours card above.
 const FIELDS: { key: string; column: string; label: string; unit: string }[] = [
-  { key: "quick_outcome_seconds", column: "quick_outcome_seconds", label: "Quick outcome under", unit: "seconds" },
-  { key: "rapid_click_seconds", column: "rapid_click_seconds", label: "Rapid click under", unit: "seconds" },
-  { key: "outcome_window_minutes", column: "outcome_window_minutes", label: "Outcome window", unit: "minutes" },
-  { key: "outcome_link_minutes", column: "outcome_link_minutes", label: "Link outcome to a click within", unit: "minutes" },
-  { key: "burst_min_clicks", column: "burst_min_clicks", label: "Burst: clicks", unit: "or more" },
-  { key: "burst_window_minutes", column: "burst_window_minutes", label: "Burst: within", unit: "minutes" },
-  { key: "repeat_clicks_per_day", column: "repeat_clicks_per_day", label: "Repeat clicks: dial number", unit: "or more, same lead, same day" },
-  { key: "min_sample", column: "call_quality_min_sample", label: "Show score after", unit: "judged calls" }
+  { key: "outcome_link_minutes", column: "outcome_link_minutes", label: "\"No result saved\" after", unit: "minutes" },
+  { key: "reminder_after_minutes", column: "reminder_after_minutes", label: "Reminder to the employee after", unit: "minutes" },
+  { key: "quick_connected_seconds", column: "quick_connected_seconds", label: "\"Connected\" saved faster than", unit: "seconds (lowers score)" },
+  { key: "quick_not_interested_seconds", column: "quick_not_interested_seconds", label: "\"Not interested\" saved faster than", unit: "seconds (context only)" },
+  { key: "outcome_floor_seconds", column: "outcome_floor_seconds", label: "Any other result saved faster than", unit: "seconds (context only)" },
+  { key: "rapid_click_seconds", column: "rapid_click_seconds", label: "Many dials: next dial within", unit: "seconds, last one unsaved" },
+  { key: "burst_min_clicks", column: "burst_min_clicks", label: "Many dials: Lead cards", unit: "dials or more" },
+  { key: "burst_data_min_clicks", column: "burst_data_min_clicks", label: "Many dials: Data cards", unit: "dials or more" },
+  { key: "burst_window_minutes", column: "burst_window_minutes", label: "Many dials: within", unit: "minutes" },
+  { key: "burst_result_share_pct", column: "burst_result_share_pct", label: "Many dials: fewer saved than", unit: "%" },
+  { key: "repeat_clicks_per_day", column: "repeat_clicks_per_day", label: "Same lead dialed", unit: "times or more a day (context only)" },
+  { key: "no_dial_share_pct", column: "no_dial_share_pct", label: "\"Result without a dial\" lowers score from", unit: "% of a day's results" },
+  { key: "declared_other_share_pct", column: "declared_other_share_pct", label: "Show \"Customer called / another phone\" note from", unit: "% of results" },
+  { key: "score_min_clicks", column: "score_min_clicks", label: "Show a score after", unit: "dials in the period" }
 ];
 
 export default function CallQualitySettingsCard() {
   const [values, setValues] = useState<Record<string, string>>({});
   const [visible, setVisible] = useState(true);
   const [enforced, setEnforced] = useState(false);
+  const [shareLineOn, setShareLineOn] = useState(true);
   const [available, setAvailable] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     supabase
       .from("lead_engine_settings")
-      .select(FIELDS.map((f) => f.column).join(", ") + ", call_quality_visible_to_employees, call_quality_enforced")
+      .select(FIELDS.map((f) => f.column).join(", ") + ", call_quality_visible_to_employees, call_quality_enforced, call_quality_share_line")
       .eq("id", 1)
       .single()
       .then(({ data, error }) => {
@@ -42,16 +49,17 @@ export default function CallQualitySettingsCard() {
         setValues(Object.fromEntries(FIELDS.map((f) => [f.key, String(row[f.column] ?? "")])));
         setVisible(Boolean(row.call_quality_visible_to_employees));
         setEnforced(Boolean(row.call_quality_enforced));
+        setShareLineOn(Boolean(row.call_quality_share_line));
         setAvailable(true);
       });
   }, []);
 
   async function save() {
-    const payload: Record<string, number | boolean> = { visible_to_employees: visible, enforced };
+    const payload: Record<string, number | boolean> = { visible_to_employees: visible, enforced, share_line: shareLineOn };
     for (const f of FIELDS) {
       const n = Number(values[f.key]);
-      if (!Number.isInteger(n) || n <= 0) {
-        toast.error(`${f.label} must be a whole number greater than 0.`);
+      if (!Number.isInteger(n) || n < 0) {
+        toast.error(`${f.label}: enter a whole number.`);
         return;
       }
       payload[f.key] = n;
@@ -79,7 +87,7 @@ export default function CallQualitySettingsCard() {
                 <div className="flex items-center gap-2">
                   <input
                     type="number"
-                    min={1}
+                    min={0}
                     value={values[f.key] ?? ""}
                     onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
                     className="w-24 h-11 rounded-xl bg-slate-50 border border-slate-200 px-3 text-sm outline-none focus:ring-2 focus:ring-amber-200"
@@ -96,6 +104,10 @@ export default function CallQualitySettingsCard() {
           <label className="flex items-center gap-2 text-sm text-slate-700">
             <input type="checkbox" checked={enforced} onChange={(e) => setEnforced(e.target.checked)} />
             Use the score for evaluation (off = learning week label everywhere)
+          </label>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={shareLineOn} onChange={(e) => setShareLineOn(e.target.checked)} />
+            Add the line &quot;Dials | Results saved | Score&quot; to the WhatsApp work report
           </label>
           <button onClick={save} disabled={saving} className="w-full h-12 rounded-2xl text-white font-semibold bg-gradient-to-r from-blue-600 to-cyan-500 disabled:opacity-60">
             {saving ? "Saving..." : "Save Call Quality Settings"}

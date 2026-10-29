@@ -21,6 +21,9 @@ export interface WorkReportSummary {
   bookings: number;
   personalLeads: number;
   stuckLeads: number;
+  // Call Quality (2026-10-29): optional last line, e.g. "Dials 20 | Results saved 18 | Score 90 (Green)".
+  // Only passed when the DB returned it and the share-line setting is on; otherwise the message is unchanged.
+  callQualityLine?: string | null;
 }
 
 export function buildWorkReportMessage(report: WorkReportSummary): string {
@@ -42,6 +45,7 @@ export function buildWorkReportMessage(report: WorkReportSummary): string {
     `🏠 Visits: ${report.visits}`,
     `🎉 Bookings: ${report.bookings}`,
     `📱 Personal Numbers: ${report.personalLeads}`,
-    `⚠️ Not Connected, No Follow-up: ${report.stuckLeads}`
+    `⚠️ Not Connected, No Follow-up: ${report.stuckLeads}`,
+    ...(report.callQualityLine ? [`📈 ${report.callQualityLine}`] : [])
   ].join("\n");
 }
