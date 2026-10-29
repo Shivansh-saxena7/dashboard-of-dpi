@@ -13,6 +13,7 @@ import { isWithinRecycleHours } from "../../../lib/recycleHours.ts";
 import { buildPreviousOwnerEndTimes, pickRecycleOwner } from "../../../lib/pickRecycleOwner.ts";
 import { autoJunkDecision, autoRecycleEnabled, DEFAULT_MAX_AUTO_JUNK_PER_SWEEP } from "../../../lib/autoJunkGuard.ts";
 import { buildHolderIndex, decideSiblingGuard, guardMode, type PositiveHolder } from "../../../lib/recycleSiblingGuard.ts";
+import { reminderHoldMaxDays, reminderHoldMode } from "../../../lib/reminderHold.ts";
 
 // Minutes after sla_office_end_time that recycled leads may still be
 // handed out (Option A Phase 1, 2026-10-08). 0 = none.
@@ -608,6 +609,42 @@ serve(withMonitoring("recycle-stale-leads", async () => {
       notInterestedAssignedAtByLead.set(row.lead_id, list);
     }
 
+    // Reminder hold (G5 fix, 2026-10-29) — see lib/reminderHold.ts. The latest
+    // follow-up reminder per assignment, loaded once per sweep. "off" (also when
+    // the setting does not exist yet) loads nothing and changes nothing; "shadow"
+    // only records what it would have done; "enforce" moves the inactivity clock.
+    const holdMode = reminderHoldMode(settings.reminder_hold_mode);
+    const holdMaxDays = reminderHoldMaxDays(settings.reminder_hold_max_days);
+    const latestReminderByHistory = new Map<string, string>();
+    const reminderHoldEvents: Record<string, unknown>[] = [];
+    if (holdMode !== "off") {
+      const since = new Date(Date.now() - (holdMaxDays + 30) * 24 * 60 * 60 * 1000).toISOString();
+      const { data: reminderRows, error: reminderError } = await fetchAllRows(
+        () =>
+          supabase
+            .from("lead_notes")
+            .select("lead_history_id, reminder_at", { count: "exact" })
+            .not("reminder_at", "is", null)
+            .gte("reminder_at", since)
+            .order("id"),
+        { anomalyContext: { supabase, source: "recycle-stale-leads:reminders" } }
+      );
+      if (reminderError) {
+        await logAnomaly(supabase, {
+          source: "reminder_hold",
+          severity: "warning",
+          message: `Reminder hold skipped this sweep: reminders could not be loaded (${reminderError.message})`,
+          context: { mode: holdMode }
+        });
+      } else {
+        for (const row of reminderRows || []) {
+          if (!row.lead_history_id || !row.reminder_at) continue;
+          const prev = latestReminderByHistory.get(row.lead_history_id);
+          if (!prev || Date.parse(row.reminder_at) > Date.parse(prev)) latestReminderByHistory.set(row.lead_history_id, row.reminder_at);
+        }
+      }
+    }
+
     // Previous owners (2026-10-09) — every ended assignment of a lead still
     // in this sweep, fetched once, so a recycle never hands a lead back to
     // someone who already owned it (see lib/pickRecycleOwner.ts). If this
@@ -844,8 +881,10 @@ serve(withMonitoring("recycle-stale-leads", async () => {
         (assignedAtMs) => unjunkedAtMs === null || assignedAtMs > unjunkedAtMs
       ).length;
 
-      const slaStatus = calculateSLAStatus(
+      // slaFor(null) is exactly the old call; slaFor(hold) adds the reminder hold.
+      const slaFor = (hold: { next_reminder_at: string; reminder_hold_max_days: number } | null) => calculateSLAStatus(
         {
+          ...(hold ?? {}),
           status: lead.status,
           sla_deadline: lead.sla_deadline,
           recycle_count: lead.recycle_count,
@@ -880,6 +919,31 @@ serve(withMonitoring("recycle-stale-leads", async () => {
         // master switch is ON (Follow-up inactivity clock only).
         workingCalendar
       );
+
+      // Reminder hold (G5 fix): only "enforce" uses the held status; any lead
+      // the hold would save is recorded (once a day) in lead_guard_events.
+      const reminderAt = holdMode !== "off" ? latestReminderByHistory.get(activeHistory.id) ?? null : null;
+      const slaStatusPlain = slaFor(null);
+      const slaStatusHeld = reminderAt ? slaFor({ next_reminder_at: reminderAt, reminder_hold_max_days: holdMaxDays }) : slaStatusPlain;
+      const slaStatus = holdMode === "enforce" ? slaStatusHeld : slaStatusPlain;
+      if (
+        slaStatusHeld !== slaStatusPlain &&
+        (slaStatusPlain === "JUNK_ELIGIBLE" || slaStatusPlain === "FOLLOWUP_INACTIVITY_RECYCLE_READY")
+      ) {
+        reminderHoldEvents.push({
+          leadId: lead.id,
+          leadHistoryId: activeHistory.id,
+          leadOwner: lead.current_owner_id,
+          project: lead.project,
+          mode: holdMode,
+          message: holdMode === "enforce" ? "REMINDER_HOLD skipped" : "REMINDER_HOLD would skip",
+          would: slaStatusPlain === "JUNK_ELIGIBLE" ? "junk" : "recycle",
+          statusWithout: slaStatusPlain,
+          statusWith: slaStatusHeld,
+          reminderAt,
+          lastActivityAt: activeHistory.last_activity_at
+        });
+      }
 
       if (slaStatus === "JUNK_ELIGIBLE") {
 
@@ -1419,6 +1483,43 @@ serve(withMonitoring("recycle-stale-leads", async () => {
           message: `Could not record ${siblingGuardEvents.length} guard decision(s): ${guardLogError.message}`,
           context: { mode: siblingGuardMode }
         });
+      }
+    }
+
+    // Reminder hold (G5 fix): one lead_guard_events row per lead per day (the
+    // sweep runs every 15 minutes, the decision rarely changes within a day).
+    // Failure here never affects the sweep.
+    if (reminderHoldEvents.length > 0) {
+      const ids = reminderHoldEvents.map((e) => e.leadId as string);
+      const { data: recentHolds } = await supabase
+        .from("lead_guard_events")
+        .select("lead_id")
+        .eq("source", "reminder_hold")
+        .in("lead_id", ids)
+        .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+        .limit(1000);
+      const alreadyLogged = new Set((recentHolds || []).map((r: { lead_id: string }) => r.lead_id));
+      const fresh = reminderHoldEvents.filter((e) => !alreadyLogged.has(e.leadId as string));
+      if (fresh.length > 0) {
+        const { error: holdLogError } = await supabase.from("lead_guard_events").insert(
+          fresh.map((e) => ({
+            source: "reminder_hold",
+            action: "REMINDER_HOLD",
+            lead_id: e.leadId,
+            lead_owner_id: e.leadOwner ?? null,
+            project: e.project ?? null,
+            mode: holdMode,
+            detail: e
+          }))
+        );
+        if (holdLogError) {
+          await logAnomaly(supabase, {
+            source: "reminder_hold_log",
+            severity: "warning",
+            message: `Could not record ${fresh.length} reminder-hold decision(s): ${holdLogError.message}`,
+            context: { mode: holdMode }
+          });
+        }
       }
     }
 

@@ -28,6 +28,7 @@ function loadLib(file) {
 }
 const { workingAdd, workingElapsedMs, nonWorkingStatusAt, loadJobWorkingCalendar, isNotificationWindowOpen, timerMsUntil, timersPausedDisplay, formatPauseUntil, shiftStartBlock, DAY_MS } = loadLib("workingCalendar.ts");
 const { calculateSLAStatus, getRecycleCutoff } = loadLib("calculateSLAStatus.ts");
+const { reminderHoldActivityAt, reminderHoldMode, reminderHoldMaxDays } = loadLib("reminderHold.ts");
 const { recyclingTomorrowCutoff } = loadLib("recyclingTomorrow.ts");
 const { isWithinRecycleHours } = loadLib("recycleHours.ts");
 const { buildPreviousOwnerEndTimes, pickRecycleOwner } = loadLib("pickRecycleOwner.ts");
@@ -84,6 +85,12 @@ const monAct = ist("2026-10-12T17:00");
 // Deterministic "now"-relative calendars: no weekly off, one non-working day.
 const dayOffAgo = (fromDays, toDays) => ({ weeklyOffDay: null, timersEnabled: true, ranges: [{ id: null, startsAt: now - fromDays * DAY_MS, endsAt: now - toDays * DAY_MS, kind: "HOLIDAY", reason: "TEST" }] });
 const sla = (lead, cal, onLeave = false) => calculateSLAStatus(lead, null, 0, onLeave, false, cal);
+// Follow-up lead idle `idleDays`, owner reminder `reminderInDays` from now (negative = in the past), hold enforced.
+const held = (idleDays, reminderInDays) => ({
+  ...followup(now - idleDays * DAY_MS),
+  next_reminder_at: new Date(now + reminderInDays * DAY_MS).toISOString(),
+  reminder_hold_max_days: 30
+});
 
 const cases = [
   ["T1 Mon 17:00 + 3 working days", workingAdd(tuesdayOff, ist("2026-10-12T17:00"), 3 * DAY_MS).getTime(), ist("2026-10-16T17:00")],
@@ -124,7 +131,24 @@ const cases = [
   ["S11 owner on leave still wins when ON", sla(followup(now - 10 * DAY_MS), dayOffAgo(3, 2), true), "FOLLOWUP_WITHIN_WINDOW"],
   ["S12 paused lead still PAUSED when ON", sla({ ...followup(now - 10 * DAY_MS), paused_until: new Date(now + DAY_MS).toISOString() }, tuesdayOff), "PAUSED"],
   ["S13 Recycling Tomorrow, OFF: due in 12h = flagged", recyclingTomorrowCutoff(followup(now - 5.5 * DAY_MS), null, 0, false, now, { ...dayOffAgo(5, 4), timersEnabled: false }) !== null, true],
-  ["S14 Recycling Tomorrow, ON: due in 36h = not flagged", recyclingTomorrowCutoff(followup(now - 5.5 * DAY_MS), null, 0, false, now, dayOffAgo(5, 4)) !== null, false]
+  ["S14 Recycling Tomorrow, ON: due in 36h = not flagged", recyclingTomorrowCutoff(followup(now - 5.5 * DAY_MS), null, 0, false, now, dayOffAgo(5, 4)) !== null, false],
+  // Reminder hold (G5 fix, 2026-10-29) — lib/reminderHold.ts; calendar off so the numbers are plain days.
+  ["R1 no reminder fields = exactly the old status", sla(followup(now - 10 * DAY_MS), null), "FOLLOWUP_INACTIVITY_RECYCLE_READY"],
+  ["R2 idle 10d, reminder in 5d = within window", sla(held(10, 5), null), "FOLLOWUP_WITHIN_WINDOW"],
+  ["R3 idle 10d, reminder yesterday = window runs from the reminder", sla(held(10, -1), null), "FOLLOWUP_WITHIN_WINDOW"],
+  ["R4 idle 10d, reminder 7d ago = recycle-ready again", sla(held(10, -7), null), "FOLLOWUP_INACTIVITY_RECYCLE_READY"],
+  ["R5 cap: idle 40d, reminder in 60d (max 30) = recycle-ready", sla(held(40, 60), null), "FOLLOWUP_INACTIVITY_RECYCLE_READY"],
+  ["R6 cap: idle 34d, reminder in 60d (max 30) = clock 4d old = warning", sla(held(34, 60), null), "FOLLOWUP_INACTIVITY_WARNING"],
+  ["R7 reminder older than last activity is ignored", sla(held(10, -12), null), "FOLLOWUP_INACTIVITY_RECYCLE_READY"],
+  ["R8 3rd recycle + reminder pending = not junk-eligible", sla({ ...held(10, 5), status: "NOT_CONNECTED", board_stage: "LEADS", recycle_count: 3 }, null), "FOLLOWUP_WITHIN_WINDOW"],
+  ["R9 3rd recycle, no reminder = junk-eligible as before", sla({ ...followup(now - 10 * DAY_MS), status: "NOT_CONNECTED", board_stage: "LEADS", recycle_count: 3 }, null), "JUNK_ELIGIBLE"],
+  ["R10 DATA lead unaffected by a reminder", sla({ ...held(10, 5), lead_type: "DATA", status: "NOT_CONNECTED", board_stage: "LEADS", call_count: 4 }, null), sla({ ...followup(now - 10 * DAY_MS), lead_type: "DATA", status: "NOT_CONNECTED", board_stage: "LEADS", call_count: 4 }, null)],
+  ["R11 cooldown status (no activity) unaffected", sla({ ...cooldown, next_reminder_at: new Date(now + 5 * DAY_MS).toISOString(), reminder_hold_max_days: 30 }, null), sla(cooldown, null)],
+  ["R12 cutoff follows the reminder: idle 10d, reminder in 5d = reminder + 6d", cutoffMs(held(10, 5), null), now + 11 * DAY_MS],
+  ["R13 cutoff, switch ON counts working days from the reminder", cutoffMs(held(10, 5), tuesdayOff), workingAdd(tuesdayOff, now + 5 * DAY_MS, 6 * DAY_MS).getTime()],
+  ["R14 helper: no reminder keeps last activity", reminderHoldActivityAt("2026-10-01T00:00:00.000Z", null, 30), "2026-10-01T00:00:00.000Z"],
+  ["R15 helper: cap at 30 days", reminderHoldActivityAt("2026-10-01T00:00:00.000Z", "2026-12-31T00:00:00.000Z", 30), "2026-10-31T00:00:00.000Z"],
+  ["R16 settings parsing", [reminderHoldMode("enforce"), reminderHoldMode("bogus"), reminderHoldMode(undefined), reminderHoldMaxDays(0), reminderHoldMaxDays("45")].join(","), "enforce,off,off,30,45"]
 ];
 
 // Background-job calendar load with a mocked failing RPC (2026-10-07):

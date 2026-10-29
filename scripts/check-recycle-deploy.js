@@ -23,12 +23,16 @@ const sla = read("lib/calculateSLAStatus.ts");
 if (!sla.includes("RECYCLE_DUE_STATUSES") || !sla.includes("function calculateBaseSLAStatus")) {
   problems.push("lib/calculateSLAStatus.ts has no max-recycles wrapper (3rd-recycle trap fix missing)");
 }
-for (const lib of ["lib/autoJunkGuard.ts", "lib/recycleSiblingGuard.ts", "lib/positiveLead.ts"]) {
+for (const lib of ["lib/autoJunkGuard.ts", "lib/recycleSiblingGuard.ts", "lib/positiveLead.ts", "lib/reminderHold.ts"]) {
   if (!fs.existsSync(path.join(root, lib))) problems.push(`${lib} is missing`);
 }
 const fn = read("supabase/functions/recycle-stale-leads/index.ts");
 for (const needle of ["autoJunkDecision(", "autoRecycleEnabled(", "decideSiblingGuard(", "../../../lib/calculateSLAStatus.ts"]) {
   if (!fn.includes(needle)) problems.push(`recycle-stale-leads/index.ts does not use ${needle}`);
+}
+// Reminder hold (2026-10-29): read from settings, held status only in "enforce", every saved lead logged.
+for (const needle of ["reminderHoldMode(settings.reminder_hold_mode)", "slaFor(null)", 'holdMode === "enforce" ? slaStatusHeld : slaStatusPlain', '"REMINDER_HOLD"']) {
+  if (!fn.includes(needle)) problems.push(`recycle-stale-leads/index.ts is missing the reminder hold piece: ${needle}`);
 }
 
 // Behaviour: the exact trap case from 2026-10-16.
@@ -49,6 +53,12 @@ if (problems.length === 0) {
   const trap = { status: "NEW", recycle_count: 3, lead_type: "LEAD", board_stage: "LEADS", sla_deadline: at(24), assigned_at: at(-0.25), last_activity_at: at(-0.25), call_count: 0 };
   const got = calculateSLAStatus(trap, null, 0, false, false, null);
   if (got === "JUNK_ELIGIBLE") problems.push("a lead 15 minutes after its 3rd recycle is JUNK_ELIGIBLE (the trap is back)");
+
+  // Reminder hold: without the two fields nothing changes (what "off" / "shadow" pass); with them a
+  // pending reminder keeps an idle follow-up lead (what "enforce" passes).
+  const idle = { status: "CONNECTED", recycle_count: 0, lead_type: "LEAD", board_stage: "FOLLOW_UP", sla_deadline: null, assigned_at: at(-24 * 11), last_activity_at: at(-24 * 10) };
+  if (calculateSLAStatus(idle, null, 0, false, false, null) !== "FOLLOWUP_INACTIVITY_RECYCLE_READY") problems.push("idle follow-up lead without reminder fields is no longer recycle-ready (shadow/off would change behaviour)");
+  if (calculateSLAStatus({ ...idle, next_reminder_at: at(24 * 5), reminder_hold_max_days: 30 }, null, 0, false, false, null) !== "FOLLOWUP_WITHIN_WINDOW") problems.push("a pending reminder does not hold the lead in enforce mode");
 }
 
 if (problems.length === 0) {
@@ -64,4 +74,4 @@ if (problems.length > 0) {
   for (const p of problems) console.error(`  - ${p}`);
   process.exit(1);
 }
-console.log("check-recycle-deploy: OK — trap fix, junk breaker and sibling guard present.");
+console.log("check-recycle-deploy: OK — trap fix, junk breaker, sibling guard and reminder hold present.");

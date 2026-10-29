@@ -5,6 +5,7 @@
 
 import { isLeadTerminal } from "./isLeadTerminal.ts";
 import { DAY_MS, timerCalendar, workingAdd, workingElapsedMs, type WorkingCalendar } from "./workingCalendar.ts";
+import { reminderHoldActivityAt } from "./reminderHold.ts";
 
 export type SLAStatus =
   | "WITHIN_SLA"
@@ -68,6 +69,11 @@ interface LeadForSLA {
   // any caller that doesn't have it handy behaves exactly like before
   // (never graduates early, same as pre-existing behavior).
   assigned_at?: string | null;
+  // Reminder hold (G5 fix, 2026-10-29) — see lib/reminderHold.ts. Only the
+  // recycle sweep passes these, and only when reminder_hold_mode is
+  // "enforce"; absent = exactly the old behavior for every caller.
+  next_reminder_at?: string | null;
+  reminder_hold_max_days?: number | null;
 }
 
 // Statuses at which the sweep would hand the lead to someone else.
@@ -288,7 +294,9 @@ function calculateBaseSLAStatus(
       return "FOLLOWUP_WITHIN_WINDOW";
     }
 
-    const lastActivity = lead.last_activity_at ? new Date(lead.last_activity_at) : null;
+    // Reminder hold: a pending follow-up reminder moves the clock's start (capped).
+    const clockStart = reminderHoldActivityAt(lead.last_activity_at, lead.next_reminder_at, lead.reminder_hold_max_days);
+    const lastActivity = clockStart ? new Date(clockStart) : null;
 
     if (!lastActivity) {
       // Shouldn't happen — last_activity_at defaults to now() at
@@ -424,15 +432,17 @@ export function getRecycleCutoff(
     lead.lead_type !== "DATA" &&
     ((lead.board_stage && lead.board_stage !== "LEADS") || lead.status === "CONNECTED" || hasGenuineActivitySinceAssignment)
   ) {
-    if (!lead.last_activity_at) return null;
+    // Same reminder hold as calculateSLAStatus, so the countdown always agrees with the sweep.
+    const clockStart = reminderHoldActivityAt(lead.last_activity_at, lead.next_reminder_at, lead.reminder_hold_max_days);
+    if (!clockStart) return null;
     const workingCal = timerCalendar(calendar);
     if (workingCal) {
       return {
-        cutoffAt: workingAdd(workingCal, lead.last_activity_at, FOLLOWUP_INACTIVITY_RECYCLE_DAYS * DAY_MS),
+        cutoffAt: workingAdd(workingCal, clockStart, FOLLOWUP_INACTIVITY_RECYCLE_DAYS * DAY_MS),
         reason: "FOLLOWUP_INACTIVITY"
       };
     }
-    const cutoffAt = new Date(lead.last_activity_at);
+    const cutoffAt = new Date(clockStart);
     cutoffAt.setDate(cutoffAt.getDate() + FOLLOWUP_INACTIVITY_RECYCLE_DAYS);
     return { cutoffAt, reason: "FOLLOWUP_INACTIVITY" };
   }
