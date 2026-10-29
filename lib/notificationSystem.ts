@@ -108,6 +108,8 @@ const NOTIFICATION_TYPES: Record<string, { label: string; icon: string; group: N
   STATUS_UPDATE_NO_CONTACT_CLICK: { label: "Status Updated Without a Call", icon: "📵", group: "SLA" },
   // Junk / recycle — slate
   LEAD_JUNKED: { label: "Lead Junked", icon: "♻️", group: "JUNK" },
+  // Positive-history junk restore (2026-10-29) — restore_positive_junk_leads
+  LEAD_RESTORED: { label: "Lead Given Back", icon: "🎯", group: "NEW_LEAD" },
   // Visits — teal
   VISIT_VERIFIED: { label: "Visit Verified", icon: "📍", group: "VISIT" },
   VISIT_DENIED: { label: "Visit Not Verified", icon: "📍", group: "VISIT" },
@@ -177,7 +179,9 @@ const CALL_ACTION_TYPES = new Set([
   "SLA_WARNING",
   "PAUSE_EXPIRY_WARNING",
   "PAUSE_EXPIRED",
-  "RECYCLE_TOMORROW"
+  "RECYCLE_TOMORROW",
+  // a lead the employee once worked was given back to them — calling it is the next step
+  "LEAD_RESTORED"
 ]);
 
 export function hasCallAction(type: string | null | undefined): boolean {

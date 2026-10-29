@@ -35,7 +35,8 @@ const menuSections=[
       { name:"Meta Datasets", href:"/admin/meta-datasets", icon:"📡" },
       { name:"Personal Lead Visits", href:"/admin/personal-visits", icon:"🔖" },
       { name:"Legacy Numbers", href:"/admin/legacy-numbers", icon:"📒" },
-      { name:"Duplicate Leads", href:"/admin/duplicate-leads", icon:"🧬" }
+      { name:"Duplicate Leads", href:"/admin/duplicate-leads", icon:"🧬" },
+      { name:"Positive-history Junk", href:"/admin/positive-junk", icon:"♻️" }
     ]
   },
   {

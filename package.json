@@ -4,13 +4,14 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node scripts/check-unbounded-queries.js && node scripts/check-working-calendar.js",
+    "prebuild": "node scripts/check-unbounded-queries.js && node scripts/check-working-calendar.js && node scripts/check-positive-junk.js",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "check:unbounded-queries": "node scripts/check-unbounded-queries.js",
     "check:working-calendar": "node scripts/check-working-calendar.js",
     "check:working-calendar-parity": "node --env-file=.env.local scripts/check-working-calendar-parity.mjs",
+    "check:positive-junk": "node scripts/check-positive-junk.js",
     "check:recycle-deploy": "node scripts/check-recycle-deploy.js",
     "deploy:recycle": "node scripts/check-recycle-deploy.js && npx supabase functions deploy recycle-stale-leads --use-api"
   },
