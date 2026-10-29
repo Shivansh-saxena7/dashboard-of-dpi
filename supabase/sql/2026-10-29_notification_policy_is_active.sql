@@ -1,4 +1,4 @@
--- 2026-10-29 — Own notifications only for active employees. NOT APPLIED — apply only after the owner's "haan" (LF copy).
+-- 2026-10-29 — Own notifications only for active employees. APPLIED 2026-10-29 17:31 IST (owner's "haan", LF copy of 029ae22); verified active 319 / admin 25130 unchanged, inactive 954 -> 0.
 -- Rollback: 2026-10-29_notification_policy_is_active_rollback.sql
 --
 -- notification_select_own / notification_update_own match the caller through employees.auth_user_id = auth.uid()
