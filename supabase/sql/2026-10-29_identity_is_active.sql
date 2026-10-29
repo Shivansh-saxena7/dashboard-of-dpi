@@ -1,4 +1,4 @@
--- 2026-10-29 — Identity helpers ignore inactive employees. NOT APPLIED — apply only after the owner's "haan" (LF copy).
+-- 2026-10-29 — Identity helpers ignore inactive employees. APPLIED 2026-10-29 17:01 IST (owner's "haan", LF copy of 137a641); verified: active/admin/orphan unchanged, inactive users lose access.
 -- Rollback: 2026-10-29_identity_is_active_rollback.sql (byte-exact copy outside git: C:/work/reports/identity_rollback_exact.sql)
 --
 -- Until now an inactive employee with a still-valid session kept full RLS and RPC access (no helper and none of the 205
