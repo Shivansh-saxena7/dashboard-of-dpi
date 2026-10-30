@@ -25,6 +25,7 @@ import { recyclingTomorrowCutoff } from "@/lib/recyclingTomorrow";
 import { useWorkingCalendar } from "@/lib/useWorkingCalendar";
 import type { WorkingCalendar } from "@/lib/workingCalendar";
 import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
+import { isUntouchedInCurrentAssignment } from "@/lib/newLeadFilter";
 
 interface LeadListProps {
   employeeId: string;
@@ -582,7 +583,10 @@ export default function LeadList({ employeeId }: LeadListProps) {
       result = result.filter((lead) => lead.source === sourceFilter);
     }
 
-    if (statusFilter) {
+    if (statusFilter === "NEW") {
+      // "New" = not called and no result yet in the current assignment, see lib/newLeadFilter.ts
+      result = result.filter((lead) => isUntouchedInCurrentAssignment(lead.lead_history[0]));
+    } else if (statusFilter) {
       result = result.filter((lead) => lead.status === statusFilter);
     }
 

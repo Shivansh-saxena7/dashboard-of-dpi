@@ -28,6 +28,7 @@ function loadLib(file) {
 }
 const { workingAdd, workingElapsedMs, nonWorkingStatusAt, loadJobWorkingCalendar, isNotificationWindowOpen, timerMsUntil, timersPausedDisplay, formatPauseUntil, shiftStartBlock, DAY_MS } = loadLib("workingCalendar.ts");
 const { calculateSLAStatus, getRecycleCutoff } = loadLib("calculateSLAStatus.ts");
+const { isUntouchedInCurrentAssignment } = loadLib("newLeadFilter.ts");
 const { recyclingTomorrowCutoff } = loadLib("recyclingTomorrow.ts");
 const { isWithinRecycleHours } = loadLib("recycleHours.ts");
 const { buildPreviousOwnerEndTimes, pickRecycleOwner } = loadLib("pickRecycleOwner.ts");
@@ -124,7 +125,17 @@ const cases = [
   ["S11 owner on leave still wins when ON", sla(followup(now - 10 * DAY_MS), dayOffAgo(3, 2), true), "FOLLOWUP_WITHIN_WINDOW"],
   ["S12 paused lead still PAUSED when ON", sla({ ...followup(now - 10 * DAY_MS), paused_until: new Date(now + DAY_MS).toISOString() }, tuesdayOff), "PAUSED"],
   ["S13 Recycling Tomorrow, OFF: due in 12h = flagged", recyclingTomorrowCutoff(followup(now - 5.5 * DAY_MS), null, 0, false, now, { ...dayOffAgo(5, 4), timersEnabled: false }) !== null, true],
-  ["S14 Recycling Tomorrow, ON: due in 36h = not flagged", recyclingTomorrowCutoff(followup(now - 5.5 * DAY_MS), null, 0, false, now, dayOffAgo(5, 4)) !== null, false]
+  ["S14 Recycling Tomorrow, ON: due in 36h = not flagged", recyclingTomorrowCutoff(followup(now - 5.5 * DAY_MS), null, 0, false, now, dayOffAgo(5, 4)) !== null, false],
+  // Leads page "New" filter (2026-10-30) — lib/newLeadFilter.ts; fields of the CURRENT assignment row.
+  ["N1 fresh lead, nothing done = New", isUntouchedInCurrentAssignment({ call_count: 0, first_call_at: null, outcome_at: null }), true],
+  ["N2 recycled lead: new row starts at 0 (old owner's calls not counted) = New", isUntouchedInCurrentAssignment({ call_count: 0, first_call_at: null, outcome_at: null }), true],
+  ["N3 reassigned keeping CONNECTED, new owner not called yet = New", isUntouchedInCurrentAssignment({ call_count: 0, first_call_at: null, outcome_at: null }), true],
+  ["N4 restored lead, not called yet = New", isUntouchedInCurrentAssignment({ call_count: 0, first_call_at: null, outcome_at: null }), true],
+  ["N5 call tapped, no result saved = not New", isUntouchedInCurrentAssignment({ call_count: 1, first_call_at: "2026-10-30T06:00:00Z", outcome_at: null }), false],
+  ["N6 call_count > 0 without first_call_at (old rows) = not New", isUntouchedInCurrentAssignment({ call_count: 2, first_call_at: null, outcome_at: null }), false],
+  ["N7 result saved without a call = not New", isUntouchedInCurrentAssignment({ call_count: 0, first_call_at: null, outcome_at: "2026-10-30T06:00:00Z" }), false],
+  ["N8 first_call_at set, count 0 = not New", isUntouchedInCurrentAssignment({ call_count: 0, first_call_at: "2026-10-30T06:00:00Z", outcome_at: null }), false],
+  ["N9 no active assignment row = not New", isUntouchedInCurrentAssignment(undefined), false]
 ];
 
 // Background-job calendar load with a mocked failing RPC (2026-10-07):
