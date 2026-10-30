@@ -135,7 +135,12 @@ const cases = [
   ["N6 call_count > 0 without first_call_at (old rows) = not New", isUntouchedInCurrentAssignment({ call_count: 2, first_call_at: null, outcome_at: null }), false],
   ["N7 result saved without a call = not New", isUntouchedInCurrentAssignment({ call_count: 0, first_call_at: null, outcome_at: "2026-10-30T06:00:00Z" }), false],
   ["N8 first_call_at set, count 0 = not New", isUntouchedInCurrentAssignment({ call_count: 0, first_call_at: "2026-10-30T06:00:00Z", outcome_at: null }), false],
-  ["N9 no active assignment row = not New", isUntouchedInCurrentAssignment(undefined), false]
+  ["N9 no active assignment row = not New", isUntouchedInCurrentAssignment(undefined), false],
+  ["N10 note / reminder / stage move only (last activity after assignment) = not New", isUntouchedInCurrentAssignment({ call_count: 0, assigned_at: "2026-10-30T06:00:00.000Z", last_activity_at: "2026-10-30T06:20:00.000Z" }), false],
+  ["N11 WhatsApp tap only = not New", isUntouchedInCurrentAssignment({ call_count: 0, first_whatsapp_at: "2026-10-30T06:05:00.000Z", assigned_at: "2026-10-30T06:00:00.000Z", last_activity_at: "2026-10-30T06:00:00.000Z" }), false],
+  ["N12 new row: last activity = assignment time = New", isUntouchedInCurrentAssignment({ call_count: 0, assigned_at: "2026-10-30T06:00:00.000Z", last_activity_at: "2026-10-30T06:00:00.000Z" }), true],
+  ["N13 same moment within rounding = New", isUntouchedInCurrentAssignment({ call_count: 0, assigned_at: "2026-10-30T06:00:00.000Z", last_activity_at: "2026-10-30T06:00:01.500Z" }), true],
+  ["N14 previous owner's activity is on the old row, not this one = New", isUntouchedInCurrentAssignment({ call_count: 0, first_call_at: null, outcome_at: null, assigned_at: "2026-10-30T06:00:00.000Z", last_activity_at: "2026-10-30T06:00:00.000Z" }), true]
 ];
 
 // Background-job calendar load with a mocked failing RPC (2026-10-07):
