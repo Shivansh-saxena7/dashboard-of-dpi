@@ -14,6 +14,7 @@ import { buildPreviousOwnerEndTimes, pickRecycleOwner } from "../../../lib/pickR
 import { autoJunkDecision, autoRecycleEnabled, DEFAULT_MAX_AUTO_JUNK_PER_SWEEP } from "../../../lib/autoJunkGuard.ts";
 import { buildHolderIndex, decideSiblingGuard, guardMode, type PositiveHolder } from "../../../lib/recycleSiblingGuard.ts";
 import { reminderHoldMaxDays, reminderHoldMode } from "../../../lib/reminderHold.ts";
+import { restoreHoldApplies, restoreHoldMode } from "../../../lib/restoreHold.ts";
 
 // Minutes after sla_office_end_time that recycled leads may still be
 // handed out (Option A Phase 1, 2026-10-08). 0 = none.
@@ -645,6 +646,40 @@ serve(withMonitoring("recycle-stale-leads", async () => {
       }
     }
 
+    // Restore hold (2026-10-30) — see lib/restoreHold.ts. Open protection
+    // windows (positive-junk restore / reassign keeping state), loaded once per
+    // sweep. "off" (also when the setting does not exist yet) loads nothing and
+    // changes nothing; "shadow" only records; "enforce" skips the recycle/junk.
+    const restoreMode = restoreHoldMode(settings.restore_hold_mode);
+    const protectedUntilByLead = new Map<string, string>();
+    const restoreHoldEvents: Record<string, unknown>[] = [];
+    if (restoreMode !== "off") {
+      const { data: protectRows, error: protectError } = await fetchAllRows(
+        () =>
+          supabase
+            .from("lead_restore_log")
+            .select("lead_id, protected_until", { count: "exact" })
+            .is("undone_at", null)
+            .gt("protected_until", new Date().toISOString())
+            .order("id"),
+        { anomalyContext: { supabase, source: "recycle-stale-leads:restore-protection" } }
+      );
+      if (protectError) {
+        await logAnomaly(supabase, {
+          source: "restore_hold",
+          severity: "warning",
+          message: `Restore hold skipped this sweep: protection windows could not be loaded (${protectError.message})`,
+          context: { mode: restoreMode }
+        });
+      } else {
+        for (const row of protectRows || []) {
+          if (!row.lead_id || !row.protected_until) continue;
+          const prev = protectedUntilByLead.get(row.lead_id);
+          if (!prev || Date.parse(row.protected_until) > Date.parse(prev)) protectedUntilByLead.set(row.lead_id, row.protected_until);
+        }
+      }
+    }
+
     // Previous owners (2026-10-09) — every ended assignment of a lead still
     // in this sweep, fetched once, so a recycle never hands a lead back to
     // someone who already owned it (see lib/pickRecycleOwner.ts). If this
@@ -943,6 +978,29 @@ serve(withMonitoring("recycle-stale-leads", async () => {
           reminderAt,
           lastActivityAt: activeHistory.last_activity_at
         });
+      }
+
+      // Restore hold (2026-10-30): a recycle / junk due inside the lead's
+      // protection window is recorded (once a day) and, in "enforce", skipped:
+      // the lead stays with its owner and is looked at again next sweep.
+      const protectedUntil = restoreMode !== "off" ? protectedUntilByLead.get(lead.id) ?? null : null;
+      if (protectedUntil && restoreHoldApplies(slaStatus, lead.lead_type, protectedUntil)) {
+        restoreHoldEvents.push({
+          leadId: lead.id,
+          leadHistoryId: activeHistory.id,
+          leadOwner: lead.current_owner_id,
+          project: lead.project,
+          mode: restoreMode,
+          message: restoreMode === "enforce" ? "RESTORE_HOLD skipped" : "RESTORE_HOLD would skip",
+          would: slaStatus === "JUNK_ELIGIBLE" ? "junk" : "recycle",
+          status: slaStatus,
+          protectedUntil,
+          lastActivityAt: activeHistory.last_activity_at
+        });
+        if (restoreMode === "enforce") {
+          diagnostics.push({ leadId: lead.id, action: "SKIPPED", reason: "RESTORE_HOLD", slaStatus, protectedUntil });
+          continue;
+        }
       }
 
       if (slaStatus === "JUNK_ELIGIBLE") {
@@ -1486,42 +1544,44 @@ serve(withMonitoring("recycle-stale-leads", async () => {
       }
     }
 
-    // Reminder hold (G5 fix): one lead_guard_events row per lead per day (the
-    // sweep runs every 15 minutes, the decision rarely changes within a day).
-    // Failure here never affects the sweep.
-    if (reminderHoldEvents.length > 0) {
-      const ids = reminderHoldEvents.map((e) => e.leadId as string);
+    // Reminder hold (G5 fix) and restore hold: one lead_guard_events row per
+    // lead per day per hold (the sweep runs every 15 minutes, the decision
+    // rarely changes within a day). Failure here never affects the sweep.
+    const recordHoldEvents = async (source: string, action: string, mode: string, events: Record<string, unknown>[]) => {
+      if (events.length === 0) return;
+      const ids = events.map((e) => e.leadId as string);
       const { data: recentHolds } = await supabase
         .from("lead_guard_events")
         .select("lead_id")
-        .eq("source", "reminder_hold")
+        .eq("source", source)
         .in("lead_id", ids)
         .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
         .limit(1000);
       const alreadyLogged = new Set((recentHolds || []).map((r: { lead_id: string }) => r.lead_id));
-      const fresh = reminderHoldEvents.filter((e) => !alreadyLogged.has(e.leadId as string));
-      if (fresh.length > 0) {
-        const { error: holdLogError } = await supabase.from("lead_guard_events").insert(
-          fresh.map((e) => ({
-            source: "reminder_hold",
-            action: "REMINDER_HOLD",
-            lead_id: e.leadId,
-            lead_owner_id: e.leadOwner ?? null,
-            project: e.project ?? null,
-            mode: holdMode,
-            detail: e
-          }))
-        );
-        if (holdLogError) {
-          await logAnomaly(supabase, {
-            source: "reminder_hold_log",
-            severity: "warning",
-            message: `Could not record ${fresh.length} reminder-hold decision(s): ${holdLogError.message}`,
-            context: { mode: holdMode }
-          });
-        }
+      const fresh = events.filter((e) => !alreadyLogged.has(e.leadId as string));
+      if (fresh.length === 0) return;
+      const { error: holdLogError } = await supabase.from("lead_guard_events").insert(
+        fresh.map((e) => ({
+          source,
+          action,
+          lead_id: e.leadId,
+          lead_owner_id: e.leadOwner ?? null,
+          project: e.project ?? null,
+          mode,
+          detail: e
+        }))
+      );
+      if (holdLogError) {
+        await logAnomaly(supabase, {
+          source: `${source}_log`,
+          severity: "warning",
+          message: `Could not record ${fresh.length} ${source.replace("_", "-")} decision(s): ${holdLogError.message}`,
+          context: { mode }
+        });
       }
-    }
+    };
+    await recordHoldEvents("reminder_hold", "REMINDER_HOLD", holdMode, reminderHoldEvents);
+    await recordHoldEvents("restore_hold", "RESTORE_HOLD", restoreMode, restoreHoldEvents);
 
     // Junk circuit breaker tripped (2026-10-16): one critical anomaly per
     // sweep; the skipped leads are listed in diagnostics.

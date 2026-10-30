@@ -29,6 +29,7 @@ function loadLib(file) {
 const { workingAdd, workingElapsedMs, nonWorkingStatusAt, loadJobWorkingCalendar, isNotificationWindowOpen, timerMsUntil, timersPausedDisplay, formatPauseUntil, shiftStartBlock, DAY_MS } = loadLib("workingCalendar.ts");
 const { calculateSLAStatus, getRecycleCutoff } = loadLib("calculateSLAStatus.ts");
 const { reminderHoldActivityAt, reminderHoldMode, reminderHoldMaxDays } = loadLib("reminderHold.ts");
+const { restoreHoldApplies, restoreHoldMode } = loadLib("restoreHold.ts");
 const { recyclingTomorrowCutoff } = loadLib("recyclingTomorrow.ts");
 const { isWithinRecycleHours } = loadLib("recycleHours.ts");
 const { buildPreviousOwnerEndTimes, pickRecycleOwner } = loadLib("pickRecycleOwner.ts");
@@ -85,6 +86,12 @@ const monAct = ist("2026-10-12T17:00");
 // Deterministic "now"-relative calendars: no weekly off, one non-working day.
 const dayOffAgo = (fromDays, toDays) => ({ weeklyOffDay: null, timersEnabled: true, ranges: [{ id: null, startsAt: now - fromDays * DAY_MS, endsAt: now - toDays * DAY_MS, kind: "HOLIDAY", reason: "TEST" }] });
 const sla = (lead, cal, onLeave = false) => calculateSLAStatus(lead, null, 0, onLeave, false, cal);
+// Restore hold: a follow-up lead given to its new owner `daysAgo` days ago (fresh clock), protected for 14 days.
+const reassigned = (daysAgo, extra = {}) => ({
+  status: "CONNECTED", board_stage: "FOLLOW_UP", lead_type: "LEAD", recycle_count: 0, sla_deadline: null, paused_until: null, pause_reason: null,
+  assigned_at: new Date(now - daysAgo * DAY_MS).toISOString(), last_activity_at: new Date(now - daysAgo * DAY_MS).toISOString(), ...extra
+});
+const rh = (lead, daysAgo) => { const s = sla(lead, null); return `${s}|${restoreHoldApplies(s, lead.lead_type, new Date(now + (14 - daysAgo) * DAY_MS).toISOString(), now)}`; };
 // Follow-up lead idle `idleDays`, owner reminder `reminderInDays` from now (negative = in the past), hold enforced.
 const held = (idleDays, reminderInDays) => ({
   ...followup(now - idleDays * DAY_MS),
@@ -148,7 +155,19 @@ const cases = [
   ["R13 cutoff, switch ON counts working days from the reminder", cutoffMs(held(10, 5), tuesdayOff), workingAdd(tuesdayOff, now + 5 * DAY_MS, 6 * DAY_MS).getTime()],
   ["R14 helper: no reminder keeps last activity", reminderHoldActivityAt("2026-10-01T00:00:00.000Z", null, 30), "2026-10-01T00:00:00.000Z"],
   ["R15 helper: cap at 30 days", reminderHoldActivityAt("2026-10-01T00:00:00.000Z", "2026-12-31T00:00:00.000Z", 30), "2026-10-31T00:00:00.000Z"],
-  ["R16 settings parsing", [reminderHoldMode("enforce"), reminderHoldMode("bogus"), reminderHoldMode(undefined), reminderHoldMaxDays(0), reminderHoldMaxDays("45")].join(","), "enforce,off,off,30,45"]
+  ["R16 settings parsing", [reminderHoldMode("enforce"), reminderHoldMode("bogus"), reminderHoldMode(undefined), reminderHoldMaxDays(0), reminderHoldMaxDays("45")].join(","), "enforce,off,off,30,45"],
+  // Restore hold (2026-10-30) — lib/restoreHold.ts; a lead reassigned / restored `d` days ago, protected 14 days.
+  ["H1 now: within window, nothing to hold", rh(reassigned(0), 0), "FOLLOWUP_WITHIN_WINDOW|false"],
+  ["H2 +3.5d: day-3 warning still goes, not held", rh(reassigned(3.5), 3.5), "FOLLOWUP_INACTIVITY_WARNING|false"],
+  ["H3 +6d: recycle-ready, held (protection to day 14)", rh(reassigned(6.1), 6.1), "FOLLOWUP_INACTIVITY_RECYCLE_READY|true"],
+  ["H4 +13.9d: still held", rh(reassigned(13.9), 13.9), "FOLLOWUP_INACTIVITY_RECYCLE_READY|true"],
+  ["H5 +15d: protection over, normal G5 recycle", rh(reassigned(15), 15), "FOLLOWUP_INACTIVITY_RECYCLE_READY|false"],
+  ["H6 DATA lead never held", rh(reassigned(6.1, { lead_type: "DATA", status: "NOT_CONNECTED", board_stage: "LEADS", call_count: 4 }), 6.1), "DATA_MAX_ATTEMPTS_REACHED|false"],
+  ["H7 paused lead stays paused, not held", rh(reassigned(6.1, { paused_until: new Date(now + 30 * DAY_MS).toISOString(), pause_reason: "SNOOZE" }), 6.1), "PAUSED|false"],
+  ["H8 NEW lead past SLA inside the window is held", rh(reassigned(1, { status: "NEW", board_stage: "LEADS", sla_deadline: new Date(now - HOUR).toISOString() }), 1), "SLA_BREACHED|true"],
+  ["H9 no protection row = not held", restoreHoldApplies("FOLLOWUP_INACTIVITY_RECYCLE_READY", "LEAD", null, now), false],
+  ["H10 warning status is never held", restoreHoldApplies("FOLLOWUP_INACTIVITY_WARNING", "LEAD", new Date(now + DAY_MS).toISOString(), now), false],
+  ["H11 settings parsing", [restoreHoldMode("enforce"), restoreHoldMode("shadow"), restoreHoldMode("bogus"), restoreHoldMode(undefined)].join(","), "enforce,shadow,off,off"]
 ];
 
 // Background-job calendar load with a mocked failing RPC (2026-10-07):

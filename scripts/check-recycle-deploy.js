@@ -23,7 +23,7 @@ const sla = read("lib/calculateSLAStatus.ts");
 if (!sla.includes("RECYCLE_DUE_STATUSES") || !sla.includes("function calculateBaseSLAStatus")) {
   problems.push("lib/calculateSLAStatus.ts has no max-recycles wrapper (3rd-recycle trap fix missing)");
 }
-for (const lib of ["lib/autoJunkGuard.ts", "lib/recycleSiblingGuard.ts", "lib/positiveLead.ts", "lib/reminderHold.ts"]) {
+for (const lib of ["lib/autoJunkGuard.ts", "lib/recycleSiblingGuard.ts", "lib/positiveLead.ts", "lib/reminderHold.ts", "lib/restoreHold.ts"]) {
   if (!fs.existsSync(path.join(root, lib))) problems.push(`${lib} is missing`);
 }
 const fn = read("supabase/functions/recycle-stale-leads/index.ts");
@@ -33,6 +33,10 @@ for (const needle of ["autoJunkDecision(", "autoRecycleEnabled(", "decideSibling
 // Reminder hold (2026-10-29): read from settings, held status only in "enforce", every saved lead logged.
 for (const needle of ["reminderHoldMode(settings.reminder_hold_mode)", "slaFor(null)", 'holdMode === "enforce" ? slaStatusHeld : slaStatusPlain', '"REMINDER_HOLD"']) {
   if (!fn.includes(needle)) problems.push(`recycle-stale-leads/index.ts is missing the reminder hold piece: ${needle}`);
+}
+// Restore hold (2026-10-30): read from settings, skipped only in "enforce", every held lead logged.
+for (const needle of ["restoreHoldMode(settings.restore_hold_mode)", "restoreHoldApplies(slaStatus, lead.lead_type, protectedUntil)", 'restoreMode === "enforce"', 'reason: "RESTORE_HOLD"', '"RESTORE_HOLD"', 'from("lead_restore_log")']) {
+  if (!fn.includes(needle)) problems.push(`recycle-stale-leads/index.ts is missing the restore hold piece: ${needle}`);
 }
 
 // Behaviour: the exact trap case from 2026-10-16.
@@ -74,4 +78,4 @@ if (problems.length > 0) {
   for (const p of problems) console.error(`  - ${p}`);
   process.exit(1);
 }
-console.log("check-recycle-deploy: OK — trap fix, junk breaker, sibling guard and reminder hold present.");
+console.log("check-recycle-deploy: OK — trap fix, junk breaker, sibling guard, reminder hold and restore hold present.");
