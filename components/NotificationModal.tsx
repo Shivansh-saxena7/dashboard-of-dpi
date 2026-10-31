@@ -12,6 +12,7 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { logCallClick } from "@/lib/logCallClick";
 import { classifyNotificationSystem, hasCallAction, notificationStyle, NotificationSystem } from "@/lib/notificationSystem";
 
 type Notification = {
@@ -90,11 +91,7 @@ export default function NotificationModal({
       .single();
 
     if (history?.id) {
-      supabase
-        .rpc("log_call_click_atomic", { p_lead_history_id: history.id })
-        .then(({ error }) => {
-          if (error) console.error("log_call_click_atomic failed:", error.message);
-        });
+      logCallClick(history.id, leadId);
     }
   }
 

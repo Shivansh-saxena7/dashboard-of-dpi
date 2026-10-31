@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import toast, { Toast } from "react-hot-toast";
 
 import PageHeader from "@/components/PageHeader";
+import CallQualitySettingsCard from "@/components/CallQualitySettingsCard";
 export default function SettingsPage() {
   const [employees, setEmployees] = useState<any[]>([]);
 
@@ -1174,6 +1175,8 @@ disabled:opacity-60
           </button>
         </div>
       </motion.div>
+
+      <CallQualitySettingsCard />
     </div>
   );
 }

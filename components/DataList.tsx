@@ -10,6 +10,7 @@ import DataDetailModal from "./DataDetailModal";
 import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
 import { consumeRecentlyCalledCardId, scrollToAndHighlightCard } from "@/lib/lastCalledLead";
+import { usePendingOutcomeSheet } from "@/lib/usePendingOutcomeSheet";
 import { normalizeMobile } from "@/lib/normalizeMobile";
 import { istDateStringToRangeStartUTC, istDateStringToRangeEndUTC } from "@/lib/istTime";
 
@@ -106,6 +107,10 @@ export default function DataList({ employeeId }: DataListProps) {
     const id = consumeRecentlyCalledCardId();
     if (id) scrollToAndHighlightCard(`data-card-${id}`);
   }, [loading]);
+
+  // Call Quality (2026-10-28) — same as LeadList: back from a call, open
+  // that row so its outcome gets logged.
+  usePendingOutcomeSheet(loading, leads, setSelectedLeadId);
 
   // Notification-Call-Action "View Lead" (2026-09-23) — same shape as
   // LeadList.tsx's own identical effect (DATA_ASSIGNED notifications

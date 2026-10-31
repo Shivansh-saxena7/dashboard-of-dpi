@@ -12,6 +12,7 @@ import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { AssignedBySource } from "@/lib/assignedByDisplay";
 import { buildWhatsAppLink } from "@/lib/buildWhatsAppLink";
 import { rememberCalledCard } from "@/lib/lastCalledLead";
+import { logCallClick } from "@/lib/logCallClick";
 import type { LeadSibling } from "@/lib/useLeadSiblings";
 import ExistingClientBadge from "./ExistingClientBadge";
 import RecycledBadge from "./RecycledBadge";
@@ -217,20 +218,14 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
     slaBadge = { label: "Going stale", className: "bg-red-100 text-red-700", pulse: true };
   }
 
-  // Fire-and-forget: logs the first-ever call-click timestamp via
-  // log_call_click_atomic (no-ops after the first click, see the
-  // RPC's own coalesce). Deliberately not awaited — the tel: link
-  // must open immediately, this is a background signal for Admin
-  // response-time reporting, not something that should ever block or
-  // interrupt the actual call.
+  // Fire-and-forget: logs the call click via lib/logCallClick.ts (the
+  // one owner of log_call_click_atomic). Deliberately not awaited — the
+  // tel: link must open immediately; the click is evidence for Call
+  // Quality and Admin reporting, never something that blocks the call.
   function handleCallClick(e: React.MouseEvent) {
     e.stopPropagation();
     rememberCalledCard(lead.id);
-    supabase
-      .rpc("log_call_click_atomic", { p_lead_history_id: lead.leadHistoryId })
-      .then(({ error }) => {
-        if (error) console.error("log_call_click_atomic failed:", error.message);
-      });
+    logCallClick(lead.leadHistoryId, lead.id);
   }
 
   // Same fire-and-forget pattern as handleCallClick, own column

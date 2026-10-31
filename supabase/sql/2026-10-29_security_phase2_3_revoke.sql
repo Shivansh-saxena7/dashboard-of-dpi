@@ -1,0 +1,120 @@
+-- 2026-10-29 — Security Phase 2 + 3. APPLIED 2026-10-29 16:03 IST (owner's "haan", from the LF copy of a8f9802); verified 14/14.
+-- Rollback: 2026-10-29_security_phase2_3_revoke_rollback.sql
+--
+-- Found 2026-10-29 by calling each function as anon (no login, only the public anon key): get_meta_dataset_credentials
+-- returned the Meta access token, get_sim_assignment_credentials_atomic the SIM e-mail password, get_expense_detail_atomic
+-- and get_stuck_leads_overview real rows, and bulk_reassign_leads_atomic started a write. No function in this list is
+-- used before login (login page only uses supabase.auth; edge functions use service_role; the anon key in
+-- _shared/auth.ts only runs auth.getUser with the caller's JWT).
+-- Kept for anon on purpose: current_employee_id/_role/_team_id/_department, is_admin, is_super_admin (used inside RLS
+-- policies; they return null/false for anon) and trigger functions (EXECUTE is not checked when a trigger fires).
+-- Edge-only (service_role) functions also lose authenticated: get_meta_dataset_credentials, resolve_project_meta_dataset.
+begin;
+revoke execute on function public.adjust_advance_atomic(uuid,numeric,date,text) from public, anon;
+grant execute on function public.adjust_advance_atomic(uuid,numeric,date,text) to authenticated, service_role;
+revoke execute on function public.admin_create_meta_dataset(text,text,text) from public, anon;
+grant execute on function public.admin_create_meta_dataset(text,text,text) to authenticated, service_role;
+revoke execute on function public.admin_rotate_meta_dataset_token(uuid,text) from public, anon;
+grant execute on function public.admin_rotate_meta_dataset_token(uuid,text) to authenticated, service_role;
+revoke execute on function public.approve_expense_atomic(uuid) from public, anon;
+grant execute on function public.approve_expense_atomic(uuid) to authenticated, service_role;
+revoke execute on function public.approve_lead_transfer_atomic(uuid,uuid) from public, anon;
+grant execute on function public.approve_lead_transfer_atomic(uuid,uuid) to authenticated, service_role;
+revoke execute on function public.bulk_reassign_leads_atomic(uuid[],uuid,text) from public, anon;
+grant execute on function public.bulk_reassign_leads_atomic(uuid[],uuid,text) to authenticated, service_role;
+revoke execute on function public.cancel_snooze_atomic(uuid) from public, anon;
+grant execute on function public.cancel_snooze_atomic(uuid) to authenticated, service_role;
+revoke execute on function public.canonical_project_key(text) from public, anon;
+grant execute on function public.canonical_project_key(text) to authenticated, service_role;
+revoke execute on function public.compute_working_hours_sla_deadline(timestamp with time zone,integer) from public, anon;
+grant execute on function public.compute_working_hours_sla_deadline(timestamp with time zone,integer) to authenticated, service_role;
+revoke execute on function public.convert_candidate_to_employee_atomic(uuid,uuid,text,text,text) from public, anon;
+grant execute on function public.convert_candidate_to_employee_atomic(uuid,uuid,text,text,text) to authenticated, service_role;
+revoke execute on function public.create_manual_booking_lead_atomic(uuid,text) from public, anon;
+grant execute on function public.create_manual_booking_lead_atomic(uuid,text) to authenticated, service_role;
+revoke execute on function public.create_personal_lead_atomic(text,text,text,text) from public, anon;
+grant execute on function public.create_personal_lead_atomic(text,text,text,text) to authenticated, service_role;
+revoke execute on function public.create_sim_assignment_atomic(text,text,text,uuid,text) from public, anon;
+grant execute on function public.create_sim_assignment_atomic(text,text,text,uuid,text) to authenticated, service_role;
+revoke execute on function public.delete_candidate_atomic(uuid) from public, anon;
+grant execute on function public.delete_candidate_atomic(uuid) to authenticated, service_role;
+revoke execute on function public.deny_site_visit_atomic(uuid,text) from public, anon;
+grant execute on function public.deny_site_visit_atomic(uuid,text) to authenticated, service_role;
+revoke execute on function public.end_employee_leave_atomic(uuid,date) from public, anon;
+grant execute on function public.end_employee_leave_atomic(uuid,date) to authenticated, service_role;
+revoke execute on function public.force_reassign_lead_atomic(uuid,uuid,text) from public, anon;
+grant execute on function public.force_reassign_lead_atomic(uuid,uuid,text) to authenticated, service_role;
+revoke execute on function public.get_employee_work_report(uuid,date) from public, anon;
+grant execute on function public.get_employee_work_report(uuid,date) to authenticated, service_role;
+revoke execute on function public.get_expense_detail_atomic(uuid) from public, anon;
+grant execute on function public.get_expense_detail_atomic(uuid) to authenticated, service_role;
+revoke execute on function public.get_hr_document_view_path_atomic(uuid) from public, anon;
+grant execute on function public.get_hr_document_view_path_atomic(uuid) to authenticated, service_role;
+revoke execute on function public.get_lead_activity_log_atomic(uuid) from public, anon;
+grant execute on function public.get_lead_activity_log_atomic(uuid) to authenticated, service_role;
+revoke execute on function public.get_lead_project_assets(uuid) from public, anon;
+grant execute on function public.get_lead_project_assets(uuid) to authenticated, service_role;
+revoke execute on function public.get_meta_dataset_credentials(uuid) from public, anon, authenticated;
+grant execute on function public.get_meta_dataset_credentials(uuid) to service_role;
+revoke execute on function public.get_sim_assignment_credentials_atomic(uuid) from public, anon;
+grant execute on function public.get_sim_assignment_credentials_atomic(uuid) to authenticated, service_role;
+revoke execute on function public.get_stuck_leads_overview() from public, anon;
+grant execute on function public.get_stuck_leads_overview() to authenticated, service_role;
+revoke execute on function public.give_advance_atomic(uuid,numeric,date,text) from public, anon;
+grant execute on function public.give_advance_atomic(uuid,numeric,date,text) to authenticated, service_role;
+revoke execute on function public.lead_project_source(uuid) from public, anon;
+grant execute on function public.lead_project_source(uuid) to authenticated, service_role;
+revoke execute on function public.log_asset_share_atomic(uuid,uuid[]) from public, anon;
+grant execute on function public.log_asset_share_atomic(uuid,uuid[]) to authenticated, service_role;
+revoke execute on function public.log_booking_atomic(uuid,integer,uuid,text) from public, anon;
+grant execute on function public.log_booking_atomic(uuid,integer,uuid,text) to authenticated, service_role;
+revoke execute on function public.log_cost_sheet_share_atomic(uuid,jsonb) from public, anon;
+grant execute on function public.log_cost_sheet_share_atomic(uuid,jsonb) to authenticated, service_role;
+revoke execute on function public.log_lead_update_atomic(uuid,uuid,text,text,integer,text) from public, anon;
+grant execute on function public.log_lead_update_atomic(uuid,uuid,text,text,integer,text) to authenticated, service_role;
+revoke execute on function public.log_no_contact_remark_atomic(uuid,text) from public, anon;
+grant execute on function public.log_no_contact_remark_atomic(uuid,text) to authenticated, service_role;
+revoke execute on function public.log_office_expense_atomic(numeric,date,text,text) from public, anon;
+grant execute on function public.log_office_expense_atomic(numeric,date,text,text) to authenticated, service_role;
+revoke execute on function public.mark_employee_leave_atomic(uuid,date,date,text) from public, anon;
+grant execute on function public.mark_employee_leave_atomic(uuid,date,date,text) to authenticated, service_role;
+revoke execute on function public.mark_expense_paid_atomic(uuid,date,text,text) from public, anon;
+grant execute on function public.mark_expense_paid_atomic(uuid,date,text,text) to authenticated, service_role;
+revoke execute on function public.mark_hrms_attendance_manual_atomic(uuid,date,text,text) from public, anon;
+grant execute on function public.mark_hrms_attendance_manual_atomic(uuid,date,text,text) to authenticated, service_role;
+revoke execute on function public.monthly_bookings_leaderboard(date) from public, anon;
+grant execute on function public.monthly_bookings_leaderboard(date) to authenticated, service_role;
+revoke execute on function public.move_lead_to_followup_atomic(uuid) from public, anon;
+grant execute on function public.move_lead_to_followup_atomic(uuid) to authenticated, service_role;
+revoke execute on function public.raise_ticket_atomic(text,text,text,text) from public, anon;
+grant execute on function public.raise_ticket_atomic(text,text,text,text) to authenticated, service_role;
+revoke execute on function public.reassign_lead_by_team_leader_atomic(uuid,uuid,uuid,text) from public, anon;
+grant execute on function public.reassign_lead_by_team_leader_atomic(uuid,uuid,uuid,text) to authenticated, service_role;
+revoke execute on function public.register_hr_document_atomic(uuid,text,text,text,text,boolean,uuid) from public, anon;
+grant execute on function public.register_hr_document_atomic(uuid,text,text,text,text,boolean,uuid) to authenticated, service_role;
+revoke execute on function public.reject_expense_atomic(uuid,text) from public, anon;
+grant execute on function public.reject_expense_atomic(uuid,text) to authenticated, service_role;
+revoke execute on function public.reject_lead_transfer_atomic(uuid) from public, anon;
+grant execute on function public.reject_lead_transfer_atomic(uuid) to authenticated, service_role;
+revoke execute on function public.request_lead_transfer_atomic(uuid,text) from public, anon;
+grant execute on function public.request_lead_transfer_atomic(uuid,text) to authenticated, service_role;
+revoke execute on function public.resolve_project_meta_dataset(text) from public, anon, authenticated;
+grant execute on function public.resolve_project_meta_dataset(text) to service_role;
+revoke execute on function public.set_interview_result_atomic(uuid,text) from public, anon;
+grant execute on function public.set_interview_result_atomic(uuid,text) to authenticated, service_role;
+revoke execute on function public.snooze_lead_atomic(uuid,integer,text) from public, anon;
+grant execute on function public.snooze_lead_atomic(uuid,integer,text) to authenticated, service_role;
+revoke execute on function public.submit_expense_atomic(numeric,date,text) from public, anon;
+grant execute on function public.submit_expense_atomic(numeric,date,text) to authenticated, service_role;
+revoke execute on function public.transfer_sim_assignment_atomic(uuid,uuid,text) from public, anon;
+grant execute on function public.transfer_sim_assignment_atomic(uuid,uuid,text) to authenticated, service_role;
+revoke execute on function public.unjunk_and_reassign_lead_atomic(uuid,uuid,text) from public, anon;
+grant execute on function public.unjunk_and_reassign_lead_atomic(uuid,uuid,text) to authenticated, service_role;
+revoke execute on function public.update_ticket_status_atomic(uuid,text) from public, anon;
+grant execute on function public.update_ticket_status_atomic(uuid,text) to authenticated, service_role;
+revoke execute on function public.verify_site_visit_atomic(uuid) from public, anon;
+grant execute on function public.verify_site_visit_atomic(uuid) to authenticated, service_role;
+revoke execute on function public.visits_leaderboard(date,date) from public, anon;
+grant execute on function public.visits_leaderboard(date,date) to authenticated, service_role;
+notify pgrst, 'reload schema';
+commit;

@@ -30,6 +30,7 @@ const { workingAdd, workingElapsedMs, nonWorkingStatusAt, loadJobWorkingCalendar
 const { calculateSLAStatus, getRecycleCutoff } = loadLib("calculateSLAStatus.ts");
 const { reminderHoldActivityAt, reminderHoldMode, reminderHoldMaxDays } = loadLib("reminderHold.ts");
 const { restoreHoldApplies, restoreHoldMode } = loadLib("restoreHold.ts");
+const { isUntouchedInCurrentAssignment } = loadLib("newLeadFilter.ts");
 const { recyclingTomorrowCutoff } = loadLib("recyclingTomorrow.ts");
 const { isWithinRecycleHours } = loadLib("recycleHours.ts");
 const { buildPreviousOwnerEndTimes, pickRecycleOwner } = loadLib("pickRecycleOwner.ts");
@@ -167,7 +168,22 @@ const cases = [
   ["H8 NEW lead past SLA inside the window is held", rh(reassigned(1, { status: "NEW", board_stage: "LEADS", sla_deadline: new Date(now - HOUR).toISOString() }), 1), "SLA_BREACHED|true"],
   ["H9 no protection row = not held", restoreHoldApplies("FOLLOWUP_INACTIVITY_RECYCLE_READY", "LEAD", null, now), false],
   ["H10 warning status is never held", restoreHoldApplies("FOLLOWUP_INACTIVITY_WARNING", "LEAD", new Date(now + DAY_MS).toISOString(), now), false],
-  ["H11 settings parsing", [restoreHoldMode("enforce"), restoreHoldMode("shadow"), restoreHoldMode("bogus"), restoreHoldMode(undefined)].join(","), "enforce,shadow,off,off"]
+  ["H11 settings parsing", [restoreHoldMode("enforce"), restoreHoldMode("shadow"), restoreHoldMode("bogus"), restoreHoldMode(undefined)].join(","), "enforce,shadow,off,off"],
+  // Leads page "New" filter (2026-10-30) — lib/newLeadFilter.ts; fields of the CURRENT assignment row.
+  ["N1 fresh lead, nothing done = New", isUntouchedInCurrentAssignment({ call_count: 0, first_call_at: null, outcome_at: null }), true],
+  ["N2 recycled lead: new row starts at 0 (old owner's calls not counted) = New", isUntouchedInCurrentAssignment({ call_count: 0, first_call_at: null, outcome_at: null }), true],
+  ["N3 reassigned keeping CONNECTED, new owner not called yet = New", isUntouchedInCurrentAssignment({ call_count: 0, first_call_at: null, outcome_at: null }), true],
+  ["N4 restored lead, not called yet = New", isUntouchedInCurrentAssignment({ call_count: 0, first_call_at: null, outcome_at: null }), true],
+  ["N5 call tapped, no result saved = not New", isUntouchedInCurrentAssignment({ call_count: 1, first_call_at: "2026-10-30T06:00:00Z", outcome_at: null }), false],
+  ["N6 call_count > 0 without first_call_at (old rows) = not New", isUntouchedInCurrentAssignment({ call_count: 2, first_call_at: null, outcome_at: null }), false],
+  ["N7 result saved without a call = not New", isUntouchedInCurrentAssignment({ call_count: 0, first_call_at: null, outcome_at: "2026-10-30T06:00:00Z" }), false],
+  ["N8 first_call_at set, count 0 = not New", isUntouchedInCurrentAssignment({ call_count: 0, first_call_at: "2026-10-30T06:00:00Z", outcome_at: null }), false],
+  ["N9 no active assignment row = not New", isUntouchedInCurrentAssignment(undefined), false],
+  ["N10 note / reminder / stage move only (last activity after assignment) = not New", isUntouchedInCurrentAssignment({ call_count: 0, assigned_at: "2026-10-30T06:00:00.000Z", last_activity_at: "2026-10-30T06:20:00.000Z" }), false],
+  ["N11 WhatsApp tap only = not New", isUntouchedInCurrentAssignment({ call_count: 0, first_whatsapp_at: "2026-10-30T06:05:00.000Z", assigned_at: "2026-10-30T06:00:00.000Z", last_activity_at: "2026-10-30T06:00:00.000Z" }), false],
+  ["N12 new row: last activity = assignment time = New", isUntouchedInCurrentAssignment({ call_count: 0, assigned_at: "2026-10-30T06:00:00.000Z", last_activity_at: "2026-10-30T06:00:00.000Z" }), true],
+  ["N13 same moment within rounding = New", isUntouchedInCurrentAssignment({ call_count: 0, assigned_at: "2026-10-30T06:00:00.000Z", last_activity_at: "2026-10-30T06:00:01.500Z" }), true],
+  ["N14 previous owner's activity is on the old row, not this one = New", isUntouchedInCurrentAssignment({ call_count: 0, first_call_at: null, outcome_at: null, assigned_at: "2026-10-30T06:00:00.000Z", last_activity_at: "2026-10-30T06:00:00.000Z" }), true]
 ];
 
 // Background-job calendar load with a mocked failing RPC (2026-10-07):
