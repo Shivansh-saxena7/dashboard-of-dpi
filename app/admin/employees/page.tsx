@@ -4,6 +4,7 @@ import { useEffect,useState } from "react";
 import { Pencil } from "lucide-react";
 import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
+import { authedFetch } from "@/lib/authedFetch";
 import AddEmployeeModal from "../components/AddEmployeeesModal";
 import DeleteModal from "../components/DeleteModal";
 import { useRouter } from "next/navigation";
@@ -54,7 +55,7 @@ async function handleSaveEmployeeEmail(employeeId: string) {
   }
   setSavingEmail(true);
   try {
-    const res = await fetch("/api/update-employee-email", {
+    const res = await authedFetch("/api/update-employee-email", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ employeeId, newEmail: trimmed })
@@ -302,7 +303,7 @@ const updateDepartment = async (id: string, newDepartment: string) => {
 
 const deleteEmployee=async()=>{
 
-const res = await fetch("/api/delete-employee", {
+const res = await authedFetch("/api/delete-employee", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ employeeId: selectedId }),

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { supabase } from "@/lib/supabase";
+import { authedFetch } from "@/lib/authedFetch";
 
 export default function AddEmployeeModal({
 open,
@@ -24,7 +25,7 @@ try{
 
 setLoading(true);
 
-const res = await fetch("/api/create-employee", {
+const res = await authedFetch("/api/create-employee", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ name, email, password, role, department }),

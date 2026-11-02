@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
+import { resolveAdminCaller } from "@/lib/resolveAdminCaller";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export async function POST(req: Request) {
+  // Admin only: the caller is verified before anything is read or written.
+  const auth = await resolveAdminCaller(req);
+  if (auth.errorResponse) return auth.errorResponse;
+
 
   try {
 

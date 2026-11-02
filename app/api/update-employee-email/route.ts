@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { resolveAdminCaller } from "@/lib/resolveAdminCaller";
 import { createClient } from "@supabase/supabase-js";
 import { createReportingFetch } from "@/lib/reportingFetch";
 
@@ -23,6 +24,10 @@ const supabaseAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, proces
 // explicitly rather than silently left half-done, since there's no
 // safe automatic way to revert an Auth email change here.
 export async function POST(req: Request) {
+  // Admin only: the caller is verified before anything is read or written.
+  const auth = await resolveAdminCaller(req);
+  if (auth.errorResponse) return auth.errorResponse;
+
   try {
     const body = await req.json();
     const { employeeId, newEmail } = body;

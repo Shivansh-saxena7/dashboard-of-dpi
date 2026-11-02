@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { resolveAdminCaller } from "@/lib/resolveAdminCaller";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 // Own route, same pattern as update-sla-office-hours — one concern,
@@ -10,6 +11,10 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 // WorkReportView.tsx's own comment on this. Nullable/optional by
 // design: an empty string clears the reminder entirely.
 export async function POST(req: Request) {
+  // Admin only: the caller is verified before anything is read or written.
+  const auth = await resolveAdminCaller(req);
+  if (auth.errorResponse) return auth.errorResponse;
+
 
   try {
 
