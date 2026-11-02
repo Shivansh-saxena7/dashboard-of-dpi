@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node scripts/check-unbounded-queries.js && node scripts/check-working-calendar.js && node scripts/check-positive-junk.js && node scripts/check-call-quality.js",
+    "prebuild": "node scripts/check-unbounded-queries.js && node scripts/check-working-calendar.js && node scripts/check-positive-junk.js && node scripts/check-call-quality.js && node scripts/check-given-context.js",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
