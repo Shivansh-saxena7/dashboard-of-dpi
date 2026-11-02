@@ -61,5 +61,5 @@ export async function resolveAdminCaller(req: Request) {
     };
   }
 
-  return { employeeId: employee.id };
+  return { employeeId: employee.id, role: employee.role as string, authUserId: user.id };
 }

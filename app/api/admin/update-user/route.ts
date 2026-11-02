@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { resolveAdminCaller } from "@/lib/resolveAdminCaller";
+import { canEditLogin } from "@/lib/adminUserPolicy";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export async function POST(req: Request) {
@@ -20,6 +21,26 @@ export async function POST(req: Request) {
       return NextResponse.json(
         { error: "User ID missing" },
         { status: 400 }
+      );
+    }
+
+    const { data: target, error: targetError } = await supabaseAdmin
+      .from("employees")
+      .select("role")
+      .eq("auth_user_id", auth_user_id)
+      .maybeSingle();
+
+    if (targetError) {
+      return NextResponse.json(
+        { error: targetError.message },
+        { status: 500 }
+      );
+    }
+
+    if (!canEditLogin(auth.role, auth.authUserId, auth_user_id, target?.role)) {
+      return NextResponse.json(
+        { error: "Only a Super Admin can change another admin's login" },
+        { status: 403 }
       );
     }
 

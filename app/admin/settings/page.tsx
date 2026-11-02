@@ -376,6 +376,7 @@ export default function SettingsPage() {
 
       if (!res.ok) {
         toast.error(result.error);
+        setLoading(false);
         return;
       }
 

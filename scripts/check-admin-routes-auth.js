@@ -37,6 +37,39 @@ for (const [file, paths] of Object.entries(CALLERS)) {
   }
 }
 
+// Who may change whose login, and who may delete.
+const policy = { exports: {} };
+new Function("module", "exports", ts.transpileModule(read("lib/adminUserPolicy.ts"), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 }
+}).outputText)(policy, policy.exports);
+const { canEditLogin, canDeleteEmployee } = policy.exports;
+const policyCases = [
+  ["admin -> own login", canEditLogin("admin", "A", "A", "admin"), true],
+  ["admin -> employee", canEditLogin("admin", "A", "E", "employee"), true],
+  ["admin -> team leader", canEditLogin("admin", "A", "E", "team_leader"), true],
+  ["admin -> hr", canEditLogin("admin", "A", "E", "hr"), true],
+  ["admin -> another admin", canEditLogin("admin", "A", "B", "admin"), false],
+  ["admin -> super_admin", canEditLogin("admin", "A", "S", "super_admin"), false],
+  ["admin -> account with no employee row", canEditLogin("admin", "A", "X", null), false],
+  ["super_admin -> own login", canEditLogin("super_admin", "S", "S", "super_admin"), true],
+  ["super_admin -> another super_admin", canEditLogin("super_admin", "S", "T", "super_admin"), true],
+  ["super_admin -> admin", canEditLogin("super_admin", "S", "A", "admin"), true],
+  ["super_admin -> employee", canEditLogin("super_admin", "S", "E", "employee"), true],
+  ["super_admin -> account with no employee row", canEditLogin("super_admin", "S", "X", null), true],
+  ["employee -> own login (never reaches here, still no)", canEditLogin("employee", "E", "E", "employee"), false],
+  ["employee -> another employee", canEditLogin("employee", "E", "F", "employee"), false],
+  ["delete: super_admin", canDeleteEmployee("super_admin"), true],
+  ["delete: admin", canDeleteEmployee("admin"), false],
+  ["delete: employee", canDeleteEmployee("employee"), false]
+];
+for (const [name, got, want] of policyCases) {
+  if (got !== want) problems.push(`${name}: got ${got}, want ${want}`);
+}
+const deleteRoute = read("app/api/delete-employee/route.ts");
+if (!(deleteRoute.indexOf("canDeleteEmployee(auth.role)") !== -1 && deleteRoute.indexOf("canDeleteEmployee(auth.role)") < deleteRoute.indexOf("req.json()"))) problems.push("delete-employee does not check for a super_admin before anything else");
+const updateRoute = read("app/api/admin/update-user/route.ts");
+if (!(updateRoute.indexOf("canEditLogin(") !== -1 && updateRoute.indexOf("canEditLogin(") < updateRoute.indexOf("updateUserById"))) problems.push("update-user changes the login before the policy check");
+
 const { outputText } = ts.transpileModule(read("lib/resolveAdminCaller.ts"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 }
 });
@@ -81,5 +114,5 @@ const cases = [
     console.error("check-admin-routes-auth: FAILED\n  " + problems.join("\n  "));
     process.exit(1);
   }
-  console.log(`check-admin-routes-auth: all ${cases.length} known answers and ${ROUTES.length} routes pass.`);
+  console.log(`check-admin-routes-auth: all ${cases.length + policyCases.length} known answers and ${ROUTES.length} routes pass.`);
 })();
