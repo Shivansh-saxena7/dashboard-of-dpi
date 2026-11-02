@@ -26,6 +26,13 @@ export function autoJunkDecision(settings: SweepSafetySettings | null | undefine
   return "JUNK";
 }
 
+// mark_lead_junk_atomic returns normally when a DB guard refuses (2026-11-02), so the sweep reads
+// the status back. Only a lead that really became JUNK counts toward the per-sweep cap; a refused
+// one stays with its owner. An unreadable status counts as junked, which keeps the cap on the safe side.
+export function junkAttemptResult(statusAfter: string | null | undefined): "JUNKED" | "REFUSED" {
+  return statusAfter && statusAfter !== "JUNK" ? "REFUSED" : "JUNKED";
+}
+
 export function autoRecycleEnabled(settings: SweepSafetySettings | null | undefined): boolean {
   return settings?.auto_recycle_enabled !== false;
 }
