@@ -1,4 +1,4 @@
--- 2026-11-02 — Restore-protection junk refusals are logged as 'info', not 'error'. NOT APPLIED — apply only after the owner's "haan" (LF copy).
+-- 2026-11-02 — Restore-protection junk refusals are logged as 'info', not 'error'. APPLIED 2026-11-02 12:41:43 IST (owner's "haan", LF copy, md5 6c3d4b3f); mode shadow.
 -- Apply AFTER 2026-10-29_reminder_hold.sql (that file replaces mark_lead_junk_atomic and would drop this change).
 -- Rollback: 2026-11-02_restore_refusal_info_rollback.sql   Tests (dry-run only): 2026-11-02_restore_refusal_info_tests.sql
 --

@@ -1,4 +1,4 @@
--- 2026-10-30 — Restore hold (G5 fix for restored / reassigned leads). NOT APPLIED — apply only after the owner's "haan" (LF copy).
+-- 2026-10-30 — Restore hold (G5 fix for restored / reassigned leads). APPLIED 2026-11-02 12:41:38 IST (owner's "haan", LF copy, md5 e2a8aae6); mode shadow.
 -- Rollback: 2026-10-30_restore_hold_rollback.sql   Tests (dry-run only): 2026-10-30_restore_hold_tests.sql
 --
 -- A lead an admin restored (positive-junk restore) or reassigned keeping its state has a protection window in

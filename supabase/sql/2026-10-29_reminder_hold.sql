@@ -1,4 +1,4 @@
--- 2026-10-29 — Reminder hold (G5 fix). NOT APPLIED — apply only after the owner's "haan".
+-- 2026-10-29 — Reminder hold (G5 fix). APPLIED 2026-11-02 12:41:33 IST (owner's "haan", LF copy, md5 e6e8fa6e); mode shadow.
 -- Rollback: 2026-10-29_reminder_hold_rollback.sql   Tests (dry-run only): 2026-10-29_reminder_hold_tests.sql
 --
 -- The 6-day Follow-up inactivity recycle ignored a follow-up reminder the owner had set for later. Rule (same as
