@@ -15,6 +15,13 @@ export function canEditLogin(
   return Boolean(targetRole) && targetRole !== "admin" && targetRole !== "super_admin";
 }
 
+// Creating an account: only a super_admin may create another super_admin.
+export function canCreateRole(callerRole: string, newRole: unknown): boolean {
+  if (callerRole === "super_admin") return true;
+  if (callerRole !== "admin") return false;
+  return typeof newRole === "string" && newRole.trim().toLowerCase() !== "super_admin";
+}
+
 // Deleting an employee is permanent, so it is for a super_admin only.
 export function canDeleteEmployee(callerRole: string): boolean {
   return callerRole === "super_admin";

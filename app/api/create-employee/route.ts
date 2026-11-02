@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { resolveAdminCaller } from "@/lib/resolveAdminCaller";
+import { canCreateRole } from "@/lib/adminUserPolicy";
 import { createClient } from "@supabase/supabase-js";
 import { createReportingFetch } from "@/lib/reportingFetch";
 
@@ -24,6 +25,20 @@ password,
 role,
 department
 }=body;
+
+if(role&&!canCreateRole(auth.role,role)){
+
+return NextResponse.json(
+{
+success:false,
+message:"Only a Super Admin can create a Super Admin"
+},
+{
+status:403
+}
+);
+
+}
 
 
 if(

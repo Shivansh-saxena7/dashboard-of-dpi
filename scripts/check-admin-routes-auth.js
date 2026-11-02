@@ -42,7 +42,7 @@ const policy = { exports: {} };
 new Function("module", "exports", ts.transpileModule(read("lib/adminUserPolicy.ts"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 }
 }).outputText)(policy, policy.exports);
-const { canEditLogin, canDeleteEmployee } = policy.exports;
+const { canEditLogin, canDeleteEmployee, canCreateRole } = policy.exports;
 const policyCases = [
   ["admin -> own login", canEditLogin("admin", "A", "A", "admin"), true],
   ["admin -> employee", canEditLogin("admin", "A", "E", "employee"), true],
@@ -58,6 +58,15 @@ const policyCases = [
   ["super_admin -> account with no employee row", canEditLogin("super_admin", "S", "X", null), true],
   ["employee -> own login (never reaches here, still no)", canEditLogin("employee", "E", "E", "employee"), false],
   ["employee -> another employee", canEditLogin("employee", "E", "F", "employee"), false],
+  ["create: admin -> employee", canCreateRole("admin", "employee"), true],
+  ["create: admin -> hr", canCreateRole("admin", "hr"), true],
+  ["create: admin -> admin (allowed, only super_admin is blocked)", canCreateRole("admin", "admin"), true],
+  ["create: admin -> super_admin", canCreateRole("admin", "super_admin"), false],
+  ["create: admin -> Super_Admin with spaces", canCreateRole("admin", " Super_Admin "), false],
+  ["create: admin -> role not text", canCreateRole("admin", ["super_admin"]), false],
+  ["create: super_admin -> super_admin", canCreateRole("super_admin", "super_admin"), true],
+  ["create: super_admin -> employee", canCreateRole("super_admin", "employee"), true],
+  ["create: employee -> employee", canCreateRole("employee", "employee"), false],
   ["delete: super_admin", canDeleteEmployee("super_admin"), true],
   ["delete: admin", canDeleteEmployee("admin"), false],
   ["delete: employee", canDeleteEmployee("employee"), false]
@@ -67,6 +76,10 @@ for (const [name, got, want] of policyCases) {
 }
 const deleteRoute = read("app/api/delete-employee/route.ts");
 if (!(deleteRoute.indexOf("canDeleteEmployee(auth.role)") !== -1 && deleteRoute.indexOf("canDeleteEmployee(auth.role)") < deleteRoute.indexOf("req.json()"))) problems.push("delete-employee does not check for a super_admin before anything else");
+const emailRoute = read("app/api/update-employee-email/route.ts");
+if (!(emailRoute.indexOf("canEditLogin(") !== -1 && emailRoute.indexOf("canEditLogin(") < emailRoute.indexOf("updateUserById"))) problems.push("update-employee-email changes the login before the policy check");
+const createRoute = read("app/api/create-employee/route.ts");
+if (!(createRoute.indexOf("canCreateRole(") !== -1 && createRoute.indexOf("canCreateRole(") < createRoute.indexOf("createUser("))) problems.push("create-employee creates the account before the role check");
 const updateRoute = read("app/api/admin/update-user/route.ts");
 if (!(updateRoute.indexOf("canEditLogin(") !== -1 && updateRoute.indexOf("canEditLogin(") < updateRoute.indexOf("updateUserById"))) problems.push("update-user changes the login before the policy check");
 
