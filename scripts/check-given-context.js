@@ -16,7 +16,7 @@ const load = (file) => {
   new Function("module", "exports", "require", outputText)(mod, mod.exports, (p) => load(path.basename(p).replace(/\.ts$/, "")));
   return (loaded[file] = mod.exports);
 };
-const { givenBoxText, givenBoxVisible, givenFilterLeads, givenFilterCount, contextByLeadId } = load("givenLeadContext");
+const { givenBoxText, givenBoxVisible, givenFilterLeads, givenFilterCount, contextByLeadId, givenFlagAllows, givenFeatureUnavailable, readGivenCache, GIVEN_CACHE_MS, GIVEN_OFF_CACHE_MS } = load("givenLeadContext");
 
 const problems = [];
 const check = (name, got, want) => {
@@ -52,9 +52,33 @@ check("filter list: in_filter and on the board", givenFilterLeads(leads, map).ma
 check("count = list", givenFilterCount(leads, map), givenFilterLeads(leads, map).length);
 check("nothing loaded", givenFilterCount(leads, contextByLeadId(null)), 0);
 
+// Flag: no call at all unless the employee is included. Columns missing (SQL not applied) = off.
+check("settings without the columns (SQL not applied)", givenFlagAllows({ id: 1 }, "E1"), false);
+check("no settings row", givenFlagAllows(null, "E1"), false);
+check("off", givenFlagAllows({ given_lead_context_mode: "off", given_lead_context_pilot_ids: ["E1"] }, "E1"), false);
+check("pilot, in the list", givenFlagAllows({ given_lead_context_mode: "admin_pilot", given_lead_context_pilot_ids: ["E1"] }, "E1"), true);
+check("pilot, not in the list", givenFlagAllows({ given_lead_context_mode: "admin_pilot", given_lead_context_pilot_ids: ["E2"] }, "E1"), false);
+check("on", givenFlagAllows({ given_lead_context_mode: "on" }, "E1"), true);
+check("on, no employee", givenFlagAllows({ given_lead_context_mode: "on" }, null), false);
+// Function missing or not allowed: hidden quietly. Anything else is a real error and stays reported.
+check("PGRST202 / 42501 / 42883 hide the feature", [givenFeatureUnavailable({ code: "PGRST202" }), givenFeatureUnavailable({ code: "42501" }), givenFeatureUnavailable({ code: "42883" })], [true, true, true]);
+check("another error is not 'unavailable'", [givenFeatureUnavailable({ code: "500" }), givenFeatureUnavailable(null)], [false, false]);
+const reporting = read("lib/reportingFetch.ts");
+if (!reporting.includes('url.includes("/rpc/get_given_lead_context") && ["PGRST202", "42501", "42883"].includes(code)')) problems.push("reportingFetch would log the missing function as an error");
+// Session cache.
+const entry = (at, enabled) => JSON.stringify({ at, enabled, leads: [] });
+check("cache: fresh", readGivenCache(entry(1000, true), 1000 + GIVEN_CACHE_MS - 1) !== null, true);
+check("cache: old", readGivenCache(entry(1000, true), 1000 + GIVEN_CACHE_MS), null);
+check("cache: 'off' lasts longer", readGivenCache(entry(1000, false), 1000 + GIVEN_OFF_CACHE_MS - 1) !== null, true);
+check("cache: broken text", readGivenCache("{oops", 1000), null);
+check("cache: nothing", readGivenCache(null, 1000), null);
+const hook = read("lib/useGivenLeadContext.ts");
+if (hook.indexOf("givenFlagAllows(settings, employeeId)") === -1 || hook.indexOf("givenFlagAllows(settings, employeeId)") > hook.indexOf('rpc("get_given_lead_context")')) problems.push("the function must not be called before the flag check");
+if (!read("components/LeadList.tsx").includes("givenContext.refresh()")) problems.push("LeadList does not refresh after a saved result");
+
 // Guards: where this is allowed to live, and what it must never do.
 const list = read("components/LeadList.tsx");
-for (const n of ["useGivenLeadContext(leads)", "givenFilterLeads(result, givenContext.byLeadId)", "givenFilterCount(leads, givenContext.byLeadId)", "givenContext.enabled &&"]) {
+for (const n of ["useGivenLeadContext(employeeId)", "givenFilterLeads(result, givenContext.byLeadId)", "givenFilterCount(leads, givenContext.byLeadId)", "givenContext.enabled &&"]) {
   if (!list.includes(n)) problems.push(`LeadList.tsx is missing ${n}`);
 }
 if (!read("components/LeadDetailModal.tsx").includes("<GivenLeadContextBox")) problems.push("LeadDetailModal.tsx does not show the box");

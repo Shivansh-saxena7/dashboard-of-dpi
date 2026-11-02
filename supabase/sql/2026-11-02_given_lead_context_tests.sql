@@ -84,7 +84,7 @@ insert into _t select 12, 'grants: PUBLIC/anon closed, helper closed to authenti
   not has_function_privilege('anon', 'get_given_lead_context()', 'execute') and has_function_privilege('authenticated', 'get_given_lead_context()', 'execute') and has_function_privilege('service_role', 'get_given_lead_context()', 'execute')
   and not exists (select 1 from pg_proc p, aclexplode(p.proacl) a where p.oid = 'get_given_lead_context()'::regprocedure and a.grantee = 0)
   and not has_function_privilege('authenticated', 'given_lead_context_for(uuid)', 'execute') and not has_function_privilege('anon', 'given_lead_context_for(uuid)', 'execute')
-  and (select bool_and(p.provolatile = 's' and p.prosecdef) from pg_proc p where p.proname in ('get_given_lead_context', 'given_lead_context_for') and p.pronamespace = 'public'::regnamespace), null;
+  and (select bool_and(p.provolatile = 's' and p.prosecdef) from pg_proc p where p.proname in ('get_given_lead_context', 'given_lead_context_for', 'given_note_mask') and p.pronamespace = 'public'::regnamespace), null;
 
 -- filter and box lifetime. Each change is undone. b330a35d's owner has not necessarily called it, so it is put in the filter first.
 insert into _t select 20, 'untouched assignment is in the filter', pg_temp.after('b330a35d', 'update lead_history set call_count = 0, first_call_at = null, last_activity_at = assigned_at where id = $H') = 'true', null;
@@ -134,5 +134,36 @@ insert into _t select 32, 'admin_pilot, not in the list: nothing', pg_temp.flag(
 insert into _t select 33, 'on: on', pg_temp.flag('on', false) = 'true', null;
 insert into _t select 34, 'default is off', (select column_default from information_schema.columns where table_name = 'lead_engine_settings' and column_name = 'given_lead_context_mode') like '%off%', null;
 
+-- names in someone else's note. Uses real employee names read from the table; the clients are made up.
+create temp table _nm on commit drop as select
+  (select name from employees where name ilike 'Tanu%' limit 1) full_name, split_part((select name from employees where name ilike 'Tanu%' limit 1), ' ', 1) first_name;
+insert into _t select 50, 'mask: first name, any case, inside a sentence', given_note_mask('Call back tomorrow ' || lower(first_name) || ' ke phone se') = 'Call back tomorrow a team member ke phone se', given_note_mask('Call back tomorrow ' || lower(first_name) || ' ke phone se') from _nm;
+insert into _t select 51, 'mask: full name becomes one phrase', given_note_mask('Owner ' || btrim(full_name) || ', calls 6') = 'Owner a team member, calls 6', given_note_mask('Owner ' || btrim(full_name) || ', calls 6') from _nm;
+insert into _t select 52, 'mask: part of a longer word is left alone', given_note_mask(first_name || 'ji needs ' || first_name || 'pur flat') = first_name || 'ji needs ' || first_name || 'pur flat', null from _nm;
+insert into _t select 53, 'mask: a surname alone is left alone', given_note_mask('Sharma ji will visit, Singh also') = 'Sharma ji will visit, Singh also', given_note_mask('Sharma ji will visit, Singh also');
+insert into _t select 54, 'mask: a note with no name is unchanged', given_note_mask('Need 2bhk ditales shered') = 'Need 2bhk ditales shered', null;
+insert into _t select 55, 'mask: closed to employees', not has_function_privilege('authenticated', 'given_note_mask(text)', 'execute') and not has_function_privilege('anon', 'given_note_mask(text)', 'execute'), null;
+-- in the box: masked for someone else's note, as written for the caller's own
+create or replace function pg_temp.note_probe(p_by_owner boolean) returns text language plpgsql as $$
+declare o record; v jsonb; emp uuid; nm text;
+begin
+  select * into o from _o where id8 = '04b70632';
+  select first_name into nm from _nm;
+  begin
+    if p_by_owner then
+      update lead_activity_log set employee_id = o.owner where lead_id = o.lead and activity_type = 'STATUS_UPDATE' and detail = 'CONNECTED';
+      update lead_notes set employee_id = o.owner where lead_id = o.lead;
+    end if;
+    update lead_notes set note = 'Ask ' || nm || ' first' where lead_id = o.lead;
+    v := pg_temp.row_for(o.auth, o.lead);
+    raise exception 'PROBE %', v#>>'{note,text}';
+  exception when others then
+    if sqlerrm like 'PROBE %' then return substr(sqlerrm, 7); end if;
+    return 'ERROR ' || left(sqlerrm, 90);
+  end;
+end $$;
+insert into _t select 56, 'box: name masked in someone else''s note', pg_temp.note_probe(false) = 'Ask a team member first', pg_temp.note_probe(false);
+insert into _t select 57, 'box: the caller''s own note stays as written', pg_temp.note_probe(true) = 'Ask ' || (select first_name from _nm) || ' first', null;
+
 -- a read-only function cannot write: stable + no write statement in either body
-insert into _t select 40, 'no write statement in either function', (select bool_and(pg_get_functiondef(p.oid) !~* '\m(insert into|update [a-z_]+ set|delete from)\M') from pg_proc p where p.proname in ('get_given_lead_context', 'given_lead_context_for') and p.pronamespace = 'public'::regnamespace), null;
+insert into _t select 40, 'no write statement in either function', (select bool_and(pg_get_functiondef(p.oid) !~* '\m(insert into|update [a-z_]+ set|delete from)\M') from pg_proc p where p.proname in ('get_given_lead_context', 'given_lead_context_for', 'given_note_mask') and p.pronamespace = 'public'::regnamespace), null;

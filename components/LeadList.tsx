@@ -488,7 +488,12 @@ export default function LeadList({ employeeId }: LeadListProps) {
     );
   }
 
-  const givenContext = useGivenLeadContext(leads);
+  const givenContext = useGivenLeadContext(employeeId);
+
+  // The feature went off while this filter was selected: back to all statuses, not an empty list.
+  useEffect(() => {
+    if (!givenContext.enabled && statusFilter === GIVEN_BY_ADMIN_FILTER) setStatusFilter("");
+  }, [givenContext.enabled, statusFilter]);
 
   const tabCounts = useMemo(() => {
     const counts: Record<BoardStage, number> = { LEADS: 0, FOLLOW_UP: 0, VISIT: 0, BOOKING: 0 };
@@ -677,7 +682,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
 
     return result;
 
-  }, [leads, givenContext, activeTab, searchQuery, projectFilter, sourceFilter, statusFilter, recyclingSoonFilter, dateRangeFilter, customStart, customEnd, sortBy, personalOnlyFilter, originFilter, priorityFilter, recyclingTomorrowFilter, workingCalendar]);
+  }, [leads, givenContext.byLeadId, activeTab, searchQuery, projectFilter, sourceFilter, statusFilter, recyclingSoonFilter, dateRangeFilter, customStart, customEnd, sortBy, personalOnlyFilter, originFilter, priorityFilter, recyclingTomorrowFilter, workingCalendar]);
 
   // Same fix as app/admin/leads/page.tsx's cardLeads (2026-09-18) — the
   // render loop below used to build `lead={{ ...inline object... }}`
@@ -1036,7 +1041,10 @@ export default function LeadList({ employeeId }: LeadListProps) {
             setSelectedLeadId(null);
             requestAnimationFrame(() => scrollToAndHighlightCard(`lead-card-${id}`));
           }}
-          onUpdated={(updates) => handleLeadUpdated(selectedLead.id, updates)}
+          onUpdated={(updates) => {
+            handleLeadUpdated(selectedLead.id, updates);
+            givenContext.refresh();
+          }}
           onBoardStageChanged={(stage) => handleBoardStageChanged(selectedLead.id, stage)}
           onPauseChanged={(pause) => handlePauseChanged(selectedLead.id, pause)}
         />

@@ -19,6 +19,43 @@ export interface GivenLeadContext {
   your_notes: { at: string; note: string; outcome: string | null }[];
 }
 
+// Whether to ask the database at all. The settings row is read with select("*"), so before the SQL is
+// applied the mode is simply undefined here, which means off: no call, no error, nothing on screen.
+export function givenFlagAllows(settings: Record<string, unknown> | null | undefined, employeeId: string | null | undefined): boolean {
+  const mode = settings?.given_lead_context_mode;
+  if (mode === "on") return Boolean(employeeId);
+  if (mode !== "admin_pilot" || !employeeId) return false;
+  const pilots = settings?.given_lead_context_pilot_ids;
+  return Array.isArray(pilots) && pilots.includes(employeeId);
+}
+
+// The function is not there or not allowed yet: the feature stays hidden, the employee sees nothing.
+export function givenFeatureUnavailable(error: { code?: string | null } | null | undefined): boolean {
+  return ["PGRST202", "42501", "42883"].includes(error?.code ?? "");
+}
+
+// Session cache: reopening the Leads page does not call the database again for a minute.
+export const GIVEN_CACHE_MS = 60 * 1000;
+export const GIVEN_OFF_CACHE_MS = 5 * 60 * 1000;
+export const GIVEN_FOCUS_THROTTLE_MS = 10 * 1000;
+
+export interface GivenCacheEntry {
+  at: number;
+  enabled: boolean;
+  leads: GivenLeadContext[];
+}
+
+export function readGivenCache(raw: string | null | undefined, nowMs: number): GivenCacheEntry | null {
+  if (!raw) return null;
+  try {
+    const entry = JSON.parse(raw) as GivenCacheEntry;
+    const maxAge = entry.enabled ? GIVEN_CACHE_MS : GIVEN_OFF_CACHE_MS;
+    return typeof entry.at === "number" && nowMs - entry.at < maxAge ? entry : null;
+  } catch {
+    return null;
+  }
+}
+
 export function contextByLeadId(rows: GivenLeadContext[] | null | undefined): Map<string, GivenLeadContext> {
   return new Map((rows ?? []).map((row) => [row.lead_id, row]));
 }

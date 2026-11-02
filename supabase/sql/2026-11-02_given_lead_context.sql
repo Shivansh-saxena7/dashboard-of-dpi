@@ -15,6 +15,27 @@ alter table lead_engine_settings
 alter table lead_engine_settings add constraint lead_engine_settings_given_lead_context_mode_check
   check (given_lead_context_mode in ('off', 'admin_pilot', 'on'));
 
+-- Employee names inside a note written by someone else: full name and first name, whole words, any case. A surname alone
+-- is left as it is, because it is far more likely to be a client's ("Sharma ji"). 2 Nov: 8,456 notes, about 20 hits, none a client.
+create or replace function public.given_note_mask(p_note text)
+returns text language sql stable security definer set search_path to 'public' as $$
+  select case when pat.p is null then p_note else regexp_replace(p_note, pat.p, 'a team member', 'gi') end
+  from (
+    select '\m(' || string_agg(alt, '|' order by length(alt) desc) || ')\M' p from (
+      select distinct alt from employees e
+      cross join lateral (
+        select array_agg(w order by ord) words from (
+          select regexp_replace(t.w, '[^A-Za-z]', '', 'g') w, t.ord from regexp_split_to_table(e.name, '\s+') with ordinality t(w, ord)
+        ) x where length(w) >= 2 and lower(w) not in ('mr', 'mrs', 'ms', 'dr')
+      ) n
+      cross join lateral unnest(array[n.words[1], array_to_string(n.words, '\s+')]) alt
+      where n.words is not null and length(n.words[1]) >= 3 and lower(n.words[1]) not in ('testing', 'cordinator', 'sales', 'admin', 'test')
+    ) names
+  ) pat
+$$;
+revoke all on function public.given_note_mask(text) from public, anon, authenticated;
+grant execute on function public.given_note_mask(text) to service_role;
+
 -- The context of one employee's given leads. Not callable by employees directly: it takes any employee id.
 create or replace function public.given_lead_context_for(p_employee uuid)
 returns jsonb language sql stable security definer set search_path to 'public' as $$
@@ -36,7 +57,8 @@ returns jsonb language sql stable security definer set search_path to 'public' a
     'in_filter', g.call_count = 0 and g.first_call_at is null and (g.last_activity_at is null or g.last_activity_at <= g.assigned_at + interval '2 seconds'),
     'last_positive', case when lp.at_ is null then null else jsonb_build_object('kind', lp.kind, 'at', lp.at_, 'is_you', lp.by_id = p_employee) end,
     'note', case when coalesce(ne.id, no.id) is null then null else jsonb_build_object(
-      'text', coalesce(ne.note, no.note),
+      -- the caller's own words stay as written
+      'text', case when lp.by_id = p_employee then coalesce(ne.note, no.note) else given_note_mask(coalesce(ne.note, no.note)) end,
       'at', coalesce(ne.created_at, no.created_at),
       'match', case when ne.id is not null then 'exact' else 'other_time' end) end,
     'after', case when af.at_ is null then null else jsonb_build_object('outcome', af.detail, 'at', af.at_) end,
