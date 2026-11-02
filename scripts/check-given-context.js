@@ -16,7 +16,7 @@ const load = (file) => {
   new Function("module", "exports", "require", outputText)(mod, mod.exports, (p) => load(path.basename(p).replace(/\.ts$/, "")));
   return (loaded[file] = mod.exports);
 };
-const { givenBoxText, givenBoxVisible, givenFilterLeads, givenFilterCount, contextByLeadId, givenFlagAllows, givenFeatureUnavailable, readGivenCache, GIVEN_CACHE_MS, GIVEN_OFF_CACHE_MS } = load("givenLeadContext");
+const { hasCallOrResult, givenBoxText, givenBoxVisible, givenFilterLeads, givenFilterCount, contextByLeadId, givenFlagAllows, givenFeatureUnavailable, readGivenCache, GIVEN_CACHE_MS, GIVEN_OFF_CACHE_MS } = load("givenLeadContext");
 
 const problems = [];
 const check = (name, got, want) => {
@@ -51,6 +51,27 @@ const leads = [{ id: "A" }, { id: "B" }, { id: "C" }];
 check("filter list: in_filter and on the board", givenFilterLeads(leads, map).map((l) => l.id), ["A"]);
 check("count = list", givenFilterCount(leads, map), givenFilterLeads(leads, map).length);
 check("nothing loaded", givenFilterCount(leads, contextByLeadId(null)), 0);
+
+// Rule v2: only a first call or a result takes a lead out.
+const A0 = "2026-11-02T08:00:00.000Z";
+const a = (over) => ({ call_count: 0, first_call_at: null, outcome_at: null, assigned_at: A0, last_activity_at: A0, ...over });
+check("untouched", hasCallOrResult(a({})), false);
+check("note only (last activity moved)", hasCallOrResult(a({ last_activity_at: "2026-11-02T09:00:00.000Z" })), false);
+check("reminder only (last activity moved)", hasCallOrResult(a({ last_activity_at: "2026-11-03T09:00:00.000Z" })), false);
+check("stage move only (last activity moved)", hasCallOrResult(a({ last_activity_at: "2026-11-02T10:00:00.000Z" })), false);
+check("pause-expiry sweep (last activity moved)", hasCallOrResult(a({ last_activity_at: "2026-11-09T10:00:00.000Z" })), false);
+check("restore: outcome set when assigning", hasCallOrResult(a({ outcome_at: A0 })), false);
+check("call", hasCallOrResult(a({ call_count: 1, first_call_at: "2026-11-02T09:00:00.000Z" })), true);
+check("first_call_at alone", hasCallOrResult(a({ first_call_at: "2026-11-02T09:00:00.000Z" })), true);
+check("result saved", hasCallOrResult(a({ outcome_at: "2026-11-02T09:00:00.000Z" })), true);
+const m2 = contextByLeadId([row({ lead_id: "N", in_filter: true }), row({ lead_id: "C", in_filter: true })]);
+const l2 = [{ id: "N", lead_history: [a({ last_activity_at: "2026-11-02T09:00:00.000Z" })] }, { id: "C", lead_history: [a({ call_count: 1 })] }];
+check("page: note stays, call leaves straight away", givenFilterLeads(l2, m2).map((l) => l.id), ["N"]);
+check("page: count = list", givenFilterCount(l2, m2), 1);
+const ruleSql = read("supabase/sql/2026-11-02_given_lead_context_rule_v2.sql");
+const inFilter = ruleSql.slice(ruleSql.indexOf("'in_filter'"), ruleSql.indexOf("'last_positive'"));
+if (inFilter.includes("last_activity_at")) problems.push("in_filter must not read last_activity_at");
+if (read("lib/givenLeadContext.ts").slice(0).match(/hasCallOrResult[\s\S]*?\n}/)?.[0].includes("history.last_activity_at")) problems.push("hasCallOrResult must not read last_activity_at");
 
 // Flag: no call at all unless the employee is included. Columns missing (SQL not applied) = off.
 check("settings without the columns (SQL not applied)", givenFlagAllows({ id: 1 }, "E1"), false);

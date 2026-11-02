@@ -1,4 +1,4 @@
--- 2026-11-02 — "Given by admin" filter and context box for employees. NOT APPLIED — apply only after the owner's "haan" (LF copy).
+-- 2026-11-02 — "Given by admin" filter and context box for employees. APPLIED 2026-11-02 17:19 IST (owner's "haan", LF copy of 1a00ea4, md5 0ffd1f76), mode off.
 -- Rollback: 2026-11-02_given_lead_context_rollback.sql   Tests (dry-run only): 2026-11-02_given_lead_context_tests.sql
 -- Parity (read-only, after apply): 2026-11-02_given_lead_context_parity.sql
 --

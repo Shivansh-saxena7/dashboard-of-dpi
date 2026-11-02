@@ -1,4 +1,4 @@
--- Known-answer tests for 2026-11-02_given_lead_context.sql. Run ONLY inside a transaction that is never committed, after the
+-- Known-answer tests for 2026-11-02_given_lead_context.sql + _rule_v2.sql. Run ONLY inside a transaction that is never committed, after the
 -- apply file (without its begin/commit), as postgres. Real leads are used read-only; changes are made in sub-blocks that are undone.
 create temp table _t (n int, name text, pass boolean, info text) on commit drop;
 create temp table _o on commit drop as
@@ -87,10 +87,44 @@ insert into _t select 12, 'grants: PUBLIC/anon closed, helper closed to authenti
   and (select bool_and(p.provolatile = 's' and p.prosecdef) from pg_proc p where p.proname in ('get_given_lead_context', 'given_lead_context_for', 'given_note_mask') and p.pronamespace = 'public'::regnamespace), null;
 
 -- filter and box lifetime. Each change is undone. b330a35d's owner has not necessarily called it, so it is put in the filter first.
-insert into _t select 20, 'untouched assignment is in the filter', pg_temp.after('b330a35d', 'update lead_history set call_count = 0, first_call_at = null, last_activity_at = assigned_at where id = $H') = 'true', null;
-insert into _t select 21, 'first call: out of the filter, box stays', pg_temp.after('b330a35d', 'update lead_history set call_count = 1, first_call_at = now(), last_activity_at = now() where id = $H') = 'false', null;
-insert into _t select 22, 'result saved: out of the filter, box stays', pg_temp.after('b330a35d', 'update lead_history set call_count = 0, first_call_at = null, outcome = ''CONNECTED'', outcome_at = now(), last_activity_at = assigned_at + interval ''1 hour'' where id = $H') = 'false', null;
-insert into _t select 23, 'restore row with outcome_at set and no action: still in the filter', pg_temp.after('b330a35d', 'update lead_history set call_count = 0, first_call_at = null, outcome = ''CONNECTED'', outcome_at = assigned_at, last_activity_at = assigned_at where id = $H') = 'true', null;
+create or replace function pg_temp.clean() returns text language sql as $$ select 'update lead_history set call_count = 0, first_call_at = null, outcome = null, outcome_at = null, last_activity_at = assigned_at where id = $H; delete from lead_activity_log where lead_history_id = $H and activity_type in (''STATUS_UPDATE'', ''BOARD_STAGE_MOVE''); ' $$;
+insert into _t select 20, 'untouched assignment is in the filter', pg_temp.after('b330a35d', pg_temp.clean()) = 'true', null;
+insert into _t select 21, 'first call: out of the filter, box stays', pg_temp.after('b330a35d', pg_temp.clean() || 'update lead_history set call_count = 1, first_call_at = now(), last_activity_at = now() where id = $H') = 'false', null;
+insert into _t select 22, 'result saved: out of the filter, box stays', pg_temp.after('b330a35d', pg_temp.clean() || 'update lead_history set outcome = ''CONNECTED'', outcome_at = assigned_at + interval ''1 hour'', last_activity_at = assigned_at + interval ''1 hour'' where id = $H') = 'false', null;
+insert into _t select 23, 'restore row with outcome_at set and no action: still in the filter', pg_temp.after('b330a35d', pg_temp.clean() || 'update lead_history set outcome = ''CONNECTED'', outcome_at = assigned_at, last_activity_at = assigned_at where id = $H') = 'true', null;
+-- rule v2: what must not take a lead out, then the same through the real functions as the employee
+insert into _t select 60, 'stage move only: stays in the filter', pg_temp.after('b330a35d', pg_temp.clean() || 'insert into lead_activity_log (lead_id, lead_history_id, employee_id, activity_type, detail) select lead_id, id, employee_id, ''BOARD_STAGE_MOVE'', ''FOLLOW_UP'' from lead_history where id = $H; update lead_history set last_activity_at = now() where id = $H') = 'true', null;
+insert into _t select 61, 'pause-expiry sweep moved last activity: stays in the filter', pg_temp.after('b330a35d', pg_temp.clean() || 'update lead_history set last_activity_at = now(), paused_until = null where id = $H') = 'true', null;
+insert into _t select 62, 'a status update row on this assignment alone: out of the filter', pg_temp.after('b330a35d', pg_temp.clean() || 'insert into lead_activity_log (lead_id, lead_history_id, employee_id, activity_type, detail) select lead_id, id, employee_id, ''STATUS_UPDATE'', ''NOT_CONNECTED'' from lead_history where id = $H') = 'false', null;
+create or replace function pg_temp.real(p_action text) returns text language plpgsql as $$
+declare o record; v jsonb;
+begin
+  select * into o from _o where id8 = 'b330a35d';
+  begin
+    update lead_history set call_count = 0, first_call_at = null, outcome = null, outcome_at = null, last_activity_at = assigned_at, last_call_click_at = null where id = o.hist;
+    delete from lead_activity_log where lead_history_id = o.hist and activity_type in ('STATUS_UPDATE', 'BOARD_STAGE_MOVE');
+    perform pg_temp.as_user(o.auth);
+    set local role authenticated;
+    if p_action = 'note' then perform log_lead_update_atomic(p_lead_id => o.lead, p_lead_history_id => o.hist, p_new_status => null, p_note => 'test note');
+    elsif p_action = 'reminder' then perform log_lead_update_atomic(p_lead_id => o.lead, p_lead_history_id => o.hist, p_new_status => null, p_note => 'test note', p_reminder_value => 2, p_reminder_unit => 'days');
+    elsif p_action = 'status' then perform log_lead_update_atomic(p_lead_id => o.lead, p_lead_history_id => o.hist, p_new_status => 'NOT_CONNECTED', p_note => 'test note');
+    elsif p_action = 'call' then perform log_call_click_atomic(o.hist);
+    elsif p_action = 'whatsapp' then perform log_whatsapp_click_atomic(o.hist);
+    end if;
+    reset role;
+    v := pg_temp.row_for(o.auth, o.lead);
+    raise exception 'PROBE %', coalesce(v->>'in_filter', 'absent');
+  exception when others then
+    reset role;
+    if sqlerrm like 'PROBE %' then return substr(sqlerrm, 7); end if;
+    return 'ERROR ' || left(sqlerrm, 90);
+  end;
+end $$;
+insert into _t select 63, 'real: note only stays in the filter', pg_temp.real('note') = 'true', pg_temp.real('note');
+insert into _t select 64, 'real: reminder only stays in the filter', pg_temp.real('reminder') = 'true', pg_temp.real('reminder');
+insert into _t select 65, 'real: WhatsApp tap stays in the filter', pg_temp.real('whatsapp') = 'true', pg_temp.real('whatsapp');
+insert into _t select 66, 'real: Call tap leaves the filter', pg_temp.real('call') = 'false', pg_temp.real('call');
+insert into _t select 67, 'real: result saved leaves the filter', pg_temp.real('status') = 'false', pg_temp.real('status');
 insert into _t select 24, 'protection over: no filter, no box', pg_temp.after('b330a35d', 'update lead_restore_log set protected_until = now() - interval ''1 minute'' where lead_id = $L') = 'absent', null;
 insert into _t select 25, 'undone: no filter, no box', pg_temp.after('b330a35d', 'update lead_restore_log set undone_at = now() where lead_id = $L') = 'absent', null;
 insert into _t select 26, 'recycled away (active assignment closed): no filter, no box', pg_temp.after('b330a35d', 'update lead_history set is_active = false, ended_reason = ''RECYCLE_READY'' where id = $H') = 'absent', null;

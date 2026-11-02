@@ -2,7 +2,8 @@
 -- Compares the function with the same conditions written directly, for every lead with an open given window.
 with direct as (
   select distinct on (h.id) h.lead_id, h.employee_id,
-    h.call_count = 0 and h.first_call_at is null and (h.last_activity_at is null or h.last_activity_at <= h.assigned_at + interval '2 seconds') in_filter
+    h.call_count = 0 and h.first_call_at is null and (h.outcome_at is null or h.outcome_at <= h.assigned_at + interval '2 seconds')
+      and not exists (select 1 from lead_activity_log a where a.lead_history_id = h.id and a.activity_type = 'STATUS_UPDATE') in_filter
   from lead_history h
   join leads l on l.id = h.lead_id and l.current_owner_id = h.employee_id
   join lead_restore_log r on r.new_lead_history_id = h.id and r.undone_at is null and r.protected_until > now()

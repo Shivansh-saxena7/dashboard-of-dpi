@@ -60,11 +60,29 @@ export function contextByLeadId(rows: GivenLeadContext[] | null | undefined): Ma
   return new Map((rows ?? []).map((row) => [row.lead_id, row]));
 }
 
-export function givenFilterLeads<T extends { id: string }>(leads: T[], byLeadId: Map<string, GivenLeadContext>): T[] {
-  return leads.filter((lead) => byLeadId.get(lead.id)?.in_filter === true);
+export interface GivenAssignmentFields {
+  call_count?: number | null;
+  first_call_at?: string | null;
+  outcome_at?: string | null;
+  assigned_at?: string | null;
 }
 
-export function givenFilterCount(leads: { id: string }[], byLeadId: Map<string, GivenLeadContext>): number {
+// The same rule as in_filter in given_lead_context_for, on the assignment row the page already holds, so a call or a
+// saved result takes the lead out at once. Only a first call or result counts: not a note, reminder, stage move or the
+// sweep (those move last_activity_at, not read here). A restore sets outcome_at when assigning, so only a later one counts.
+export function hasCallOrResult(history: GivenAssignmentFields | null | undefined): boolean {
+  if (!history) return false;
+  if ((history.call_count ?? 0) > 0 || history.first_call_at) return true;
+  if (!history.outcome_at) return false;
+  const assigned = history.assigned_at ? Date.parse(history.assigned_at) : NaN;
+  return !Number.isFinite(assigned) || Date.parse(history.outcome_at) > assigned + 2000;
+}
+
+export function givenFilterLeads<T extends { id: string; lead_history?: GivenAssignmentFields[] | null }>(leads: T[], byLeadId: Map<string, GivenLeadContext>): T[] {
+  return leads.filter((lead) => byLeadId.get(lead.id)?.in_filter === true && !hasCallOrResult(lead.lead_history?.[0]));
+}
+
+export function givenFilterCount(leads: { id: string; lead_history?: GivenAssignmentFields[] | null }[], byLeadId: Map<string, GivenLeadContext>): number {
   return givenFilterLeads(leads, byLeadId).length;
 }
 
