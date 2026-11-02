@@ -8,6 +8,7 @@ import { calculateStats } from "@/lib/calculateStats";
 import { getUniquePosts } from "@/lib/getUniquePosts";
 import { reportClientError } from "@/lib/reportClientError";
 import PageHeader from "@/components/PageHeader";
+import { authedFetch } from "@/lib/authedFetch";
 export default function AdminDashboard() {
 
 const [allData,setAllData]=useState<any[]>([]);
@@ -56,7 +57,7 @@ async function loadTracking(){
 
 try{
 
-const res=await fetch("/api/data",{
+const res=await authedFetch("/api/data",{
 
 cache:"no-store"
 
