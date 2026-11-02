@@ -6,6 +6,8 @@ import { X, Phone, Loader2, Send, MessageCircle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { logCallClick } from "@/lib/logCallClick";
 import { logLeadUpdate } from "@/lib/logLeadUpdate";
+import { SESSION_EXPIRED_CODE } from "@/lib/sessionGuard";
+import { clearLeadUpdateDraft, draftReturnPath, loadLeadUpdateDraft, saveLeadUpdateDraft } from "@/lib/leadUpdateDraft";
 import type { ContactMethod } from "@/lib/callQuality";
 import HowDidYouTalk from "@/components/HowDidYouTalk";
 import toast from "react-hot-toast";
@@ -83,6 +85,18 @@ export default function DataDetailModal({ lead, onClose, onUpdated, onBoardStage
   const [visitPromptOpen, setVisitPromptOpen] = useState(false);
   const [bookingConfirmOpen, setBookingConfirmOpen] = useState(false);
   const [moving, setMoving] = useState(false);
+
+  // What was typed when saving failed because the login expired (see lib/leadUpdateDraft.ts).
+  useEffect(() => {
+    const draft = loadLeadUpdateDraft(lead.id);
+    if (!draft) return;
+    setSelectedStatus(draft.status as LeadStatus | null);
+    setNoteText(draft.note);
+    setReminderValue(draft.reminderValue);
+    setReminderUnit(draft.reminderUnit as "hours" | "days");
+    if (draft.contactMethod) setContactMethod(draft.contactMethod as ContactMethod);
+    toast.success("Your unsaved update was restored. Check it and save again.");
+  }, [lead.id]);
 
   useEffect(() => {
     loadNotes();
@@ -224,10 +238,18 @@ export default function DataDetailModal({ lead, onClose, onUpdated, onBoardStage
       }, contactMethod);
 
       if (error) {
+        if (error.code === SESSION_EXPIRED_CODE) {
+          saveLeadUpdateDraft(
+            lead.id,
+            { status: selectedStatus, note: noteText, reminderValue, reminderUnit, contactMethod },
+            draftReturnPath(window.location.pathname, lead.id)
+          );
+        }
         toast.error(error.message || "Could not log this update.");
         return;
       }
 
+      clearLeadUpdateDraft(lead.id);
       toast.success("Update logged.");
 
       onUpdated({

@@ -9,6 +9,7 @@ import { Building2, ShieldCheck, Mail, Lock, Eye, EyeOff, ArrowRight } from "luc
 import { Playfair_Display } from "next/font/google";
 
 import { supabase } from "@/lib/supabase";
+import { safeNextPath } from "@/lib/sessionGuard";
 import { reportClientError } from "@/lib/reportClientError";
 
 const playfair = Playfair_Display({ subsets: ["latin"], weight: ["600", "700"] });
@@ -68,7 +69,7 @@ export default function LoginPage() {
       } else if (employee?.role === "payroll") {
         router.replace("/payroll");
       } else {
-        router.replace("/");
+        router.replace(safeNextPath(new URLSearchParams(window.location.search).get("next")) ?? "/");
       }
       // Deliberately no setCheckingSession(false) here — stays on the
       // neutral loading screen until the redirect above actually
@@ -132,7 +133,7 @@ reportClientError("session check", err);
       } else {
         toast.success("Login Successful!");
         setTimeout(() => {
-          router.replace("/");
+          router.replace(safeNextPath(new URLSearchParams(window.location.search).get("next")) ?? "/");
         }, 600);
       }
 
