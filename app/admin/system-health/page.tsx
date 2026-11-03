@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 
 import PageHeader from "@/components/PageHeader";
+import GuardHeldLeadsCard from "@/components/GuardHeldLeadsCard";
 interface Anomaly {
   id: string;
   detected_at: string;
@@ -44,6 +45,7 @@ export default function SystemHealthPage() {
   const [loading, setLoading] = useState(true);
   const [showReviewed, setShowReviewed] = useState(false);
   const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [heldRefreshKey, setHeldRefreshKey] = useState(0);
 
   useEffect(() => {
     loadAnomalies();
@@ -123,7 +125,7 @@ export default function SystemHealthPage() {
         title="System Health"
         description="Anomalies the app's own defensive checks flagged automatically — nothing here required a human to notice something looked off first."
         actions={
-          <button onClick={loadAnomalies} className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition">
+          <button onClick={() => { loadAnomalies(); setHeldRefreshKey((k) => k + 1); }} className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-sm font-semibold transition">
             <RefreshCw size={13} />
             Refresh
           </button>
@@ -149,6 +151,8 @@ export default function SystemHealthPage() {
           </button>
         </div>
       </PageHeader>
+
+      <GuardHeldLeadsCard refreshKey={heldRefreshKey} />
 
       {loading ? (
         <p className="text-sm text-slate-400 px-1">Loading...</p>

@@ -91,6 +91,8 @@ export function createReportingFetch(options: ReportingFetchOptions, baseFetch: 
     if (code === "PGRST116") return response;
     // The "Given by admin" feature hides itself when its function is missing or not allowed yet: expected, not an error.
     if (url.includes("/rpc/get_given_lead_context") && ["PGRST202", "42501", "42883"].includes(code)) return response;
+    // Same for the guard-held card on System Health: hidden until its function is applied.
+    if (url.includes("/rpc/get_guard_held_leads") && ["PGRST202", "42501", "42883"].includes(code)) return response;
     if (response.status === 401 && /JWT|PGRST30/i.test(`${code} ${body.message || ""}`)) return response;
 
     const severity = code === "P0001" || code === "23505" ? "warning" : "error";
