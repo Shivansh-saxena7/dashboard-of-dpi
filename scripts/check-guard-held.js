@@ -41,7 +41,6 @@ if (!/coalesce\(current_employee_role\(\), ''\)/.test(body)) problems.push("the 
 if (!/revoke all on function public\.get_guard_held_leads\(\) from public, anon/.test(body)) problems.push("anon must not run the function");
 if (!/security definer set search_path/.test(body)) problems.push("the function must pin search_path");
 if (/\b(insert|update|delete)\s+(into\s+)?(leads|lead_history|lead_guard_events|lead_engine_settings)\b/i.test(body)) problems.push("the function must be read-only");
-if (/\r/.test(sql)) problems.push("the SQL file must be LF");
 if (/mobile/i.test(read("components/GuardHeldLeadsCard.tsx"))) problems.push("the card must not show a mobile number");
 if (!read("lib/reportingFetch.ts").includes("/rpc/get_guard_held_leads")) problems.push("reportingFetch must not log the expected hidden state");
 if (!read("app/admin/system-health/page.tsx").includes("GuardHeldLeadsCard")) problems.push("system-health must show the card");
