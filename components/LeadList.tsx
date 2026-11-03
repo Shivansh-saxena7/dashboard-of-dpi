@@ -26,6 +26,8 @@ import { useWorkingCalendar } from "@/lib/useWorkingCalendar";
 import type { WorkingCalendar } from "@/lib/workingCalendar";
 import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 import { isUntouchedInCurrentAssignment } from "@/lib/newLeadFilter";
+import { useGivenLeadContext } from "@/lib/useGivenLeadContext";
+import { GIVEN_BY_ADMIN_FILTER, givenFilterCount, givenFilterLeads } from "@/lib/givenLeadContext";
 
 interface LeadListProps {
   employeeId: string;
@@ -486,6 +488,13 @@ export default function LeadList({ employeeId }: LeadListProps) {
     );
   }
 
+  const givenContext = useGivenLeadContext(employeeId);
+
+  // The feature went off while this filter was selected: back to all statuses, not an empty list.
+  useEffect(() => {
+    if (!givenContext.enabled && statusFilter === GIVEN_BY_ADMIN_FILTER) setStatusFilter("");
+  }, [givenContext.enabled, statusFilter]);
+
   const tabCounts = useMemo(() => {
     const counts: Record<BoardStage, number> = { LEADS: 0, FOLLOW_UP: 0, VISIT: 0, BOOKING: 0 };
 
@@ -583,7 +592,9 @@ export default function LeadList({ employeeId }: LeadListProps) {
       result = result.filter((lead) => lead.source === sourceFilter);
     }
 
-    if (statusFilter === "NEW") {
+    if (statusFilter === GIVEN_BY_ADMIN_FILTER) {
+      result = givenFilterLeads(result, givenContext.byLeadId);
+    } else if (statusFilter === "NEW") {
       // "New" = not called and no result yet in the current assignment, see lib/newLeadFilter.ts
       result = result.filter((lead) => isUntouchedInCurrentAssignment(lead.lead_history[0]));
     } else if (statusFilter) {
@@ -671,7 +682,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
 
     return result;
 
-  }, [leads, activeTab, searchQuery, projectFilter, sourceFilter, statusFilter, recyclingSoonFilter, dateRangeFilter, customStart, customEnd, sortBy, personalOnlyFilter, originFilter, priorityFilter, recyclingTomorrowFilter, workingCalendar]);
+  }, [leads, givenContext.byLeadId, activeTab, searchQuery, projectFilter, sourceFilter, statusFilter, recyclingSoonFilter, dateRangeFilter, customStart, customEnd, sortBy, personalOnlyFilter, originFilter, priorityFilter, recyclingTomorrowFilter, workingCalendar]);
 
   // Same fix as app/admin/leads/page.tsx's cardLeads (2026-09-18) — the
   // render loop below used to build `lead={{ ...inline object... }}`
@@ -843,6 +854,9 @@ export default function LeadList({ employeeId }: LeadListProps) {
 
             <FilterSelect value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
               <option value="">All Statuses</option>
+              {givenContext.enabled && (
+                <option value={GIVEN_BY_ADMIN_FILTER}>Given by admin ({givenFilterCount(leads, givenContext.byLeadId)})</option>
+              )}
               {/* "New" is a filter value here, not a selectable status
                   an employee can set on a lead — those are two
                   genuinely different things (EMPLOYEE_SELECTABLE_STATUSES
@@ -986,6 +1000,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
 
       {selectedLead && (
         <LeadDetailModal
+          givenContext={givenContext.byLeadId.get(selectedLead.id) ?? null}
           lead={{
             id: selectedLead.id,
             leadHistoryId: selectedLead.lead_history[0]?.id,
@@ -1026,7 +1041,10 @@ export default function LeadList({ employeeId }: LeadListProps) {
             setSelectedLeadId(null);
             requestAnimationFrame(() => scrollToAndHighlightCard(`lead-card-${id}`));
           }}
-          onUpdated={(updates) => handleLeadUpdated(selectedLead.id, updates)}
+          onUpdated={(updates) => {
+            handleLeadUpdated(selectedLead.id, updates);
+            givenContext.refresh();
+          }}
           onBoardStageChanged={(stage) => handleBoardStageChanged(selectedLead.id, stage)}
           onPauseChanged={(pause) => handlePauseChanged(selectedLead.id, pause)}
         />

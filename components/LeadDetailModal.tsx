@@ -8,6 +8,8 @@ import { logCallClick } from "@/lib/logCallClick";
 import { logLeadUpdate } from "@/lib/logLeadUpdate";
 import { SESSION_EXPIRED_CODE } from "@/lib/sessionGuard";
 import { clearLeadUpdateDraft, draftReturnPath, loadLeadUpdateDraft, saveLeadUpdateDraft } from "@/lib/leadUpdateDraft";
+import GivenLeadContextBox from "./GivenLeadContextBox";
+import type { GivenLeadContext } from "@/lib/givenLeadContext";
 import type { ContactMethod } from "@/lib/callQuality";
 import HowDidYouTalk from "@/components/HowDidYouTalk";
 import toast from "react-hot-toast";
@@ -53,6 +55,7 @@ interface LeadNote {
 
 interface LeadDetailModalProps {
   lead: LeadDetailLead;
+  givenContext?: GivenLeadContext | null;
   onClose: () => void;
   onUpdated: (updates: { status?: LeadStatus; callCount: number }) => void;
   onBoardStageChanged: (boardStage: BoardStage) => void;
@@ -70,7 +73,7 @@ interface LeadDetailModalProps {
 // status and board_stage are deliberately independent state, per the
 // approved design — Log Update never touches board_stage, and Move
 // Lead never touches status except the one explicit case (Booking).
-export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStageChanged, onPauseChanged }: LeadDetailModalProps) {
+export default function LeadDetailModal({ lead, givenContext, onClose, onUpdated, onBoardStageChanged, onPauseChanged }: LeadDetailModalProps) {
 
   const [notes, setNotes] = useState<LeadNote[]>([]);
   const [loadingNotes, setLoadingNotes] = useState(true);
@@ -480,6 +483,8 @@ export default function LeadDetailModal({ lead, onClose, onUpdated, onBoardStage
           >
             {LEAD_STATUS_DISPLAY[lead.status].label}
           </span>
+
+          <GivenLeadContextBox context={givenContext ?? null} />
 
           {lead.assignedByType === "TEAM_LEADER" && (
             <div className="flex items-start gap-1.5 mt-3 rounded-xl bg-amber-50 border border-amber-100 px-2.5 py-2">

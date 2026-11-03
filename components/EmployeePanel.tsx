@@ -1,8 +1,6 @@
 "use client";
 
 import EmployeeDetails from "./EmployeeDetails";
-import TopPerformers from "./TopPerformers";
-import LowPerformer from "./LowPerformer";
 import { calculateStats } from "@/lib/calculateStats";
 import { getUniquePosts } from "@/lib/getUniquePosts";
 import Charts from "./Charts";
@@ -22,7 +20,6 @@ done?: boolean;
 
 type Props = {
 data: DataType[];
-allData: any[];
 employee: any;
 selectedEmployee: string;
 setSelectedEmployee: any;
@@ -32,7 +29,6 @@ selectedDate: string;
 export default function EmployeePanel({
 data,
 employee,
-allData,
 selectedEmployee,
 selectedDate,
 }: Props) {
@@ -56,37 +52,6 @@ const completed = stats.completed;
 const pending = stats.pending;
 
 const performance = stats.performance;
-
-// employee ranking
-
-const scores:any={};
-
-allData.forEach((d:any)=>{
-
-const score=
-(d["IG Like"]==="YES"?1:0)
-+
-(d["FB Like"]==="YES"?1:0);
-
-scores[d.Employee]=
-(scores[d.Employee]||0)
-+
-score;
-
-});
-
-const sorted=
-Object.entries(scores)
-.sort(
-(a:any,b:any)=>
-Number(b[1])-Number(a[1])
-);
-
-const rank=
-sorted.findIndex(
-(x:any)=>
-x[0]===employeeName
-)+1;
 
 const remainingGoal=
 Math.max(
@@ -227,18 +192,6 @@ text-xl">
 
 <div className="grid grid-cols-2 gap-3 mt-5">
 
-<div className="bg-blue-50 rounded-xl p-3">
-
-<p className="text-xs text-gray-500">
-Current Rank
-</p>
-
-<h4 className="text-2xl font-bold text-blue-600">
-#{rank>0?rank:"--"}
-</h4>
-
-</div>
-
 <div className="bg-orange-50 rounded-xl p-3">
 
 <p className="text-xs text-gray-500">
@@ -323,8 +276,6 @@ width:`${performance}%`
 
 <div className="lg:col-span-2 flex flex-col gap-6">
 
-<TopPerformers data={allData}/>
-
 <Charts data={data}/>
 
 <EmployeeDetails
@@ -332,8 +283,6 @@ data={data}
 selected={selectedEmployee}
 selectedDate={selectedDate}
 />
-
-<LowPerformer data={allData}/>
 
 </div>
 

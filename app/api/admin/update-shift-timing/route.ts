@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { resolveAdminCaller } from "@/lib/resolveAdminCaller";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 // Own route, own card on the Settings page — mirrors
@@ -8,6 +9,10 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 // with defaults but no consuming code yet, so they're deliberately
 // left out (editing them would silently do nothing — misleading).
 export async function POST(req: Request) {
+  // Admin only: the caller is verified before anything is read or written.
+  const auth = await resolveAdminCaller(req);
+  if (auth.errorResponse) return auth.errorResponse;
+
 
   try {
 

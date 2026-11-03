@@ -89,6 +89,8 @@ export function createReportingFetch(options: ReportingFetchOptions, baseFetch: 
 
     const code = body.code || String(response.status);
     if (code === "PGRST116") return response;
+    // The "Given by admin" feature hides itself when its function is missing or not allowed yet: expected, not an error.
+    if (url.includes("/rpc/get_given_lead_context") && ["PGRST202", "42501", "42883"].includes(code)) return response;
     if (response.status === 401 && /JWT|PGRST30/i.test(`${code} ${body.message || ""}`)) return response;
 
     const severity = code === "P0001" || code === "23505" ? "warning" : "error";
