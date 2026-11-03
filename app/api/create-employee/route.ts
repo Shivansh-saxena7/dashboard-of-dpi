@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { resolveAdminCaller } from "@/lib/resolveAdminCaller";
+import { canCreateRole } from "@/lib/adminUserPolicy";
 import { createClient } from "@supabase/supabase-js";
 import { createReportingFetch } from "@/lib/reportingFetch";
 
@@ -7,6 +9,10 @@ const supabaseAdmin=createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.
 });
 
 export async function POST(req:Request){
+  // Admin only: the caller is verified before anything is read or written.
+  const auth = await resolveAdminCaller(req);
+  if (auth.errorResponse) return auth.errorResponse;
+
 
 try{
 
@@ -19,6 +25,20 @@ password,
 role,
 department
 }=body;
+
+if(role&&!canCreateRole(auth.role,role)){
+
+return NextResponse.json(
+{
+success:false,
+message:"Only a Super Admin can create a Super Admin"
+},
+{
+status:403
+}
+);
+
+}
 
 
 if(

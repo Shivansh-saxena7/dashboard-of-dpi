@@ -9,6 +9,7 @@ import { calculateStatus } from "@/components/calculateStatus";
 import { reportClientError } from "@/lib/reportClientError";
 import Card from "@/components/StatCard";
 import PageHeader from "@/components/PageHeader";
+import { authedFetch } from "@/lib/authedFetch";
 export default function EmployeeDetailsPage(){
 
 const params=useParams();
@@ -29,7 +30,7 @@ async function loadData(){
 
 try{
 
-const res=await fetch("/api/data");
+const res=await authedFetch("/api/data");
 
 const json=await res.json();
 

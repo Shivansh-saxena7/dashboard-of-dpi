@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { getUniquePosts } from "@/lib/getUniquePosts";
 import { reportClientError } from "@/lib/reportClientError";
 
+import { authedFetch } from "@/lib/authedFetch";
 
 export default function EmployeeDetails({
   data,
@@ -345,8 +346,7 @@ const posts = getUniquePosts(allData);
                               return;
                             }
 
-                     const refresh = await fetch(
-  `/api/data?employeeId=${selected}&date=${selectedDate}`,
+                     const refresh = await authedFetch(`/api/data?employeeId=${selected}&date=${selectedDate}`,
   {
     cache: "no-store",
   }

@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { resolveAdminCaller } from "@/lib/resolveAdminCaller";
+import { canDeleteEmployee } from "@/lib/adminUserPolicy";
 import { createClient } from "@supabase/supabase-js";
 import { createReportingFetch } from "@/lib/reportingFetch";
 
@@ -7,6 +9,14 @@ const supabaseAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, proces
 });
 
 export async function POST(req: Request) {
+  // Admin only: the caller is verified before anything is read or written.
+  const auth = await resolveAdminCaller(req);
+  if (auth.errorResponse) return auth.errorResponse;
+  if (!canDeleteEmployee(auth.role)) {
+    const refusal = "Only a Super Admin can delete an employee";
+    return NextResponse.json({ success: false, error: refusal, message: refusal }, { status: 403 });
+  }
+
   try {
     const body = await req.json();
     const { employeeId } = body;

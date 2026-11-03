@@ -25,7 +25,7 @@ export async function resolveAdminCaller(req: Request) {
 
   if (!authHeader) {
     return {
-      errorResponse: NextResponse.json({ error: "Missing authorization header" }, { status: 401 })
+      errorResponse: NextResponse.json({ success: false, error: "Missing authorization header", message: "Missing authorization header" }, { status: 401 })
     };
   }
 
@@ -39,7 +39,7 @@ export async function resolveAdminCaller(req: Request) {
 
   if (userError || !user) {
     return {
-      errorResponse: NextResponse.json({ error: "Invalid or expired session" }, { status: 401 })
+      errorResponse: NextResponse.json({ success: false, error: "Invalid or expired session", message: "Invalid or expired session" }, { status: 401 })
     };
   }
 
@@ -51,15 +51,15 @@ export async function resolveAdminCaller(req: Request) {
 
   if (employeeError || !employee) {
     return {
-      errorResponse: NextResponse.json({ error: "No employee record found for this account" }, { status: 404 })
+      errorResponse: NextResponse.json({ success: false, error: "No employee record found for this account", message: "No employee record found for this account" }, { status: 403 })
     };
   }
 
   if (!employee.is_active || (employee.role !== "admin" && employee.role !== "super_admin")) {
     return {
-      errorResponse: NextResponse.json({ error: "Only an active Admin can perform this action" }, { status: 403 })
+      errorResponse: NextResponse.json({ success: false, error: "Only an active Admin can perform this action", message: "Only an active Admin can perform this action" }, { status: 403 })
     };
   }
 
-  return { employeeId: employee.id };
+  return { employeeId: employee.id, role: employee.role as string, authUserId: user.id };
 }

@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { resolveAdminCaller } from "@/lib/resolveAdminCaller";
+import { canEditLogin } from "@/lib/adminUserPolicy";
 import { createClient } from "@supabase/supabase-js";
 import { createReportingFetch } from "@/lib/reportingFetch";
 
@@ -23,6 +25,10 @@ const supabaseAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, proces
 // explicitly rather than silently left half-done, since there's no
 // safe automatic way to revert an Auth email change here.
 export async function POST(req: Request) {
+  // Admin only: the caller is verified before anything is read or written.
+  const auth = await resolveAdminCaller(req);
+  if (auth.errorResponse) return auth.errorResponse;
+
   try {
     const body = await req.json();
     const { employeeId, newEmail } = body;
@@ -39,7 +45,7 @@ export async function POST(req: Request) {
 
     const { data: employee, error: employeeError } = await supabaseAdmin
       .from("employees")
-      .select("id, auth_user_id")
+      .select("id, auth_user_id, role")
       .eq("id", employeeId)
       .single();
 
@@ -49,6 +55,10 @@ export async function POST(req: Request) {
 
     if (!employee.auth_user_id) {
       return NextResponse.json({ success: false, message: "This employee has no login account to update" }, { status: 400 });
+    }
+
+    if (!canEditLogin(auth.role, auth.authUserId, employee.auth_user_id, employee.role)) {
+      return NextResponse.json({ success: false, message: "Only a Super Admin can change another admin's login" }, { status: 403 });
     }
 
     const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(employee.auth_user_id, {
