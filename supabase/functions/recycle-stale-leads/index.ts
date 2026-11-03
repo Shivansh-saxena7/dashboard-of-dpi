@@ -11,7 +11,7 @@ import { logAnomaly } from "../../../lib/logAnomaly.ts";
 import { isNotificationWindowOpen, loadJobWorkingCalendar, nonWorkingStatusAt, timerCalendar, timerMsUntil } from "../../../lib/workingCalendar.ts";
 import { isWithinRecycleHours } from "../../../lib/recycleHours.ts";
 import { buildPreviousOwnerEndTimes, pickRecycleOwner } from "../../../lib/pickRecycleOwner.ts";
-import { autoJunkDecision, autoRecycleEnabled, DEFAULT_MAX_AUTO_JUNK_PER_SWEEP } from "../../../lib/autoJunkGuard.ts";
+import { autoJunkDecision, autoRecycleEnabled, DEFAULT_MAX_AUTO_JUNK_PER_SWEEP, junkAttemptResult } from "../../../lib/autoJunkGuard.ts";
 import { buildHolderIndex, decideSiblingGuard, guardMode, type PositiveHolder } from "../../../lib/recycleSiblingGuard.ts";
 import { reminderHoldMaxDays, reminderHoldMode } from "../../../lib/reminderHold.ts";
 import { restoreHoldApplies, restoreHoldMode } from "../../../lib/restoreHold.ts";
@@ -554,6 +554,8 @@ serve(withMonitoring("recycle-stale-leads", async () => {
     let recycledCount = 0;
     let junkedCount = 0;
     let junkBreakerSkipped = 0;
+    let junkRefused = 0;
+    let junkRefusedSkipped = 0;
     let warnedCount = 0;
     let pointerEmployeeId = settings.round_robin_pointer_employee_id;
     // Restricted-pool pointer-skip fix (2026-09-25) — see
@@ -642,6 +644,35 @@ serve(withMonitoring("recycle-stale-leads", async () => {
           if (!row.lead_history_id || !row.reminder_at) continue;
           const prev = latestReminderByHistory.get(row.lead_history_id);
           if (!prev || Date.parse(row.reminder_at) > Date.parse(prev)) latestReminderByHistory.set(row.lead_history_id, row.reminder_at);
+        }
+      }
+    }
+
+    // Junk refusals (2026-11-02): a lead a DB guard refused in the last 24 hours is
+    // not tried again, so each refused lead is logged at most once a day and never
+    // uses up the per-sweep junk cap. Loaded only while auto-junk is on; if it cannot
+    // be loaded the sweep just tries those leads again, nothing else changes.
+    const recentlyRefused = new Set<string>();
+    if (autoJunkDecision(settings, 0) !== "SKIP_DISABLED") {
+      const { data: refusedRows, error: refusedError } = await fetchAllRows(
+        () =>
+          supabase
+            .from("lead_guard_events")
+            .select("lead_id", { count: "exact" })
+            .eq("action", "JUNK_REFUSED")
+            .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+            .order("id"),
+        { anomalyContext: { supabase, source: "recycle-stale-leads:junk-refusals" } }
+      );
+      if (refusedError) {
+        await logAnomaly(supabase, {
+          source: "junk_refusals",
+          severity: "warning",
+          message: `Recent junk refusals could not be loaded, those leads are tried again this sweep (${refusedError.message})`
+        });
+      } else {
+        for (const row of refusedRows || []) {
+          if (row.lead_id) recentlyRefused.add(row.lead_id);
         }
       }
     }
@@ -1008,6 +1039,12 @@ serve(withMonitoring("recycle-stale-leads", async () => {
         // Kill switch + per-sweep circuit breaker (2026-10-16) — see
         // lib/autoJunkGuard.ts. A skipped lead stays with its owner
         // unchanged and is re-evaluated on the next sweep.
+        if (recentlyRefused.has(lead.id)) {
+          junkRefusedSkipped++;
+          diagnostics.push({ leadId: lead.id, action: "SKIPPED", reason: "JUNK_REFUSED_RECENTLY", slaStatus });
+          continue;
+        }
+
         const junkDecision = autoJunkDecision(settings, junkedCount);
         if (junkDecision !== "JUNK") {
           if (junkDecision === "SKIP_BREAKER") junkBreakerSkipped++;
@@ -1030,13 +1067,25 @@ serve(withMonitoring("recycle-stale-leads", async () => {
             error: junkError.message
           });
         } else {
-          junkedCount++;
-          diagnostics.push({
-            leadId: lead.id,
-            action: "JUNKED",
-            slaStatus,
-            notInterestedCount: notInterestedCount || 0
-          });
+          // A DB guard may have refused: the call returns normally either way.
+          const { data: afterJunk } = await supabase.from("leads").select("status").eq("id", lead.id).maybeSingle();
+          if (junkAttemptResult(afterJunk?.status) === "REFUSED") {
+            junkRefused++;
+            diagnostics.push({
+              leadId: lead.id,
+              action: "JUNK_REFUSED",
+              slaStatus,
+              notInterestedCount: notInterestedCount || 0
+            });
+          } else {
+            junkedCount++;
+            diagnostics.push({
+              leadId: lead.id,
+              action: "JUNKED",
+              slaStatus,
+              notInterestedCount: notInterestedCount || 0
+            });
+          }
         }
 
         continue;
@@ -1630,6 +1679,8 @@ serve(withMonitoring("recycle-stale-leads", async () => {
         withinRecycleHours,
         junkedCount,
         junkBreakerSkipped,
+        junkRefused,
+        junkRefusedSkipped,
         siblingGuard: { mode: siblingGuardMode, events: siblingGuardEvents.length },
         warnedCount,
         totalChecked: (leads || []).length,

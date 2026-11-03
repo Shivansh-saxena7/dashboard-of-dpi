@@ -328,7 +328,17 @@ async function main() {
 
   // Kill switches + junk circuit breaker (2026-10-16). Missing columns
   // (migration not applied yet) must behave exactly like today.
-  const { autoJunkDecision, autoRecycleEnabled, DEFAULT_MAX_AUTO_JUNK_PER_SWEEP } = loadLib("autoJunkGuard.ts");
+  const { autoJunkDecision, autoRecycleEnabled, DEFAULT_MAX_AUTO_JUNK_PER_SWEEP, junkAttemptResult } = loadLib("autoJunkGuard.ts");
+  // One sweep's junk loop as recycle-stale-leads runs it: `refused` leads the DB guards refuse, then `real` junkable leads.
+  const junkSweep = (refused, real, settings = {}) => {
+    let junked = 0, refusedCount = 0, breaker = 0;
+    for (const statusAfter of [...Array(refused).fill("NOT_CONNECTED"), ...Array(real).fill("JUNK")]) {
+      const decision = autoJunkDecision(settings, junked);
+      if (decision !== "JUNK") { if (decision === "SKIP_BREAKER") breaker++; continue; }
+      if (junkAttemptResult(statusAfter) === "REFUSED") refusedCount++; else junked++;
+    }
+    return `junked ${junked}, refused ${refusedCount}, breaker ${breaker}`;
+  };
   cases.push(
     ["K1 no columns yet -> junk allowed", autoJunkDecision({}, 0), "JUNK"],
     ["K2 no columns yet -> recycle allowed", autoRecycleEnabled({}), true],
@@ -338,6 +348,13 @@ async function main() {
     ["K6 auto_junk_enabled=false -> disabled even at 0", autoJunkDecision({ auto_junk_enabled: false }, 0), "SKIP_DISABLED"],
     ["K7 custom cap 5, 5 junked -> breaker", autoJunkDecision({ max_auto_junk_per_sweep: 5 }, 5), "SKIP_BREAKER"],
     ["K8 cap -1 = no breaker", autoJunkDecision({ max_auto_junk_per_sweep: -1 }, 500), "JUNK"],
+    ["K20 status still NOT_CONNECTED after the call = refused", junkAttemptResult("NOT_CONNECTED"), "REFUSED"],
+    ["K21 status JUNK after the call = junked", junkAttemptResult("JUNK"), "JUNKED"],
+    ["K22 status unreadable = counted as junked (cap stays safe)", junkAttemptResult(undefined), "JUNKED"],
+    ["K23 30 refused + 5 real: cap not used up, all 5 real junked", junkSweep(30, 5), "junked 5, refused 30, breaker 0"],
+    ["K24 25 real junks: cap still stops at 20", junkSweep(0, 25), "junked 20, refused 0, breaker 5"],
+    ["K25 30 refused + 25 real: breaker counts only the real ones", junkSweep(30, 25), "junked 20, refused 30, breaker 5"],
+    ["K26 auto-junk off: nothing attempted", junkSweep(3, 3, { auto_junk_enabled: false }), "junked 0, refused 0, breaker 0"],
     ["K9 null settings -> junk allowed", autoJunkDecision(null, 0), "JUNK"],
     ["K10 auto_recycle_enabled=false -> off", autoRecycleEnabled({ auto_recycle_enabled: false }), false],
     ["K11 auto_recycle_enabled=null -> on", autoRecycleEnabled({ auto_recycle_enabled: null }), true]

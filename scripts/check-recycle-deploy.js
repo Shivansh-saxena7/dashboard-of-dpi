@@ -34,6 +34,10 @@ for (const needle of ["autoJunkDecision(", "autoRecycleEnabled(", "decideSibling
 for (const needle of ["reminderHoldMode(settings.reminder_hold_mode)", "slaFor(null)", 'holdMode === "enforce" ? slaStatusHeld : slaStatusPlain', '"REMINDER_HOLD"']) {
   if (!fn.includes(needle)) problems.push(`recycle-stale-leads/index.ts is missing the reminder hold piece: ${needle}`);
 }
+// Junk refusals (2026-11-02): only a real junk counts toward the cap, a refused lead is not tried again for a day.
+for (const needle of ["junkAttemptResult(afterJunk?.status)", "recentlyRefused.has(lead.id)", 'reason: "JUNK_REFUSED_RECENTLY"']) {
+  if (!fn.includes(needle)) problems.push(`recycle-stale-leads/index.ts is missing the junk refusal piece: ${needle}`);
+}
 // Restore hold (2026-10-30): read from settings, skipped only in "enforce", every held lead logged.
 for (const needle of ["restoreHoldMode(settings.restore_hold_mode)", "restoreHoldApplies(slaStatus, lead.lead_type, protectedUntil)", 'restoreMode === "enforce"', 'reason: "RESTORE_HOLD"', '"RESTORE_HOLD"', 'from("lead_restore_log")']) {
   if (!fn.includes(needle)) problems.push(`recycle-stale-leads/index.ts is missing the restore hold piece: ${needle}`);
@@ -78,4 +82,4 @@ if (problems.length > 0) {
   for (const p of problems) console.error(`  - ${p}`);
   process.exit(1);
 }
-console.log("check-recycle-deploy: OK — trap fix, junk breaker, sibling guard, reminder hold and restore hold present.");
+console.log("check-recycle-deploy: OK — trap fix, junk breaker, sibling guard, reminder hold, restore hold and junk refusals present.");
