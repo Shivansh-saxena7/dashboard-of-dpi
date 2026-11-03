@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import StatsCard from "./StatsCard";
 import EmployeePanel from "./EmployeePanel";
 import { reportClientError } from "@/lib/reportClientError";
+import { authedFetch } from "@/lib/authedFetch";
 
 // Employee-facing social-media post tracking (open link -> Mark Done)
 // factored out of app/page.tsx so HR/Payroll/Other-department views can
@@ -22,7 +23,6 @@ export default function PostsTrackingView({
   employeeName: string;
 }) {
   const [data, setData] = useState<any[]>([]);
-  const [allData, setAllData] = useState<any[]>([]);
   const [selectedDate, setSelectedDate] = useState("");
 
   useEffect(() => {
@@ -37,7 +37,7 @@ export default function PostsTrackingView({
         employeeId: employeeId || ""
       });
 
-      const res = await fetch(`/api/data?${query}`, { cache: "no-store" });
+      const res = await authedFetch(`/api/data?${query}`, { cache: "no-store" });
 
       if (!res.ok) {
         setData([]);
@@ -47,10 +47,6 @@ export default function PostsTrackingView({
       const json = await res.json();
       const records = Array.isArray(json) ? json : json.data || [];
       setData(records);
-
-      const allRes = await fetch(`/api/data?date=${date}`, { cache: "no-store" });
-      const allJson = await allRes.json();
-      setAllData(Array.isArray(allJson) ? allJson : []);
     } catch (err) {
       console.log(err);
 reportClientError("load posts tracking", err);
@@ -59,10 +55,18 @@ reportClientError("load posts tracking", err);
   }
 
   useEffect(() => {
-    if (!employeeId) return;
+    if (!employeeId || !selectedDate) return;
     loadData(selectedDate);
-    const interval = setInterval(() => loadData(selectedDate), 5000);
-    return () => clearInterval(interval);
+    // Refresh when the employee comes back to the page, and once a minute while it is open.
+    const refreshIfVisible = () => {
+      if (document.visibilityState === "visible") loadData(selectedDate);
+    };
+    const interval = setInterval(refreshIfVisible, 60000);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+    };
   }, [employeeId, selectedDate]);
 
   const filteredData = selectedDate
@@ -124,7 +128,6 @@ reportClientError("load posts tracking", err);
       ) : (
         <EmployeePanel
           data={filteredData}
-          allData={allData}
           employee={{ id: employeeId, role: "employee" }}
           selectedEmployee={employeeId}
           setSelectedEmployee={() => {}}

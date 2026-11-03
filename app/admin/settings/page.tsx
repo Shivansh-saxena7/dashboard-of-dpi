@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { supabase } from "@/lib/supabase";
+import { authedFetch } from "@/lib/authedFetch";
 import toast, { Toast } from "react-hot-toast";
 
 import PageHeader from "@/components/PageHeader";
@@ -126,7 +127,7 @@ export default function SettingsPage() {
     setSlaHoursLoading(true);
 
     try {
-      const res = await fetch("/api/admin/update-sla-office-hours", {
+      const res = await authedFetch("/api/admin/update-sla-office-hours", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -190,7 +191,7 @@ export default function SettingsPage() {
     setShiftTimingLoading(true);
 
     try {
-      const res = await fetch("/api/admin/update-shift-timing", {
+      const res = await authedFetch("/api/admin/update-shift-timing", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -237,7 +238,7 @@ export default function SettingsPage() {
     setWorkReportLoading(true);
 
     try {
-      const res = await fetch("/api/admin/update-work-report-settings", {
+      const res = await authedFetch("/api/admin/update-work-report-settings", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -305,7 +306,7 @@ export default function SettingsPage() {
     setGeoLoading(true);
 
     try {
-      const res = await fetch("/api/admin/update-lead-engine-settings", {
+      const res = await authedFetch("/api/admin/update-lead-engine-settings", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -355,7 +356,7 @@ export default function SettingsPage() {
         return;
       }
 
-      const res = await fetch("/api/admin/update-user", {
+      const res = await authedFetch("/api/admin/update-user", {
         method: "POST",
 
         headers: {
@@ -375,6 +376,7 @@ export default function SettingsPage() {
 
       if (!res.ok) {
         toast.error(result.error);
+        setLoading(false);
         return;
       }
 

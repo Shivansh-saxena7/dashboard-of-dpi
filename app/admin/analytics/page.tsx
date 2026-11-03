@@ -10,6 +10,7 @@ import { reportClientError } from "@/lib/reportClientError";
 
 import PageHeader from "@/components/PageHeader";
 import Card from "@/components/StatCard";
+import { authedFetch } from "@/lib/authedFetch";
 export default function AnalyticsPage(){
 
 const [allData,setAllData]=useState<any[]>([]);
@@ -75,7 +76,7 @@ async function loadData(){
 try{
 
 const res=
-await fetch("/api/data");
+await authedFetch("/api/data");
 
 const json=
 await res.json();
