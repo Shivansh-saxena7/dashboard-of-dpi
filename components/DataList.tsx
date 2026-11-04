@@ -17,7 +17,8 @@ import { useGivenLeadContext } from "@/lib/useGivenLeadContext";
 import { useDataPreviousPositive } from "@/lib/useDataPreviousPositive";
 import {
   dataFilterByStatus,
-  dataStatusChips,
+  dataStatusOptionText,
+  dataStatusOptions,
   effectiveDataStatusFilter,
   readSavedDataStatusFilter,
   saveDataStatusFilter
@@ -103,7 +104,7 @@ export default function DataList({ employeeId }: DataListProps) {
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("NEWEST");
-  // Status chips (2026-11-04): remembered for this browser session, see lib/dataStatusFilter.ts.
+  // Status filter (2026-11-04): remembered for this browser session, see lib/dataStatusFilter.ts.
   const [statusFilter, setStatusFilter] = useState(() => readSavedDataStatusFilter(employeeId));
   const givenContext = useGivenLeadContext(employeeId);
   const previousPositive = useDataPreviousPositive(employeeId);
@@ -201,7 +202,7 @@ export default function DataList({ employeeId }: DataListProps) {
     return counts;
   }, [leads]);
 
-  // Everything except the status chip, so each chip's count is what tapping it would show.
+  // Everything except the status filter, so each option's count is what choosing it would show.
   const filteredLeads = useMemo(() => {
 
     // Same fix as LeadList.tsx (2026-09-21) — search runs across ALL
@@ -262,8 +263,8 @@ export default function DataList({ employeeId }: DataListProps) {
 
   }, [leads, activeTab, searchQuery, sourceFilter, dateRangeFilter, customStart, customEnd]);
 
-  const statusChips = useMemo(
-    () => dataStatusChips(filteredLeads, givenContext.enabled, givenContext.byLeadId),
+  const statusOptions = useMemo(
+    () => dataStatusOptions(filteredLeads, givenContext.enabled, givenContext.byLeadId),
     [filteredLeads, givenContext.enabled, givenContext.byLeadId]
   );
 
@@ -397,25 +398,6 @@ export default function DataList({ employeeId }: DataListProps) {
                 className="w-full h-10 rounded-xl bg-white border border-slate-200 pl-10 pr-3 text-sm outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-300 transition"
               />
             </div>
-
-            <div className="flex gap-1.5 overflow-x-auto pb-0.5" role="group" aria-label="Filter by status">
-              {statusChips.map((chip) => {
-                const active = activeStatusFilter === chip.value;
-                return (
-                  <button
-                    key={chip.value || "ALL"}
-                    onClick={() => chooseStatusFilter(chip.value)}
-                    aria-pressed={active}
-                    className={`flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition ${
-                      active ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-600"
-                    }`}
-                  >
-                    {chip.label}
-                    <span className={`text-[11px] font-bold ${active ? "text-white/80" : "text-slate-400"}`}>{chip.count}</span>
-                  </button>
-                );
-              })}
-            </div>
           </div>
 
           <motion.div
@@ -424,6 +406,12 @@ export default function DataList({ employeeId }: DataListProps) {
             transition={{ duration: 0.4, delay: 0.05 }}
             className="mx-4 mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap"
           >
+            <FilterSelect value={activeStatusFilter} onChange={(e) => chooseStatusFilter(e.target.value)}>
+              {statusOptions.map((option) => (
+                <option key={option.value || "ALL"} value={option.value}>{dataStatusOptionText(option)}</option>
+              ))}
+            </FilterSelect>
+
             <FilterSelect value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
               <option value="">All Sources</option>
               {sourceOptions.map((s) => (

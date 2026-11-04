@@ -3,9 +3,9 @@ import { GIVEN_BY_ADMIN_FILTER, givenFilterCount, givenFilterLeads, type GivenAs
 import { LEAD_STATUS_DISPLAY } from "./leadStatusDisplay";
 import { isUntouchedInCurrentAssignment, type AssignmentTouchFields } from "./newLeadFilter";
 
-// Status chips on the employee Data page (2026-11-04). The same rules as the Leads page Status filter, from the same
+// Status dropdown on the employee Data page (2026-11-04). The same rules as the Leads page Status filter, from the same
 // places: "New" is lib/newLeadFilter, "Given by admin" is lib/givenLeadContext, labels are LEAD_STATUS_DISPLAY, the rest is
-// EMPLOYEE_SELECTABLE_STATUSES. Follow-up, Visit and Booking are board stages, so they stay as the tabs above the chips.
+// EMPLOYEE_SELECTABLE_STATUSES. Follow-up, Visit and Booking are board stages, so they stay as the tabs.
 // Pure functions, known-answer tested in scripts/check-data-status-filter.js.
 
 export interface DataFilterLead {
@@ -14,7 +14,7 @@ export interface DataFilterLead {
   lead_history?: (AssignmentTouchFields & GivenAssignmentFields)[] | null;
 }
 
-export interface DataStatusChip {
+export interface DataStatusOption {
   value: string;
   label: string;
   count: number;
@@ -36,14 +36,18 @@ export function dataFilterByStatus<T extends DataFilterLead>(leads: T[], filter:
   return leads.filter((lead) => lead.status === filter);
 }
 
-export function dataStatusChips(leads: DataFilterLead[], givenEnabled: boolean, byLeadId: Map<string, GivenLeadContext>): DataStatusChip[] {
-  const chips: DataStatusChip[] = [{ value: "", label: "All", count: leads.length }];
-  if (givenEnabled) chips.push({ value: GIVEN_BY_ADMIN_FILTER, label: "Given by admin", count: givenFilterCount(leads, byLeadId) });
-  chips.push({ value: "NEW", label: LEAD_STATUS_DISPLAY.NEW.label, count: dataFilterByStatus(leads, "NEW", byLeadId).length });
+export function dataStatusOptions(leads: DataFilterLead[], givenEnabled: boolean, byLeadId: Map<string, GivenLeadContext>): DataStatusOption[] {
+  const options: DataStatusOption[] = [{ value: "", label: "All statuses", count: leads.length }];
+  if (givenEnabled) options.push({ value: GIVEN_BY_ADMIN_FILTER, label: "Given by admin", count: givenFilterCount(leads, byLeadId) });
+  options.push({ value: "NEW", label: LEAD_STATUS_DISPLAY.NEW.label, count: dataFilterByStatus(leads, "NEW", byLeadId).length });
   for (const status of EMPLOYEE_SELECTABLE_STATUSES) {
-    chips.push({ value: status, label: LEAD_STATUS_DISPLAY[status].label, count: leads.filter((lead) => lead.status === status).length });
+    options.push({ value: status, label: LEAD_STATUS_DISPLAY[status].label, count: leads.filter((lead) => lead.status === status).length });
   }
-  return chips;
+  return options;
+}
+
+export function dataStatusOptionText(option: DataStatusOption): string {
+  return `${option.label} (${option.count})`;
 }
 
 // A saved "Given by admin" stays saved while the feature loads; it counts as All only when the feature is off.
