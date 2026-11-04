@@ -1,5 +1,7 @@
 import { supabase } from "./supabase";
 import { calculateDailyHrmsStatus, applyMonthlyLateComingRule, DailyHrmsStatus } from "./calculateHrmsAttendanceStatus";
+import { fetchWorkingCalendar } from "./workingCalendar";
+import { addDaysYmd, istToday, payrollCountedDates, payrollSandwichDays, type PayrollDayContext } from "./payrollWorkingDays";
 
 // Three independent monthly-close computations, one per system built in
 // this payroll phase. Each is a pure "read inputs, upsert one result"
@@ -243,7 +245,7 @@ export async function computeAttendanceDeductionForMonth(
   yyyyMm: string,
   computedByEmployeeId: string
 ): Promise<AttendanceDeductionComputeResult> {
-  const { y, m, daysInMonth, startDate, endDate, payPeriod } = monthBounds(yyyyMm);
+  const { startDate, endDate, payPeriod } = monthBounds(yyyyMm);
 
   const { data: assignmentsRaw } = await supabase
     .from("employee_attendance_deduction_rule_assignments")
@@ -270,22 +272,34 @@ export async function computeAttendanceDeductionForMonth(
   const { data: les } = await supabase.from("lead_engine_settings").select("sla_weekly_off_day").eq("id", 1).single();
   const weeklyOffDay = les?.sla_weekly_off_day ?? 0;
 
-  const { data: monthAttendance } = await supabase
-    .from("attendance")
-    .select("date, shift_start_at, attendance_type")
-    .eq("employee_id", employeeId)
-    .gte("date", startDate)
-    .lte("date", endDate);
+  // One day either side, so a weekly off on the 1st or the last day can see its neighbour for the sandwich rule.
+  const bufferStart = addDaysYmd(startDate, -1);
+  const bufferEnd = addDaysYmd(endDate, 1);
 
-  const workingDates: string[] = [];
-  for (let d = 1; d <= daysInMonth; d++) {
-    if (new Date(y, m - 1, d).getDay() === weeklyOffDay) continue;
-    workingDates.push(`${yyyyMm}-${String(d).padStart(2, "0")}`);
-  }
+  // A failed read must stop the compute: carrying on would save wrong LOP days as if they were right.
+  const [attendanceResult, leaveResult, detailsResult, calendar] = await Promise.all([
+    supabase.from("attendance").select("date, shift_start_at, attendance_type").eq("employee_id", employeeId).gte("date", bufferStart).lte("date", bufferEnd),
+    supabase.from("employee_leave_periods").select("start_date, end_date").eq("employee_id", employeeId).lte("start_date", bufferEnd),
+    supabase.from("employee_payroll_details").select("date_of_joining").eq("employee_id", employeeId).maybeSingle(),
+    fetchWorkingCalendar(supabase, `${bufferStart}T00:00:00+05:30`, `${addDaysYmd(bufferEnd, 1)}T00:00:00+05:30`)
+  ]);
+  const readError = attendanceResult.error || leaveResult.error || detailsResult.error;
+  if (readError) throw new Error(`Could not read attendance data: ${readError.message}`);
+
+  const monthAttendance = attendanceResult.data || [];
+  const dayContext: PayrollDayContext = {
+    weeklyOffDay,
+    ranges: calendar.ranges,
+    leavePeriods: leaveResult.data || [],
+    joiningDate: detailsResult.data?.date_of_joining ?? null,
+    today: istToday(),
+    attendanceDates: new Set(monthAttendance.map((a) => a.date))
+  };
+  const workingDates = payrollCountedDates(yyyyMm, dayContext);
 
   const daily: DailyHrmsStatus[] = settings
     ? workingDates.map((date) => {
-        const row = (monthAttendance || []).find((a) => a.date === date) || null;
+        const row = monthAttendance.find((a) => a.date === date) || null;
         return calculateDailyHrmsStatus(row as any, settings as any);
       })
     : [];
@@ -305,29 +319,7 @@ export async function computeAttendanceDeductionForMonth(
     lateComingLopDays = monthly.filter((s) => s === "HALF_DAY").length * 0.5;
   }
 
-  let sandwichLeaveLopDays = 0;
-  if (sandwichActive) {
-    // Buffered window so a weekly-off on the 1st/last day of the month
-    // can still see the adjacent day in the prior/next month.
-    const bufferStart = new Date(y, m - 2, daysInMonth - 1).toISOString().slice(0, 10);
-    const bufferEnd = new Date(y, m, 2).toISOString().slice(0, 10);
-
-    const { data: bufferAttendance } = await supabase
-      .from("attendance")
-      .select("date")
-      .eq("employee_id", employeeId)
-      .gte("date", bufferStart)
-      .lte("date", bufferEnd);
-
-    const isAbsent = (dateStr: string) => !(bufferAttendance || []).some((a) => a.date === dateStr);
-
-    for (let d = 1; d <= daysInMonth; d++) {
-      if (new Date(y, m - 1, d).getDay() !== weeklyOffDay) continue;
-      const before = new Date(y, m - 1, d - 1).toISOString().slice(0, 10);
-      const after = new Date(y, m - 1, d + 1).toISOString().slice(0, 10);
-      if (isAbsent(before) && isAbsent(after)) sandwichLeaveLopDays += 1;
-    }
-  }
+  const sandwichLeaveLopDays = sandwichActive ? payrollSandwichDays(yyyyMm, dayContext) : 0;
 
   const totalLopDays = absenceLopDays + lateComingLopDays + sandwichLeaveLopDays + halfDayManualLopDays;
 
