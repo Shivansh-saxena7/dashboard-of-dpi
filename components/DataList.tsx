@@ -13,6 +13,14 @@ import { consumeRecentlyCalledCardId, scrollToAndHighlightCard } from "@/lib/las
 import { usePendingOutcomeSheet } from "@/lib/usePendingOutcomeSheet";
 import { normalizeMobile } from "@/lib/normalizeMobile";
 import { istDateStringToRangeStartUTC, istDateStringToRangeEndUTC } from "@/lib/istTime";
+import { useGivenLeadContext } from "@/lib/useGivenLeadContext";
+import {
+  dataFilterByStatus,
+  dataStatusChips,
+  effectiveDataStatusFilter,
+  readSavedDataStatusFilter,
+  saveDataStatusFilter
+} from "@/lib/dataStatusFilter";
 
 interface DataListProps {
   employeeId: string;
@@ -94,6 +102,15 @@ export default function DataList({ employeeId }: DataListProps) {
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("NEWEST");
+  // Status chips (2026-11-04): remembered for this browser session, see lib/dataStatusFilter.ts.
+  const [statusFilter, setStatusFilter] = useState(() => readSavedDataStatusFilter(employeeId));
+  const givenContext = useGivenLeadContext(employeeId);
+  const activeStatusFilter = effectiveDataStatusFilter(statusFilter, givenContext.enabled);
+
+  function chooseStatusFilter(value: string) {
+    setStatusFilter(value);
+    saveDataStatusFilter(employeeId, value);
+  }
 
   useEffect(() => {
     loadLeads();
@@ -141,7 +158,11 @@ export default function DataList({ employeeId }: DataListProps) {
         lead_history!inner (
           id,
           call_count,
-          assigned_at
+          assigned_at,
+          first_call_at,
+          first_whatsapp_at,
+          outcome_at,
+          last_activity_at
         )
       `
       )
@@ -178,7 +199,8 @@ export default function DataList({ employeeId }: DataListProps) {
     return counts;
   }, [leads]);
 
-  const visibleLeads = useMemo(() => {
+  // Everything except the status chip, so each chip's count is what tapping it would show.
+  const filteredLeads = useMemo(() => {
 
     // Same fix as LeadList.tsx (2026-09-21) — search runs across ALL
     // of this employee's own Data leads, not just the active
@@ -234,7 +256,17 @@ export default function DataList({ employeeId }: DataListProps) {
       });
     }
 
-    result = [...result].sort((a, b) => {
+    return result;
+
+  }, [leads, activeTab, searchQuery, sourceFilter, dateRangeFilter, customStart, customEnd]);
+
+  const statusChips = useMemo(
+    () => dataStatusChips(filteredLeads, givenContext.enabled, givenContext.byLeadId),
+    [filteredLeads, givenContext.enabled, givenContext.byLeadId]
+  );
+
+  const visibleLeads = useMemo(() => {
+    const result = [...dataFilterByStatus(filteredLeads, activeStatusFilter, givenContext.byLeadId)].sort((a, b) => {
       const aAssigned = new Date(a.lead_history[0]?.assigned_at || a.created_at).getTime();
       const bAssigned = new Date(b.lead_history[0]?.assigned_at || b.created_at).getTime();
       return sortBy === "OLDEST" ? aAssigned - bAssigned : bAssigned - aAssigned;
@@ -242,7 +274,7 @@ export default function DataList({ employeeId }: DataListProps) {
 
     return result;
 
-  }, [leads, activeTab, searchQuery, sourceFilter, dateRangeFilter, customStart, customEnd, sortBy]);
+  }, [filteredLeads, activeStatusFilter, givenContext.byLeadId, sortBy]);
 
   // Same fix as LeadList.tsx/app/admin/leads/page.tsx (2026-09-18 perf
   // audit) — DataCard had NO re-render protection at all before this
@@ -282,7 +314,8 @@ export default function DataList({ employeeId }: DataListProps) {
         return {
           ...lead,
           status: updates.status ?? lead.status,
-          lead_history: [{ ...currentHistory, call_count: updates.callCount }]
+          // A saved result takes the lead out of "New" and "Given by admin" at once.
+          lead_history: [{ ...currentHistory, call_count: updates.callCount, outcome_at: updates.status ? new Date().toISOString() : currentHistory.outcome_at }]
         };
       })
     );
@@ -323,53 +356,65 @@ export default function DataList({ employeeId }: DataListProps) {
         </div>
       ) : (
         <>
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4 }}
-            className="mx-4 mt-4 flex gap-2 overflow-x-auto pb-1"
-          >
-            {BOARD_STAGES.map((tab) => {
-              const active = activeTab === tab.stage;
+          {/* Stays under the sticky Header (h-16) while the list scrolls. */}
+          <div className="sticky top-16 z-20 mt-2 space-y-2 border-b border-slate-200/70 bg-white/90 px-4 py-2 backdrop-blur">
+            <div className="flex gap-2 overflow-x-auto pb-0.5">
+              {BOARD_STAGES.map((tab) => {
+                const active = activeTab === tab.stage;
 
-              return (
-                <button
-                  key={tab.stage}
-                  onClick={() => setActiveTab(tab.stage)}
-                  className={`flex items-center gap-1.5 shrink-0 px-3.5 py-2.5 sm:py-2 rounded-xl text-sm font-bold transition ${
-                    active
-                      ? "bg-gradient-to-r from-yellow-400 to-amber-500 text-slate-900 shadow-[0_4px_12px_rgba(217,119,6,0.3)]"
-                      : "bg-white text-slate-600 border border-slate-200"
-                  }`}
-                >
-                  <span>{tab.emoji}</span>
-                  {tab.label}
-                  <span
-                    className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full ${
-                      active ? "bg-black/10 text-slate-900" : "bg-slate-100 text-slate-500"
+                return (
+                  <button
+                    key={tab.stage}
+                    onClick={() => setActiveTab(tab.stage)}
+                    className={`flex items-center gap-1.5 shrink-0 px-3 py-2 rounded-xl text-sm font-bold transition ${
+                      active
+                        ? "bg-gradient-to-r from-yellow-400 to-amber-500 text-slate-900 shadow-[0_4px_12px_rgba(217,119,6,0.3)]"
+                        : "bg-white text-slate-600 border border-slate-200"
                     }`}
                   >
-                    {tabCounts[tab.stage]}
-                  </span>
-                </button>
-              );
-            })}
-          </motion.div>
+                    <span>{tab.emoji}</span>
+                    {tab.label}
+                    <span
+                      className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full ${
+                        active ? "bg-black/10 text-slate-900" : "bg-slate-100 text-slate-500"
+                      }`}
+                    >
+                      {tabCounts[tab.stage]}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4 }}
-            className="mx-4 mt-4 relative"
-          >
-            <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search name or mobile..."
-              className="w-full h-12 rounded-2xl bg-white border border-slate-200 pl-10 pr-3 text-sm outline-none shadow-[0_2px_10px_rgba(15,23,42,0.04)] focus:ring-2 focus:ring-amber-200 focus:border-amber-300 transition"
-            />
-          </motion.div>
+            <div className="relative">
+              <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search name or mobile..."
+                className="w-full h-10 rounded-xl bg-white border border-slate-200 pl-10 pr-3 text-sm outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-300 transition"
+              />
+            </div>
+
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5" role="group" aria-label="Filter by status">
+              {statusChips.map((chip) => {
+                const active = activeStatusFilter === chip.value;
+                return (
+                  <button
+                    key={chip.value || "ALL"}
+                    onClick={() => chooseStatusFilter(chip.value)}
+                    aria-pressed={active}
+                    className={`flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition ${
+                      active ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-600"
+                    }`}
+                  >
+                    {chip.label}
+                    <span className={`text-[11px] font-bold ${active ? "text-white/80" : "text-slate-400"}`}>{chip.count}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
           <motion.div
             initial={{ opacity: 0, y: 10 }}
@@ -422,6 +467,11 @@ export default function DataList({ employeeId }: DataListProps) {
               <div className="text-5xl mb-3">🔍</div>
               <h2 className="text-lg font-semibold text-gray-700">No Data matches these filters</h2>
               <p className="text-sm text-gray-500 mt-1">Try clearing the search or filters above.</p>
+              {activeStatusFilter && (
+                <button onClick={() => chooseStatusFilter("")} className="mt-3 min-h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700">
+                  Show all statuses
+                </button>
+              )}
             </div>
           ) : (
             <div className="mx-4 mt-4 space-y-3 pb-6">
@@ -450,7 +500,10 @@ export default function DataList({ employeeId }: DataListProps) {
             callCount: selectedLead.lead_history[0]?.call_count ?? 0
           }}
           onClose={() => setSelectedLeadId(null)}
-          onUpdated={(updates) => handleLeadUpdated(selectedLead.id, updates)}
+          onUpdated={(updates) => {
+            handleLeadUpdated(selectedLead.id, updates);
+            givenContext.refresh();
+          }}
           onBoardStageChanged={(stage) => handleBoardStageChanged(selectedLead.id, stage)}
         />
       )}
