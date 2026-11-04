@@ -16,6 +16,10 @@ import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BoardStage } from "@/lib/leadBoardStageDisplay";
 import { LEAD_POINTS } from "@/lib/calculateLeadPoints";
 import { buildWhatsAppLink } from "@/lib/buildWhatsAppLink";
+import GivenLeadContextBox from "./GivenLeadContextBox";
+import PreviousPositiveBox from "./PreviousPositiveBox";
+import { givenBoxVisible, type GivenLeadContext } from "@/lib/givenLeadContext";
+import type { DataPreviousPositive } from "@/lib/dataPreviousPositive";
 
 export interface DataDetailLead {
   id: string;
@@ -34,6 +38,8 @@ interface LeadNote {
 }
 
 interface DataDetailModalProps {
+  givenContext?: GivenLeadContext | null;
+  previousPositive?: DataPreviousPositive | null;
   lead: DataDetailLead;
   onClose: () => void;
   onUpdated: (updates: { status?: LeadStatus; callCount: number }) => void;
@@ -70,7 +76,7 @@ interface DataDetailModalProps {
 // reminder phases: 4/5/6-param versions all still exist), and always
 // matching the exact shape already proven in production avoids any
 // risk of PostgREST resolving to the wrong overload.
-export default function DataDetailModal({ lead, onClose, onUpdated, onBoardStageChanged }: DataDetailModalProps) {
+export default function DataDetailModal({ lead, givenContext, previousPositive, onClose, onUpdated, onBoardStageChanged }: DataDetailModalProps) {
 
   const [notes, setNotes] = useState<LeadNote[]>([]);
   const [loadingNotes, setLoadingNotes] = useState(true);
@@ -314,6 +320,10 @@ export default function DataDetailModal({ lead, onClose, onUpdated, onBoardStage
               </span>
             )}
           </div>
+
+          {/* A lead an admin gave back already says all of this, so only one box shows. */}
+          <GivenLeadContextBox context={givenContext ?? null} />
+          {!givenBoxVisible(givenContext) && <PreviousPositiveBox row={previousPositive ?? null} />}
 
           <div className="mt-4 flex items-center gap-2">
             <a

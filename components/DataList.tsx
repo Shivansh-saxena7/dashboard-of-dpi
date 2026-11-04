@@ -13,6 +13,8 @@ import { consumeRecentlyCalledCardId, scrollToAndHighlightCard } from "@/lib/las
 import { usePendingOutcomeSheet } from "@/lib/usePendingOutcomeSheet";
 import { normalizeMobile } from "@/lib/normalizeMobile";
 import { istDateStringToRangeStartUTC, istDateStringToRangeEndUTC } from "@/lib/istTime";
+import { useGivenLeadContext } from "@/lib/useGivenLeadContext";
+import { useDataPreviousPositive } from "@/lib/useDataPreviousPositive";
 
 interface DataListProps {
   employeeId: string;
@@ -94,6 +96,8 @@ export default function DataList({ employeeId }: DataListProps) {
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("NEWEST");
+  const givenContext = useGivenLeadContext(employeeId);
+  const previousPositive = useDataPreviousPositive(employeeId);
 
   useEffect(() => {
     loadLeads();
@@ -440,6 +444,8 @@ export default function DataList({ employeeId }: DataListProps) {
 
       {selectedLead && (
         <DataDetailModal
+          givenContext={givenContext.byLeadId.get(selectedLead.id) ?? null}
+          previousPositive={previousPositive.get(selectedLead.id) ?? null}
           lead={{
             id: selectedLead.id,
             leadHistoryId: selectedLead.lead_history[0]?.id,
@@ -450,7 +456,10 @@ export default function DataList({ employeeId }: DataListProps) {
             callCount: selectedLead.lead_history[0]?.call_count ?? 0
           }}
           onClose={() => setSelectedLeadId(null)}
-          onUpdated={(updates) => handleLeadUpdated(selectedLead.id, updates)}
+          onUpdated={(updates) => {
+            handleLeadUpdated(selectedLead.id, updates);
+            givenContext.refresh();
+          }}
           onBoardStageChanged={(stage) => handleBoardStageChanged(selectedLead.id, stage)}
         />
       )}
