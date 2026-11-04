@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ShieldCheck } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import GuardHeldReassignDialog from "./GuardHeldReassignDialog";
 import { guardHeldUnavailable, positiveLabel, refusedForText, shortDateIst, type GuardHeldLead } from "@/lib/guardHeldLeads";
 
 // Leads auto-junk wanted to junk but the positive-history guard refused. Admin only (the function checks the role).
@@ -10,6 +11,8 @@ import { guardHeldUnavailable, positiveLabel, refusedForText, shortDateIst, type
 export default function GuardHeldLeadsCard({ refreshKey = 0 }: { refreshKey?: number }) {
   const [leads, setLeads] = useState<GuardHeldLead[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "failed" | "hidden">("loading");
+  const [reassigning, setReassigning] = useState<GuardHeldLead | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -26,7 +29,7 @@ export default function GuardHeldLeadsCard({ refreshKey = 0 }: { refreshKey?: nu
     return () => {
       active = false;
     };
-  }, [refreshKey]);
+  }, [refreshKey, reloadKey]);
 
   if (state === "hidden") return null;
 
@@ -61,7 +64,8 @@ export default function GuardHeldLeadsCard({ refreshKey = 0 }: { refreshKey?: nu
                 <th className="py-2 pr-3">Recycles</th>
                 <th className="py-2 pr-3">Positive</th>
                 <th className="py-2 pr-3">Last activity</th>
-                <th className="py-2">Refused for</th>
+                <th className="py-2 pr-3">Refused for</th>
+                <th className="py-2"><span className="sr-only">Action</span></th>
               </tr>
             </thead>
             <tbody>
@@ -73,12 +77,27 @@ export default function GuardHeldLeadsCard({ refreshKey = 0 }: { refreshKey?: nu
                   <td className="py-2 pr-3">{lead.recycle_count}</td>
                   <td className="py-2 pr-3">{positiveLabel(lead.positive_kind)}</td>
                   <td className="py-2 pr-3 whitespace-nowrap">{shortDateIst(lead.last_activity_at)}</td>
-                  <td className="py-2 whitespace-nowrap">{refusedForText(lead.days_refused)}</td>
+                  <td className="py-2 pr-3 whitespace-nowrap">{refusedForText(lead.days_refused)}</td>
+                  <td className="py-2 text-right">
+                    <button onClick={() => setReassigning(lead)} className="text-xs font-semibold text-slate-700 border border-slate-200 rounded-lg px-2.5 py-1 hover:bg-slate-50 transition">
+                      Reassign
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      )}
+      {reassigning && (
+        <GuardHeldReassignDialog
+          lead={reassigning}
+          onClose={() => setReassigning(null)}
+          onDone={() => {
+            setReassigning(null);
+            setReloadKey((k) => k + 1);
+          }}
+        />
       )}
     </section>
   );
