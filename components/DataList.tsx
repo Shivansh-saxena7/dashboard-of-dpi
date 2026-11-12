@@ -14,6 +14,7 @@ import { usePendingOutcomeSheet } from "@/lib/usePendingOutcomeSheet";
 import { normalizeMobile } from "@/lib/normalizeMobile";
 import { istDateStringToRangeStartUTC, istDateStringToRangeEndUTC } from "@/lib/istTime";
 import { useGivenLeadContext } from "@/lib/useGivenLeadContext";
+import { useNeedsYourCall } from "@/lib/useNeedsYourCall";
 import { useDataPreviousPositive } from "@/lib/useDataPreviousPositive";
 import {
   dataFilterByStatus,
@@ -108,7 +109,8 @@ export default function DataList({ employeeId }: DataListProps) {
   const [statusFilter, setStatusFilter] = useState(() => readSavedDataStatusFilter(employeeId));
   const givenContext = useGivenLeadContext(employeeId);
   const previousPositive = useDataPreviousPositive(employeeId);
-  const activeStatusFilter = effectiveDataStatusFilter(statusFilter, givenContext.enabled);
+  const needsCall = useNeedsYourCall(employeeId);
+  const activeStatusFilter = effectiveDataStatusFilter(statusFilter, givenContext.enabled, needsCall.enabled);
 
   function chooseStatusFilter(value: string) {
     setStatusFilter(value);
@@ -264,12 +266,12 @@ export default function DataList({ employeeId }: DataListProps) {
   }, [leads, activeTab, searchQuery, sourceFilter, dateRangeFilter, customStart, customEnd]);
 
   const statusOptions = useMemo(
-    () => dataStatusOptions(filteredLeads, givenContext.enabled, givenContext.byLeadId),
-    [filteredLeads, givenContext.enabled, givenContext.byLeadId]
+    () => dataStatusOptions(filteredLeads, givenContext.enabled, givenContext.byLeadId, needsCall),
+    [filteredLeads, givenContext.enabled, givenContext.byLeadId, needsCall]
   );
 
   const visibleLeads = useMemo(() => {
-    const result = [...dataFilterByStatus(filteredLeads, activeStatusFilter, givenContext.byLeadId)].sort((a, b) => {
+    const result = [...dataFilterByStatus(filteredLeads, activeStatusFilter, givenContext.byLeadId, needsCall)].sort((a, b) => {
       const aAssigned = new Date(a.lead_history[0]?.assigned_at || a.created_at).getTime();
       const bAssigned = new Date(b.lead_history[0]?.assigned_at || b.created_at).getTime();
       return sortBy === "OLDEST" ? aAssigned - bAssigned : bAssigned - aAssigned;
@@ -277,7 +279,7 @@ export default function DataList({ employeeId }: DataListProps) {
 
     return result;
 
-  }, [filteredLeads, activeStatusFilter, givenContext.byLeadId, sortBy]);
+  }, [filteredLeads, activeStatusFilter, givenContext.byLeadId, needsCall, sortBy]);
 
   // Same fix as LeadList.tsx/app/admin/leads/page.tsx (2026-09-18 perf
   // audit) — DataCard had NO re-render protection at all before this

@@ -28,6 +28,8 @@ import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 import { isUntouchedInCurrentAssignment } from "@/lib/newLeadFilter";
 import { useGivenLeadContext } from "@/lib/useGivenLeadContext";
 import { GIVEN_BY_ADMIN_FILTER, givenFilterCount, givenFilterLeads } from "@/lib/givenLeadContext";
+import { NEEDS_CALL_FILTER, needsCallFilterLeads, needsCallOptionText } from "@/lib/needsYourCall";
+import { useNeedsYourCall } from "@/lib/useNeedsYourCall";
 
 interface LeadListProps {
   employeeId: string;
@@ -489,6 +491,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
   }
 
   const givenContext = useGivenLeadContext(employeeId);
+  const needsCall = useNeedsYourCall(employeeId);
 
   // The feature went off while this filter was selected: back to all statuses, not an empty list.
   useEffect(() => {
@@ -592,7 +595,9 @@ export default function LeadList({ employeeId }: LeadListProps) {
       result = result.filter((lead) => lead.source === sourceFilter);
     }
 
-    if (statusFilter === GIVEN_BY_ADMIN_FILTER) {
+    if (statusFilter === NEEDS_CALL_FILTER) {
+      result = needsCall.enabled ? needsCallFilterLeads(result, needsCall.byLeadId) : result;
+    } else if (statusFilter === GIVEN_BY_ADMIN_FILTER) {
       result = givenFilterLeads(result, givenContext.byLeadId);
     } else if (statusFilter === "NEW") {
       // "New" = not called and no result yet in the current assignment, see lib/newLeadFilter.ts
@@ -682,7 +687,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
 
     return result;
 
-  }, [leads, givenContext.byLeadId, activeTab, searchQuery, projectFilter, sourceFilter, statusFilter, recyclingSoonFilter, dateRangeFilter, customStart, customEnd, sortBy, personalOnlyFilter, originFilter, priorityFilter, recyclingTomorrowFilter, workingCalendar]);
+  }, [leads, givenContext.byLeadId, needsCall, activeTab, searchQuery, projectFilter, sourceFilter, statusFilter, recyclingSoonFilter, dateRangeFilter, customStart, customEnd, sortBy, personalOnlyFilter, originFilter, priorityFilter, recyclingTomorrowFilter, workingCalendar]);
 
   // Same fix as app/admin/leads/page.tsx's cardLeads (2026-09-18) — the
   // render loop below used to build `lead={{ ...inline object... }}`
@@ -854,6 +859,9 @@ export default function LeadList({ employeeId }: LeadListProps) {
 
             <FilterSelect value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
               <option value="">All Statuses</option>
+              {needsCall.enabled && (
+                <option value={NEEDS_CALL_FILTER}>{needsCallOptionText(needsCallFilterLeads(leads, needsCall.byLeadId).length)}</option>
+              )}
               {givenContext.enabled && (
                 <option value={GIVEN_BY_ADMIN_FILTER}>Given by admin ({givenFilterCount(leads, givenContext.byLeadId)})</option>
               )}

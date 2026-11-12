@@ -2,6 +2,7 @@ import { EMPLOYEE_SELECTABLE_STATUSES } from "./getValidNextLeadStatuses";
 import { GIVEN_BY_ADMIN_FILTER, givenFilterCount, givenFilterLeads, type GivenAssignmentFields, type GivenLeadContext } from "./givenLeadContext";
 import { LEAD_STATUS_DISPLAY } from "./leadStatusDisplay";
 import { isUntouchedInCurrentAssignment, type AssignmentTouchFields } from "./newLeadFilter";
+import { NEEDS_CALL_FILTER, NEEDS_CALL_LABEL, needsCallFilterLeads, type NeedsCallState } from "./needsYourCall";
 
 // Status dropdown on the employee Data page (2026-11-04). The same rules as the Leads page Status filter, from the same
 // places: "New" is lib/newLeadFilter, "Given by admin" is lib/givenLeadContext, labels are LEAD_STATUS_DISPLAY, the rest is
@@ -25,19 +26,24 @@ export function isDataStatusFilterValue(value: unknown): value is string {
     value === "" ||
     value === "NEW" ||
     value === GIVEN_BY_ADMIN_FILTER ||
+    value === NEEDS_CALL_FILTER ||
     (EMPLOYEE_SELECTABLE_STATUSES as readonly unknown[]).includes(value)
   );
 }
 
-export function dataFilterByStatus<T extends DataFilterLead>(leads: T[], filter: string, byLeadId: Map<string, GivenLeadContext>): T[] {
+const NO_NEEDS_CALL: NeedsCallState = { enabled: false, byLeadId: new Map() };
+
+export function dataFilterByStatus<T extends DataFilterLead>(leads: T[], filter: string, byLeadId: Map<string, GivenLeadContext>, needsCall: NeedsCallState = NO_NEEDS_CALL): T[] {
   if (!filter) return leads;
+  if (filter === NEEDS_CALL_FILTER) return needsCallFilterLeads(leads, needsCall.byLeadId);
   if (filter === GIVEN_BY_ADMIN_FILTER) return givenFilterLeads(leads, byLeadId);
   if (filter === "NEW") return leads.filter((lead) => isUntouchedInCurrentAssignment(lead.lead_history?.[0]));
   return leads.filter((lead) => lead.status === filter);
 }
 
-export function dataStatusOptions(leads: DataFilterLead[], givenEnabled: boolean, byLeadId: Map<string, GivenLeadContext>): DataStatusOption[] {
+export function dataStatusOptions(leads: DataFilterLead[], givenEnabled: boolean, byLeadId: Map<string, GivenLeadContext>, needsCall: NeedsCallState = NO_NEEDS_CALL): DataStatusOption[] {
   const options: DataStatusOption[] = [{ value: "", label: "All statuses", count: leads.length }];
+  if (needsCall.enabled) options.push({ value: NEEDS_CALL_FILTER, label: NEEDS_CALL_LABEL, count: needsCallFilterLeads(leads, needsCall.byLeadId).length });
   if (givenEnabled) options.push({ value: GIVEN_BY_ADMIN_FILTER, label: "Given by admin", count: givenFilterCount(leads, byLeadId) });
   options.push({ value: "NEW", label: LEAD_STATUS_DISPLAY.NEW.label, count: dataFilterByStatus(leads, "NEW", byLeadId).length });
   for (const status of EMPLOYEE_SELECTABLE_STATUSES) {
@@ -51,7 +57,8 @@ export function dataStatusOptionText(option: DataStatusOption): string {
 }
 
 // A saved "Given by admin" stays saved while the feature loads; it counts as All only when the feature is off.
-export function effectiveDataStatusFilter(filter: string, givenEnabled: boolean): string {
+export function effectiveDataStatusFilter(filter: string, givenEnabled: boolean, needsCallEnabled: boolean = false): string {
+  if (filter === NEEDS_CALL_FILTER && !needsCallEnabled) return "";
   return filter === GIVEN_BY_ADMIN_FILTER && !givenEnabled ? "" : filter;
 }
 

@@ -93,6 +93,8 @@ export function createReportingFetch(options: ReportingFetchOptions, baseFetch: 
     if (url.includes("/rpc/get_given_lead_context") && ["PGRST202", "42501", "42883"].includes(code)) return response;
     // Same for the guard-held card on System Health: hidden until its function is applied.
     if (url.includes("/rpc/get_guard_held_leads") && ["PGRST202", "42501", "42883"].includes(code)) return response;
+    // Same for the employee "Needs your call" filter.
+    if (url.includes("/rpc/get_my_guard_held_leads") && ["PGRST202", "42501", "42883"].includes(code)) return response;
     // Same for the Data page "Previously connected" box.
     if (url.includes("/rpc/get_data_previous_positive") && ["PGRST202", "42501", "42883"].includes(code)) return response;
     if (response.status === 401 && /JWT|PGRST30/i.test(`${code} ${body.message || ""}`)) return response;
