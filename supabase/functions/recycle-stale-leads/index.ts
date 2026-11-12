@@ -9,6 +9,7 @@ import { isLeadTerminal } from "../../../lib/isLeadTerminal.ts";
 import { fetchAllRows } from "../../../lib/fetchAllRows.ts";
 import { logAnomaly } from "../../../lib/logAnomaly.ts";
 import { istDateYmd, ownerLeaveEvents, ownerLeaveSkipReason, ownersOnLeave } from "../../../lib/ownerLeave.ts";
+import { leaveAdjustedSlaDeadline, ownerCalendar } from "../../../lib/ownerLeaveCalendar.ts";
 import { isNotificationWindowOpen, loadJobWorkingCalendar, nonWorkingStatusAt, timerCalendar, timerMsUntil } from "../../../lib/workingCalendar.ts";
 import { isWithinRecycleHours } from "../../../lib/recycleHours.ts";
 import { buildPreviousOwnerEndTimes, pickRecycleOwner } from "../../../lib/pickRecycleOwner.ts";
@@ -306,6 +307,23 @@ serve(withMonitoring("recycle-stale-leads", async () => {
     }
 
     const onLeaveEmployeeIds = ownersOnLeave(activeLeaveRows, leaveToday);
+
+    // Leave days do not count on a lead's timers (2026-11-12): past and current leave of every owner. If this cannot be
+    // read, the timers count leave days as before (a warning, the sweep goes on).
+    const leaveWindowStart = istDateYmd(Date.now() - 150 * 24 * 60 * 60 * 1000);
+    const { data: leaveHistoryData, error: leaveHistoryError } = await supabase
+      .from("employee_leave_periods")
+      .select("employee_id, start_date, end_date")
+      .or(`end_date.is.null,end_date.gte.${leaveWindowStart}`)
+      .limit(1000);
+    if (leaveHistoryError) {
+      await logAnomaly(supabase, {
+        source: "recycle-stale-leads:leave-calendar",
+        severity: "warning",
+        message: `Leave periods could not be read, leave days count on timers this sweep (${leaveHistoryError.message})`
+      });
+    }
+    const leaveHistoryRows = leaveHistoryData || [];
     // Owner on leave (2026-11-12): their leads are skipped below, counted here per owner for one log row a day.
     const ownerLeaveSkips = new Map<string, string[]>();
 
@@ -964,11 +982,15 @@ serve(withMonitoring("recycle-stale-leads", async () => {
       ).length;
 
       // slaFor(null) is exactly the old call; slaFor(hold) adds the reminder hold.
+      // Leave days do not count (2026-11-12): the owner's own leave is off-time on this lead's clocks, and a NEW lead's
+      // stored SLA deadline moves on past it. See lib/ownerLeaveCalendar.ts.
+      const leadCalendar = ownerCalendar(workingCalendar, leaveHistoryRows, lead.current_owner_id, leaveToday);
+      const leadSlaDeadline = leaveAdjustedSlaDeadline(workingCalendar, leaveHistoryRows, lead.current_owner_id, leaveToday, activeHistory.assigned_at, lead.sla_deadline);
       const slaFor = (hold: { next_reminder_at: string; reminder_hold_max_days: number } | null) => calculateSLAStatus(
         {
           ...(hold ?? {}),
           status: lead.status,
-          sla_deadline: lead.sla_deadline,
+          sla_deadline: leadSlaDeadline,
           recycle_count: lead.recycle_count,
           lead_type: lead.lead_type,
           call_count: activeHistory.call_count,
@@ -998,8 +1020,8 @@ serve(withMonitoring("recycle-stale-leads", async () => {
         // slaStatus, none of which match NOT_APPLICABLE.
         lead.is_personal_lead,
         // Working calendar (Step 4) — only changes anything when the
-        // master switch is ON (Follow-up inactivity clock only).
-        workingCalendar
+        // master switch is ON (Follow-up inactivity clock only). Includes the owner's leave (2026-11-12).
+        leadCalendar
       );
 
       // Reminder hold (G5 fix): only "enforce" uses the held status; any lead
