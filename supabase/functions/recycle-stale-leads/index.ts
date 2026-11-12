@@ -8,6 +8,7 @@ import { calculateLeadAssignment } from "../../../lib/calculateLeadAssignment.ts
 import { isLeadTerminal } from "../../../lib/isLeadTerminal.ts";
 import { fetchAllRows } from "../../../lib/fetchAllRows.ts";
 import { logAnomaly } from "../../../lib/logAnomaly.ts";
+import { istDateYmd, ownerLeaveEvents, ownerLeaveSkipReason, ownersOnLeave } from "../../../lib/ownerLeave.ts";
 import { isNotificationWindowOpen, loadJobWorkingCalendar, nonWorkingStatusAt, timerCalendar, timerMsUntil } from "../../../lib/workingCalendar.ts";
 import { isWithinRecycleHours } from "../../../lib/recycleHours.ts";
 import { buildPreviousOwnerEndTimes, pickRecycleOwner } from "../../../lib/pickRecycleOwner.ts";
@@ -289,11 +290,13 @@ serve(withMonitoring("recycle-stale-leads", async () => {
     // currently-on-leave, per employee_leave_periods' own design
     // (Point C) — the `.or(...)` covers both "still open" and "end
     // date hasn't passed yet".
+    // Leave days are IST dates (2026-11-12): `today` above is the UTC date, which is a day behind from 00:00 to 05:30 IST.
+    const leaveToday = istDateYmd();
     const { data: activeLeaveRows, error: leaveError } = await supabase
       .from("employee_leave_periods")
       .select("id, employee_id, start_date, end_date, open_ended_nudge_sent_at")
-      .lte("start_date", today)
-      .or(`end_date.is.null,end_date.gte.${today}`);
+      .lte("start_date", leaveToday)
+      .or(`end_date.is.null,end_date.gte.${leaveToday}`);
 
     if (leaveError) {
       return new Response(
@@ -302,7 +305,9 @@ serve(withMonitoring("recycle-stale-leads", async () => {
       );
     }
 
-    const onLeaveEmployeeIds = new Set((activeLeaveRows || []).map((r) => r.employee_id));
+    const onLeaveEmployeeIds = ownersOnLeave(activeLeaveRows, leaveToday);
+    // Owner on leave (2026-11-12): their leads are skipped below, counted here per owner for one log row a day.
+    const ownerLeaveSkips = new Map<string, string[]>();
 
     // Piece 5 (2026-08-23) — two admin nudges. Both are best-effort: a
     // failure here must never block the real recycling work below, so
@@ -759,6 +764,17 @@ serve(withMonitoring("recycle-stale-leads", async () => {
 
       if (!activeHistory) {
         diagnostics.push({ leadId: lead.id, action: "SKIPPED", reason: "no active lead_history row" });
+        continue;
+      }
+
+      // Owner on leave (2026-11-12): before anything else, so no recycle, junk, SLA warning or pause / visit-lock
+      // notice can happen for any of their leads (LEAD and DATA). The guards below never see these leads.
+      const leaveSkip = ownerLeaveSkipReason(lead.current_owner_id, onLeaveEmployeeIds);
+      if (leaveSkip) {
+        const ids = ownerLeaveSkips.get(lead.current_owner_id) ?? [];
+        ids.push(lead.id);
+        ownerLeaveSkips.set(lead.current_owner_id, ids);
+        diagnostics.push({ leadId: lead.id, action: "SKIPPED", reason: leaveSkip });
         continue;
       }
 
@@ -1631,6 +1647,27 @@ serve(withMonitoring("recycle-stale-leads", async () => {
     };
     await recordHoldEvents("reminder_hold", "REMINDER_HOLD", holdMode, reminderHoldEvents);
     await recordHoldEvents("restore_hold", "RESTORE_HOLD", restoreMode, restoreHoldEvents);
+
+    // Owner on leave: one lead_guard_events row per owner per day (not one per lead, an owner can hold hundreds),
+    // lead_id empty. A record, not a warning or an error. Failure here never affects the sweep.
+    const leaveEvents = ownerLeaveEvents(ownerLeaveSkips, leaveToday);
+    if (leaveEvents.length > 0) {
+      const { data: recentLeave } = await supabase
+        .from("lead_guard_events")
+        .select("lead_owner_id")
+        .eq("source", "owner_leave")
+        .in("lead_owner_id", leaveEvents.map((e) => e.leadOwner))
+        .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+        .limit(1000);
+      const loggedOwners = new Set((recentLeave || []).map((r: { lead_owner_id: string }) => r.lead_owner_id));
+      const freshLeave = leaveEvents.filter((e) => !loggedOwners.has(e.leadOwner));
+      if (freshLeave.length > 0) {
+        const { error: leaveLogError } = await supabase.from("lead_guard_events").insert(
+          freshLeave.map((e) => ({ source: "owner_leave", action: "OWNER_ON_LEAVE", lead_id: null, lead_owner_id: e.leadOwner, mode: "enforce", detail: e }))
+        );
+        if (leaveLogError) console.error("recycle-stale-leads: owner leave log failed (non-fatal):", leaveLogError.message);
+      }
+    }
 
     // Junk circuit breaker tripped (2026-10-16): one critical anomaly per
     // sweep; the skipped leads are listed in diagnostics.
