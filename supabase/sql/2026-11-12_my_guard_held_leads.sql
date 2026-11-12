@@ -1,7 +1,8 @@
 -- 2026-11-12 - "Needs your call": the caller's own leads the positive-history junk guard is holding back. NOT APPLIED: apply only
 -- after the owner's "haan", from an LF copy (git show <commit>:<this file>). Rollback: 2026-11-12_my_guard_held_leads_rollback.sql
 -- Read-only, additive: one function. Same rule as get_guard_held_leads (the System Health card), only for the caller's own
--- active assignment, and a lead the caller worked on after the last refusal drops off at once.
+-- active assignment. A lead drops off as soon as the caller tapped Call or saved a result after the last refusal; a note,
+-- reminder, stage move or WhatsApp tap does not count (same idea as the Given by admin rule v2).
 -- Result: lead id, positive kind, last refusal time. No name, number, note or other employee.
 begin;
 
@@ -30,7 +31,8 @@ begin
     cross join lateral (select lead_positive_history_kind(l.id) kind) k
     where l.current_owner_id = v_employee and l.status <> 'JUNK' and l.merged_into_lead_id is null and l.recycle_count >= 3
       and k.kind is not null and r.last_at > now() - interval '3 days'
-      and (h.last_activity_at is null or h.last_activity_at <= r.last_at)
+      and not (coalesce(h.last_call_click_at > r.last_at, false) or coalesce(h.outcome_at > r.last_at, false)
+        or exists (select 1 from lead_activity_log a where a.lead_history_id = h.id and a.activity_type = 'STATUS_UPDATE' and a.created_at > r.last_at))
   );
 end;
 $$;

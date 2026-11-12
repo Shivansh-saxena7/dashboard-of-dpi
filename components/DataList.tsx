@@ -167,7 +167,8 @@ export default function DataList({ employeeId }: DataListProps) {
           first_call_at,
           first_whatsapp_at,
           outcome_at,
-          last_activity_at
+          last_activity_at,
+          last_call_click_at
         )
       `
       )

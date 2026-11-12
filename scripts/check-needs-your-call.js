@@ -22,18 +22,21 @@ const rows = [
   { lead_id: "c", positive_kind: "CONVERTED", last_refused_at: REFUSED }
 ];
 const byId = nc.needsCallByLeadId(rows);
+const OLD = "2026-10-26T08:33:00Z";
+const LATER = "2026-11-12T07:00:00Z";
 const leads = [
-  { id: "a", status: "NEW", lead_history: [{ last_activity_at: "2026-10-26T08:33:00Z", outcome_at: null, call_count: 1, assigned_at: "2026-10-26T08:30:00Z" }] },
-  { id: "b", status: "NOT_CONNECTED", lead_history: [{ last_activity_at: "2026-11-12T07:00:00Z", outcome_at: null, call_count: 2, assigned_at: "2026-10-20T08:30:00Z" }] },
-  { id: "c", status: "NEW", lead_history: [{ last_activity_at: "2026-10-26T08:33:00Z", outcome_at: "2026-11-12T08:00:00Z", call_count: 1, assigned_at: "2026-10-26T08:30:00Z" }] },
-  { id: "d", status: "NEW", lead_history: [{ last_activity_at: "2026-10-26T08:33:00Z", outcome_at: null, call_count: 0, assigned_at: "2026-10-26T08:30:00Z" }] }
+  { id: "a", status: "NEW", lead_history: [{ last_activity_at: LATER, last_call_click_at: OLD, outcome_at: null, first_whatsapp_at: LATER }] },
+  { id: "b", status: "NOT_CONNECTED", lead_history: [{ last_activity_at: LATER, last_call_click_at: LATER, outcome_at: null }] },
+  { id: "c", status: "NEW", lead_history: [{ last_activity_at: OLD, last_call_click_at: OLD, outcome_at: "2026-11-12T08:00:00Z" }] },
+  { id: "d", status: "NEW", lead_history: [{ last_activity_at: OLD, outcome_at: null }] }
 ];
 const ids = (r) => r.map((x) => x.id).join("");
 
 eq("only held leads not worked since the refusal", ids(nc.needsCallFilterLeads(leads, byId)), "a");
-eq("activity after the refusal takes it out", nc.workedSinceRefusal(leads[1].lead_history[0], REFUSED), true);
+eq("a Call tap after the refusal takes it out", nc.workedSinceRefusal(leads[1].lead_history[0], REFUSED), true);
+eq("a note, reminder, stage move or WhatsApp tap keeps it in", nc.workedSinceRefusal(leads[0].lead_history[0], REFUSED), false);
+eq("a Call tap before the refusal keeps it in", nc.workedSinceRefusal({ last_call_click_at: OLD }, REFUSED), false);
 eq("a result after the refusal takes it out", nc.workedSinceRefusal(leads[2].lead_history[0], REFUSED), true);
-eq("old activity keeps it in", nc.workedSinceRefusal(leads[0].lead_history[0], REFUSED), false);
 eq("no history keeps it in", nc.workedSinceRefusal(null, REFUSED), false);
 eq("bad refusal time keeps it in", nc.workedSinceRefusal(leads[1].lead_history[0], "x"), false);
 eq("option text", nc.needsCallOptionText(3), "Needs your call (3)");
@@ -62,6 +65,9 @@ if (/mobile|name|note|email|employee/i.test(output)) problems.push("the result m
 if (!/v_employee uuid := current_employee_id\(\)/.test(body)) problems.push("the owner must come from the login");
 if (!/h\.employee_id = v_employee/.test(body) || !/l\.current_owner_id = v_employee/.test(body)) problems.push("only the caller's own active leads");
 if (!/get_my_guard_held_leads\(\)\s*\n?returns jsonb/.test(body)) problems.push("the function must take no parameter");
+if (!/h\.last_call_click_at > r\.last_at/.test(body) || !/h\.outcome_at > r\.last_at/.test(body) || !/activity_type = 'STATUS_UPDATE' and a\.created_at > r\.last_at/.test(body)) problems.push("only a Call tap or a saved result takes a lead out");
+if (/last_activity_at|first_whatsapp_at/.test(body)) problems.push("a note, reminder, stage move or WhatsApp tap must not take a lead out");
+if (!read("components/LeadList.tsx").includes("last_call_click_at") || !read("components/DataList.tsx").includes("last_call_click_at")) problems.push("both pages must load last_call_click_at");
 if (!/revoke all on function public\.get_my_guard_held_leads\(\) from public, anon/.test(body)) problems.push("anon must not run it");
 if (!/grant execute on function public\.get_my_guard_held_leads\(\) to authenticated, service_role/.test(body)) problems.push("only authenticated and service_role");
 if (!/security definer set search_path/.test(body)) problems.push("search_path must be pinned");

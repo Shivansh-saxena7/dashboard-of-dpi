@@ -357,6 +357,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
           recycled_from_status,
           recycled_from_stage,
           last_activity_at,
+          last_call_click_at,
           paused_until,
           pause_reason,
           pause_note,
