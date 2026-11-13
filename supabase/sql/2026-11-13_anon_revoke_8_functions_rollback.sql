@@ -1,5 +1,5 @@
--- ROLLBACK for 2026-11-13_anon_revoke_8_functions.sql: gives PUBLIC and anon EXECUTE back, so every ACL is
--- byte for byte what it was before ({=X/postgres,postgres=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres}).
+-- ROLLBACK for 2026-11-13_anon_revoke_8_functions.sql: gives PUBLIC and anon EXECUTE back, so every ACL holds
+-- exactly the entries it had before (Postgres may list them in another order) ({=X/postgres,postgres=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres}).
 begin;
 
 grant execute on function public.check_employee_deletion_blockers(uuid) to public, anon;
@@ -18,7 +18,7 @@ begin
     if has_function_privilege('anon', f, 'EXECUTE') <> true then bad := bad || ' anon:' || f; end if;
     if not has_function_privilege('authenticated', f, 'EXECUTE') then bad := bad || ' authenticated:' || f; end if;
     if not has_function_privilege('service_role', f, 'EXECUTE') then bad := bad || ' service_role:' || f; end if;
-    if (select proacl::text from pg_proc where oid = f::regprocedure) <> '{=X/postgres,postgres=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres}' then bad := bad || ' acl:' || f; end if;
+    if (select array_agg(x::text order by x::text) from unnest((select proacl from pg_proc where oid = f::regprocedure)) x) <> array['=X/postgres','anon=X/postgres','authenticated=X/postgres','postgres=X/postgres','service_role=X/postgres']::text[] then bad := bad || ' acl:' || f; end if;
   end loop;
   if bad <> '' then raise exception 'check failed:%', bad; end if;
 end $$;
