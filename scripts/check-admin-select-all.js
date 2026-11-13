@@ -55,6 +55,24 @@ eq("no filter: no lead_history filter", [...noFilter.keys()].filter((k) => k.sta
 const old = params(db.from("leads").select("id, status, board_stage").eq("lead_history.is_active", true));
 eq("old shape had no embed (the bug)", /lead_history/.test(old.get("select")), false);
 
+// 4) Bulk Reassign safety: at most 500 a click, confirm dialog names the count and the employee.
+const { ADMIN_REASSIGN_MAX_PER_CALL, canBulkReassign, reassignConfirmTitle } = require(path.join(root, "lib/adminReassign.ts"));
+const { ADMIN_JUNK_MAX_PER_CALL } = require(path.join(root, "lib/adminJunk.ts"));
+eq("reassign limit", ADMIN_REASSIGN_MAX_PER_CALL, 500);
+eq("junk limit unchanged", ADMIN_JUNK_MAX_PER_CALL, 50);
+eq("reassign 0", canBulkReassign(0), false);
+eq("reassign 1", canBulkReassign(1), true);
+eq("reassign 500", canBulkReassign(500), true);
+eq("reassign 501", canBulkReassign(501), false);
+eq("reassign 3198", canBulkReassign(3198), false);
+eq("title plural", reassignConfirmTitle(12, "Rama"), "Reassign 12 leads to Rama?");
+eq("title singular", reassignConfirmTitle(1, "Rama"), "Reassign 1 lead to Rama?");
+eq("title no name", reassignConfirmTitle(3, null), "Reassign 3 leads to this employee?");
+if (!page.includes("onClick={() => setReassignDialogOpen(true)}")) problems.push("Reassign must open the confirm dialog first");
+if (!page.includes("!canBulkReassign(selectedLeadIds.size)}")) problems.push("Reassign must be disabled above the limit");
+if (!page.includes("Select at most {ADMIN_REASSIGN_MAX_PER_CALL} leads")) problems.push('the "Select at most 500 leads" message is missing');
+if (!/async function handleBulkReassign\(\) \{\n\s+if \(!canBulkReassign\(selectedLeadIds\.size\)/.test(page)) problems.push("handleBulkReassign must refuse above the limit too");
+
 if (problems.length) {
   console.error("check-admin-select-all: FAILED");
   for (const p of problems) console.error("  " + p);

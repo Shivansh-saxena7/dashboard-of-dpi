@@ -25,6 +25,7 @@ import PageHeader from "@/components/PageHeader";
 import { splitAdminEmployeeOptions, adminEmployeeLabel } from "@/lib/adminEmployeeOptions";
 import { ADMIN_JUNK_MAX_PER_CALL, summarizeAdminJunkResult } from "@/lib/adminJunk";
 import { ADMIN_SELECT_ALL_SELECT } from "@/lib/adminLeadsSelect";
+import { ADMIN_REASSIGN_MAX_PER_CALL, canBulkReassign, reassignConfirmTitle } from "@/lib/adminReassign";
 
 type SortOption = "NEWEST" | "OLDEST" | "SLA_URGENCY";
 
@@ -139,6 +140,8 @@ export default function AdminLeadsPage() {
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
   // Bulk "Mark as junk" (2026-11-13): admin_mark_leads_junk, reason required, at most 50 a call.
   const [junkDialogOpen, setJunkDialogOpen] = useState(false);
+  // Bulk Reassign confirm (2026-11-13): count + employee named, at most ADMIN_REASSIGN_MAX_PER_CALL a click.
+  const [reassignDialogOpen, setReassignDialogOpen] = useState(false);
   const [junkReason, setJunkReason] = useState("");
   const [junkSubmitting, setJunkSubmitting] = useState(false);
   const [bulkTargetEmployeeId, setBulkTargetEmployeeId] = useState("");
@@ -555,7 +558,7 @@ export default function AdminLeadsPage() {
   // returns are surfaced as a single summary toast rather than one
   // toast per lead, which would be noise for a 50-lead batch.
   async function handleBulkReassign() {
-    if (selectedLeadIds.size === 0 || !bulkTargetEmployeeId || !bulkReason.trim()) return;
+    if (!canBulkReassign(selectedLeadIds.size) || !bulkTargetEmployeeId || !bulkReason.trim()) return;
 
     setBulkSubmitting(true);
     try {
@@ -584,6 +587,7 @@ export default function AdminLeadsPage() {
         );
       }
 
+      setReassignDialogOpen(false);
       setSelectedLeadIds(new Set());
       setBulkTargetEmployeeId("");
       setBulkReason("");
@@ -1312,8 +1316,8 @@ export default function AdminLeadsPage() {
             />
 
             <button
-              onClick={handleBulkReassign}
-              disabled={bulkSubmitting || !bulkTargetEmployeeId || !bulkReason.trim()}
+              onClick={() => setReassignDialogOpen(true)}
+              disabled={bulkSubmitting || !bulkTargetEmployeeId || !bulkReason.trim() || !canBulkReassign(selectedLeadIds.size)}
               className="h-10 px-4 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60 transition shrink-0"
             >
               {bulkSubmitting ? "Reassigning..." : `Reassign (${selectedLeadIds.size})`}
@@ -1328,10 +1332,42 @@ export default function AdminLeadsPage() {
               {`Mark as junk (${selectedLeadIds.size})`}
             </button>
           </div>
+          {selectedLeadIds.size > ADMIN_REASSIGN_MAX_PER_CALL && (
+            <p className="mt-2 text-[11px] text-slate-500">Select at most {ADMIN_REASSIGN_MAX_PER_CALL} leads</p>
+          )}
           {selectedLeadIds.size > ADMIN_JUNK_MAX_PER_CALL && (
             <p className="mt-2 text-[11px] text-slate-500">Mark as junk works on at most {ADMIN_JUNK_MAX_PER_CALL} leads at a time.</p>
           )}
         </motion.div>
+      )}
+
+      {reassignDialogOpen && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 px-4" onClick={() => !bulkSubmitting && setReassignDialogOpen(false)}>
+          <div role="dialog" aria-modal="true" aria-labelledby="admin-reassign-title" className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h2 id="admin-reassign-title" className="text-base font-bold text-slate-800">
+              {reassignConfirmTitle(selectedLeadIds.size, employees.find((e) => e.id === bulkTargetEmployeeId)?.name)}
+            </h2>
+            <p className="mt-2 text-xs text-slate-500">
+              Reason: <span className="font-semibold text-slate-700">{bulkReason.trim()}</span>
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setReassignDialogOpen(false)}
+                disabled={bulkSubmitting}
+                className="h-10 px-4 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBulkReassign}
+                disabled={bulkSubmitting || !canBulkReassign(selectedLeadIds.size)}
+                className="h-10 px-4 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+              >
+                {bulkSubmitting ? "Reassigning..." : "Reassign"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {junkDialogOpen && (
