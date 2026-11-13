@@ -75,10 +75,13 @@ export default function Header() {
         data: { user }
       } = await supabase.auth.getUser();
 
+      // No login (signed out, expired): nothing to load, and no employees?auth_user_id=eq.undefined query.
+      if (!user) return;
+
       const { data: employee } = await supabase
         .from("employees")
         .select("id")
-        .eq("auth_user_id", user?.id)
+        .eq("auth_user_id", user.id)
         .single();
 
       if (!employee) return;
@@ -394,10 +397,12 @@ useEffect(() => {
       data: { user }
     } = await supabase.auth.getUser();
 
+    if (!user) return;
+
     const { data: employee } = await supabase
       .from("employees")
       .select("id")
-      .eq("auth_user_id", user?.id)
+      .eq("auth_user_id", user.id)
       .single();
 
     if (!employee) return;
@@ -459,10 +464,12 @@ useEffect(() => {
                   data: { user }
                 } = await supabase.auth.getUser();
 
+                if (!user) return;
+
                 const { data: employee } = await supabase
                   .from("employees")
                   .select("id")
-                  .eq("auth_user_id", user?.id)
+                  .eq("auth_user_id", user.id)
                   .single();
 
                 if (employee) {

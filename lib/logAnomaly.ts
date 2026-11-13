@@ -20,7 +20,7 @@
 // NULL) and from an Edge Function's service-role client alike.
 export interface AnomalyLogInput {
   source: string;
-  severity?: "warning" | "error";
+  severity?: "info" | "warning" | "error";
   message: string;
   context?: Record<string, unknown>;
   // Where it broke. Optional: the DB trigger infers it (service role ->

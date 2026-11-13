@@ -4,3 +4,9 @@
 // Select-all silently selected nothing. Only the columns the filters need are fetched. Guarded by
 // scripts/check-admin-select-all.js.
 export const ADMIN_SELECT_ALL_SELECT = "id, status, board_stage, lead_history!inner ( is_active, recycle_reason, assigned_at )";
+
+// Admin Leads search (2026-11-13): PostgREST's or() treats , ( ) as list / group syntax, so a name like "Sharma, R"
+// broke the whole query ("failed to parse logic tree"). They become spaces; * and % are wildcards in ilike, also out.
+export function adminSearchTerm(raw: string): string {
+  return (raw || "").replace(/[,()*%\\]/g, " ").replace(/\s+/g, " ").trim();
+}
