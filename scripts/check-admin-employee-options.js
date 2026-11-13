@@ -30,7 +30,21 @@ eq("active label", adminEmployeeLabel(list[0]), "Yogesh");
 eq("inactive label", adminEmployeeLabel(list[1]), "Muskan (inactive)");
 eq("empty list", splitAdminEmployeeOptions([]), { active: [], inactive: [] });
 
+// Bulk "Mark as junk"
+const { ADMIN_JUNK_MAX_PER_CALL, summarizeAdminJunkResult } = require(path.join(root, "lib/adminJunk.ts"));
+eq("junk limit", ADMIN_JUNK_MAX_PER_CALL, 50);
+eq("junk summary all ok", summarizeAdminJunkResult({ requested: 2, junked: 2, results: [{ lead_id: "aaaaaaaa-1", success: true }, { lead_id: "bbbbbbbb-2", success: true }] }), { junked: 2, failed: [] });
+eq("junk summary one failed", summarizeAdminJunkResult({ junked: 1, results: [{ lead_id: "aaaaaaaa-1", success: true }, { lead_id: "bbbbbbbb-2", success: false, error: "already junk" }] }), { junked: 1, failed: ["bbbbbbbb already junk"] });
+eq("junk summary empty answer", summarizeAdminJunkResult(null), { junked: 0, failed: [] });
+const sql = read("supabase/sql/2026-11-13_admin_mark_leads_junk.sql");
+if (!sql.includes("cardinality(v_ids) > " + ADMIN_JUNK_MAX_PER_CALL)) problems.push("the page limit must match the RPC limit");
+if (!sql.includes("revoke all on function public.admin_mark_leads_junk(uuid[], text) from public, anon;")) problems.push("admin_mark_leads_junk must not be executable by anon / PUBLIC");
+if (!sql.includes("not coalesce(is_admin(), false)")) problems.push("admin_mark_leads_junk must check is_admin()");
+if (!sql.includes("reason is required")) problems.push("admin_mark_leads_junk must require a reason");
+
 const page = read("app/admin/leads/page.tsx");
+if (!page.includes('supabase.rpc("admin_mark_leads_junk"')) problems.push("the bulk bar must call admin_mark_leads_junk");
+if (!page.includes("disabled={junkSubmitting || !junkReason.trim()}")) problems.push("Mark as junk must need a reason");
 if (!page.includes('<optgroup label="Inactive employees">')) problems.push("the Admin Leads filter must list inactive employees in their own group");
 if (!page.includes("splitAdminEmployeeOptions(employees)")) problems.push("the Admin Leads filter must use splitAdminEmployeeOptions");
 // The "Assign to..." picker must stay active-only: a lead must never be handed to someone who has left.

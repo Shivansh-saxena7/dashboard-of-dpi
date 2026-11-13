@@ -23,6 +23,7 @@ import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 
 import PageHeader from "@/components/PageHeader";
 import { splitAdminEmployeeOptions, adminEmployeeLabel } from "@/lib/adminEmployeeOptions";
+import { ADMIN_JUNK_MAX_PER_CALL, summarizeAdminJunkResult } from "@/lib/adminJunk";
 
 type SortOption = "NEWEST" | "OLDEST" | "SLA_URGENCY";
 
@@ -135,6 +136,10 @@ export default function AdminLeadsPage() {
   const [totalCount, setTotalCount] = useState(0);
 
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
+  // Bulk "Mark as junk" (2026-11-13): admin_mark_leads_junk, reason required, at most 50 a call.
+  const [junkDialogOpen, setJunkDialogOpen] = useState(false);
+  const [junkReason, setJunkReason] = useState("");
+  const [junkSubmitting, setJunkSubmitting] = useState(false);
   const [bulkTargetEmployeeId, setBulkTargetEmployeeId] = useState("");
   const [bulkReason, setBulkReason] = useState("");
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
@@ -588,6 +593,42 @@ export default function AdminLeadsPage() {
       toast.error("Something went wrong bulk-reassigning these leads.");
     } finally {
       setBulkSubmitting(false);
+    }
+  }
+
+  async function handleBulkJunk() {
+    const ids = Array.from(selectedLeadIds);
+    if (ids.length === 0 || ids.length > ADMIN_JUNK_MAX_PER_CALL || !junkReason.trim() || junkSubmitting) return;
+
+    setJunkSubmitting(true);
+    try {
+      const { data, error } = await supabase.rpc("admin_mark_leads_junk", {
+        p_lead_ids: ids,
+        p_reason: junkReason.trim()
+      });
+
+      if (error) {
+        toast.error(error.message || "Could not mark these leads as junk.");
+        return;
+      }
+
+      const summary = summarizeAdminJunkResult(data);
+      if (summary.failed.length === 0) {
+        toast.success(`Marked ${summary.junked} lead${summary.junked === 1 ? "" : "s"} as junk.`);
+      } else {
+        toast.error(`${summary.junked} marked as junk, ${summary.failed.length} not: ${summary.failed.join("; ")}`, { duration: 8000 });
+      }
+
+      setJunkDialogOpen(false);
+      setJunkReason("");
+      setSelectedLeadIds(new Set());
+      setFullMatchingIds(null);
+      loadLeads();
+    } catch (err) {
+      console.error(err);
+      toast.error("Something went wrong marking these leads as junk.");
+    } finally {
+      setJunkSubmitting(false);
     }
   }
 
@@ -1276,8 +1317,57 @@ export default function AdminLeadsPage() {
             >
               {bulkSubmitting ? "Reassigning..." : `Reassign (${selectedLeadIds.size})`}
             </button>
+
+            <button
+              onClick={() => setJunkDialogOpen(true)}
+              disabled={junkSubmitting || selectedLeadIds.size > ADMIN_JUNK_MAX_PER_CALL}
+              title={selectedLeadIds.size > ADMIN_JUNK_MAX_PER_CALL ? `Select at most ${ADMIN_JUNK_MAX_PER_CALL} leads to mark as junk` : undefined}
+              className="h-10 px-4 rounded-lg text-xs font-bold bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 disabled:opacity-60 transition shrink-0"
+            >
+              {`Mark as junk (${selectedLeadIds.size})`}
+            </button>
           </div>
+          {selectedLeadIds.size > ADMIN_JUNK_MAX_PER_CALL && (
+            <p className="mt-2 text-[11px] text-slate-500">Mark as junk works on at most {ADMIN_JUNK_MAX_PER_CALL} leads at a time.</p>
+          )}
         </motion.div>
+      )}
+
+      {junkDialogOpen && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 px-4" onClick={() => !junkSubmitting && setJunkDialogOpen(false)}>
+          <div role="dialog" aria-modal="true" aria-labelledby="admin-junk-title" className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h2 id="admin-junk-title" className="text-base font-bold text-slate-800">
+              Mark {selectedLeadIds.size} lead{selectedLeadIds.size === 1 ? "" : "s"} as junk?
+            </h2>
+            <p className="mt-2 text-xs text-slate-500">
+              They leave their owner&apos;s list and stop recycling. This also applies to leads with a positive history.
+              To bring one back later, use Reassign on the junk lead.
+            </p>
+            <textarea
+              value={junkReason}
+              onChange={(e) => setJunkReason(e.target.value)}
+              placeholder="Reason (required)"
+              rows={3}
+              className="mt-3 w-full rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-rose-100"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setJunkDialogOpen(false)}
+                disabled={junkSubmitting}
+                className="h-10 px-4 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBulkJunk}
+                disabled={junkSubmitting || !junkReason.trim()}
+                className="h-10 px-4 rounded-lg text-xs font-bold bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-60"
+              >
+                {junkSubmitting ? "Marking..." : "Mark as junk"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
