@@ -24,7 +24,7 @@ import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 import PageHeader from "@/components/PageHeader";
 import { splitAdminEmployeeOptions, adminEmployeeLabel } from "@/lib/adminEmployeeOptions";
 import { ADMIN_JUNK_MAX_PER_CALL, summarizeAdminJunkResult } from "@/lib/adminJunk";
-import { ADMIN_SELECT_ALL_SELECT } from "@/lib/adminLeadsSelect";
+import { ADMIN_SELECT_ALL_SELECT, adminSearchTerm } from "@/lib/adminLeadsSelect";
 import { ADMIN_REASSIGN_MAX_PER_CALL, canBulkReassign, reassignConfirmTitle } from "@/lib/adminReassign";
 
 type SortOption = "NEWEST" | "OLDEST" | "SLA_URGENCY";
@@ -353,7 +353,9 @@ export default function AdminLeadsPage() {
     }
 
     if (debouncedSearchQuery) {
-      q = q.or(`name.ilike.%${debouncedSearchQuery}%,mobile.ilike.%${debouncedSearchQuery}%,project.ilike.%${debouncedSearchQuery}%`);
+      // Commas and brackets split or group PostgREST's or() list ("failed to parse logic tree"): taken out of the term.
+      const term = adminSearchTerm(debouncedSearchQuery);
+      if (term) q = q.or(`name.ilike.%${term}%,mobile.ilike.%${term}%,project.ilike.%${term}%`);
     }
 
     if (employeeFilter) q = q.eq("current_owner_id", employeeFilter);

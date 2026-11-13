@@ -74,9 +74,19 @@ export function createReportingFetch(options: ReportingFetchOptions, baseFetch: 
       // a warning, so Admin is only notified if it keeps happening.
       const aborted = networkError instanceof Error && networkError.name === "AbortError";
       if (aborted || pageUnloading) throw networkError;
-      void report(options, baseFetch, url, init, input, "warning", "network", {
-        message: networkError instanceof Error ? networkError.message : String(networkError)
-      });
+      // System Health cleanup (2026-11-13): a phone that is offline tells us nothing, so nothing is logged. A failed
+      // write (POST/PATCH/PUT/DELETE, except read-only RPCs) stays a warning: something the user saved did not arrive.
+      // A failed read is "info", once a day per page + endpoint on this device, under its own network:* source.
+      if (isOffline()) throw networkError;
+      const failure = { message: networkError instanceof Error ? networkError.message : String(networkError) };
+      const method = (init?.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
+      const endpoint = endpointOf(url);
+      if (isWriteRequest(method, endpoint)) {
+        void report(options, baseFetch, url, init, input, "warning", "network", failure);
+      } else {
+        const source = `network:${options.source()} ${method} ${endpoint}`;
+        if (firstTodayOnThisDevice(source)) void report(options, baseFetch, url, init, input, "info", "network", failure, undefined, source);
+      }
       throw networkError;
     }
 
@@ -116,22 +126,67 @@ function extraContext(options: ReportingFetchOptions): Record<string, unknown> {
   }
 }
 
+// --- Network failures (2026-11-13). Kept here, import-free, because Edge Functions load this file too. ---
+export function isWriteRequest(method: string, endpoint: string): boolean {
+  const m = method.toUpperCase();
+  if (m === "GET" || m === "HEAD") return false;
+  return !(m === "POST" && /^rpc\/(get|list|count|find|search|check)_/.test(endpoint));
+}
+
+function endpointOf(url: string): string {
+  try {
+    return new URL(url).pathname.replace("/rest/v1/", "");
+  } catch {
+    return "unknown";
+  }
+}
+
+function isOffline(): boolean {
+  try {
+    return typeof navigator !== "undefined" && (navigator as { onLine?: boolean }).onLine === false;
+  } catch {
+    return false;
+  }
+}
+
+const NET_KEY_PREFIX = "reportingFetch:net:";
+
+// True the first time this device sees this read fail today (IST); false after. Without localStorage (server, Edge)
+// it is always true and the 10-minute throttle in report() still applies.
+export function firstTodayOnThisDevice(source: string, nowMs: number = Date.now()): boolean {
+  try {
+    if (typeof localStorage === "undefined") return true;
+    const day = new Date(nowMs + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const key = `${NET_KEY_PREFIX}${day}:${source}`;
+    if (localStorage.getItem(key)) return false;
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(NET_KEY_PREFIX) && !k.startsWith(`${NET_KEY_PREFIX}${day}:`)) localStorage.removeItem(k);
+    }
+    localStorage.setItem(key, "1");
+    return true;
+  } catch {
+    return true;
+  }
+}
+
 async function report(
   options: ReportingFetchOptions,
   baseFetch: FetchLike,
   url: string,
   init: RequestInit | undefined,
   input: RequestInfo | URL,
-  severity: "warning" | "error",
+  severity: "info" | "warning" | "error",
   code: string,
   body: { message?: string; details?: string; hint?: string },
-  status?: number
+  status?: number,
+  sourceOverride?: string
 ) {
   try {
     const parsed = new URL(url);
     const endpoint = parsed.pathname.replace("/rest/v1/", "");
     const method = (init?.method || (input instanceof Request ? input.method : "GET")).toUpperCase();
-    const source = options.source();
+    const source = sourceOverride ?? options.source();
 
     const key = `${source}|${method} ${endpoint}|${code}`;
     const last = recentlyReported.get(key);
