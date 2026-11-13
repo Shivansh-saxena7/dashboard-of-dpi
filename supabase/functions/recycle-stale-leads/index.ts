@@ -12,7 +12,8 @@ import { istDateYmd, ownerLeaveEvents, ownerLeaveSkipReason, ownersOnLeave } fro
 import { leaveAdjustedSlaDeadline, ownerCalendar } from "../../../lib/ownerLeaveCalendar.ts";
 import { isNotificationWindowOpen, loadJobWorkingCalendar, nonWorkingStatusAt, timerCalendar, timerMsUntil } from "../../../lib/workingCalendar.ts";
 import { isWithinRecycleHours } from "../../../lib/recycleHours.ts";
-import { buildPreviousOwnerEndTimes, pickRecycleOwner } from "../../../lib/pickRecycleOwner.ts";
+import { buildPreviousOwnerEndTimes } from "../../../lib/pickRecycleOwner.ts";
+import { pickRecycleOwnerCapped, recordRecycleGiven, RECYCLE_PER_OWNER_CAP_PER_SWEEP } from "../../../lib/recyclePerOwnerCap.ts";
 import { autoJunkDecision, autoRecycleEnabled, DEFAULT_MAX_AUTO_JUNK_PER_SWEEP, junkAttemptResult } from "../../../lib/autoJunkGuard.ts";
 import { buildHolderIndex, decideSiblingGuard, guardMode, type PositiveHolder } from "../../../lib/recycleSiblingGuard.ts";
 import { reminderHoldMaxDays, reminderHoldMode } from "../../../lib/reminderHold.ts";
@@ -575,6 +576,9 @@ serve(withMonitoring("recycle-stale-leads", async () => {
     }
 
     let recycledCount = 0;
+    // Per-owner recycle cap (2026-11-13, lib/recyclePerOwnerCap.ts): recycled leads given to each employee this sweep.
+    const recycleGivenThisSweep = new Map<string, number>();
+    let perOwnerCapSkipped = 0;
     let junkedCount = 0;
     let junkBreakerSkipped = 0;
     let junkRefused = 0;
@@ -1250,7 +1254,10 @@ serve(withMonitoring("recycle-stale-leads", async () => {
               p_recycle_reason: slaStatus
             });
             event.result = assignError ? `failed: ${assignError.message}` : "assigned";
-            if (!assignError) recycledCount++;
+            if (!assignError) {
+              recycledCount++;
+              recordRecycleGiven(recycleGivenThisSweep, holder.owner_id);
+            }
             diagnostics.push({ leadId: lead.id, action: assignError ? "SIBLING_ASSIGN_FAILED" : "SIBLING_ASSIGNED", newEmployeeId: holder.owner_id, error: assignError?.message });
           } else {
             event.result = "not recycled";
@@ -1388,11 +1395,21 @@ serve(withMonitoring("recycle-stale-leads", async () => {
         const lastProjectPointer = projectPointers[normalizedProject] ?? null;
         // Previous owners left out too (lib/pickRecycleOwner.ts); the
         // project pointer rotation itself is unchanged.
-        const projectPick = pickRecycleOwner(groupPoolEmployees, previousOwnersByLead.get(lead.id), (pool) => {
+        const projectPick = pickRecycleOwnerCapped(groupPoolEmployees, previousOwnersByLead.get(lead.id), recycleGivenThisSweep, (pool) => {
           const lastIndex = pool.findIndex((id) => id === lastProjectPointer);
           const nextIndex = lastIndex === -1 ? 0 : (lastIndex + 1) % pool.length;
           return pool[nextIndex] ?? null;
         });
+        if (projectPick.capped) {
+          // Every group member this lead may go to already got its share this sweep: it stays put, next sweep tries again.
+          perOwnerCapSkipped++;
+          diagnostics.push({ leadId: lead.id, action: "SKIPPED", reason: "PER_OWNER_CAP_REACHED", slaStatus });
+          continue;
+        }
+        if (!projectPick.employeeId) {
+          diagnostics.push({ leadId: lead.id, action: "SKIPPED", reason: "PROJECT_RULE_GROUP_NO_ELIGIBLE_EMPLOYEE", slaStatus, project: lead.project });
+          continue;
+        }
         if (projectPick.usedFallback) prevOwnerFallbacks.push({ lead: lead.id.slice(0, 8), excluded: projectPick.excludedCount });
         const nextEmployeeId = projectPick.employeeId as string;
 
@@ -1434,6 +1451,7 @@ serve(withMonitoring("recycle-stale-leads", async () => {
           });
         } else {
           recycledCount++;
+          recordRecycleGiven(recycleGivenThisSweep, nextEmployeeId);
           projectPointers[normalizedProject] = nextEmployeeId;
 
           const { error: projectPointerUpsertError } = await supabase
@@ -1500,9 +1518,10 @@ serve(withMonitoring("recycle-stale-leads", async () => {
       // it fall back to the longest-ago previous owner. `result` is the
       // calculateLeadAssignment call that produced the pick.
       let result = { assignedEmployeeId: null, nextGlobalPointerEmployeeId: pointerEmployeeId, nextRestrictedPoolPointerEmployeeId: restrictedPoolPointerEmployeeId } as ReturnType<typeof calculateLeadAssignment>;
-      const rrPick = pickRecycleOwner(
+      const rrPick = pickRecycleOwnerCapped(
         eligibleEmployees.map((employee) => employee.id),
         previousOwnersByLead.get(lead.id),
+        recycleGivenThisSweep,
         (poolIds) => {
           result = calculateLeadAssignment(
             lead.project,
@@ -1519,7 +1538,14 @@ serve(withMonitoring("recycle-stale-leads", async () => {
       );
       if (rrPick.usedFallback) prevOwnerFallbacks.push({ lead: lead.id.slice(0, 8), excluded: rrPick.excludedCount });
 
-      if (!result.assignedEmployeeId) {
+      if (rrPick.capped) {
+        // Every receiver this lead may go to already got its share this sweep: it stays put, next sweep tries again.
+        perOwnerCapSkipped++;
+        diagnostics.push({ leadId: lead.id, action: "SKIPPED", reason: "PER_OWNER_CAP_REACHED", slaStatus });
+        continue;
+      }
+
+      if (!rrPick.employeeId || !result.assignedEmployeeId) {
         // Nobody eligible right now — leave it, retry next sweep.
         diagnostics.push({
           leadId: lead.id,
@@ -1570,6 +1596,7 @@ serve(withMonitoring("recycle-stale-leads", async () => {
         });
       } else {
         recycledCount++;
+        recordRecycleGiven(recycleGivenThisSweep, result.assignedEmployeeId);
         if (!isTeamLeaderAssigned) {
           pointerEmployeeId = result.nextGlobalPointerEmployeeId;
           // Restricted-pool pointer (2026-09-25) — now written
@@ -1735,6 +1762,7 @@ serve(withMonitoring("recycle-stale-leads", async () => {
         success: true,
         recycledCount,
         cappedRecycleAttempts,
+        perOwnerCap: { cap: RECYCLE_PER_OWNER_CAP_PER_SWEEP, skipped: perOwnerCapSkipped, given: Object.fromEntries(recycleGivenThisSweep) },
         withinRecycleHours,
         junkedCount,
         junkBreakerSkipped,
