@@ -22,6 +22,8 @@ import { LeadOrigin } from "@/lib/recycleReasonDisplay";
 import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 
 import PageHeader from "@/components/PageHeader";
+import { splitAdminEmployeeOptions, adminEmployeeLabel } from "@/lib/adminEmployeeOptions";
+
 type SortOption = "NEWEST" | "OLDEST" | "SLA_URGENCY";
 
 const ALL_STATUSES = Object.keys(LEAD_STATUS_DISPLAY);
@@ -647,7 +649,9 @@ export default function AdminLeadsPage() {
   // a meaningful thing to filter by ("confirm they truly have none"),
   // and this removes a dependency on the full leads set being in
   // memory at all.
-  const employeeOptions = useMemo(() => employees.filter((e) => e.is_active), [employees]);
+  // Admin filter also lists employees who have left (after the active ones), so their leads can still be found.
+  const employeeGroups = useMemo(() => splitAdminEmployeeOptions(employees), [employees]);
+  const employeeOptions = employeeGroups.active;
 
   // Piece 3 — loaded once on mount from dedicated leads_distinct_projects/
   // leads_distinct_sources views (security_invoker=true, same convention
@@ -794,7 +798,7 @@ export default function AdminLeadsPage() {
   // actually in the export.
   const reportMeta = useMemo(() => {
     const employeeLabel = employeeFilter
-      ? employeeOptions.find((e) => e.id === employeeFilter)?.name ?? null
+      ? (() => { const e = employees.find((x) => x.id === employeeFilter); return e ? adminEmployeeLabel(e) : null; })()
       : null;
 
     const otherFilters: { label: string; value: string }[] = [];
@@ -856,7 +860,7 @@ export default function AdminLeadsPage() {
     dateRangeFilter,
     customStart,
     customEnd,
-    employeeOptions
+    employees
   ]);
 
   // Piece 2 — exports the full server-side-filtered set via
@@ -987,6 +991,13 @@ export default function AdminLeadsPage() {
             {employeeOptions.map((emp) => (
               <option key={emp.id} value={emp.id}>{emp.name}</option>
             ))}
+            {employeeGroups.inactive.length > 0 && (
+              <optgroup label="Inactive employees">
+                {employeeGroups.inactive.map((emp) => (
+                  <option key={emp.id} value={emp.id}>{adminEmployeeLabel(emp)}</option>
+                ))}
+              </optgroup>
+            )}
           </FilterSelect>
 
           <FilterSelect value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)}>
