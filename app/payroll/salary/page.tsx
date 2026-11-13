@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { computePaidDays } from "@/lib/payrollLop";
 import { motion } from "framer-motion";
 import toast from "react-hot-toast";
 import {
@@ -207,7 +208,6 @@ export default function PayrollSalaryPage() {
   const [slipMonth, setSlipMonth] = useState(todayStr.slice(0, 7));
   const [generating, setGenerating] = useState(false);
   const [slips, setSlips] = useState<SlipRow[]>([]);
-  const [paidDaysOverride, setPaidDaysOverride] = useState("");
   const [lopDaysOverride, setLopDaysOverride] = useState("");
   const [totalWorkingDaysOverride, setTotalWorkingDaysOverride] = useState("");
   const [payDate, setPayDate] = useState("");
@@ -414,7 +414,6 @@ export default function PayrollSalaryPage() {
     // employee left the PREVIOUS employee's Paid/LOP/Working Days
     // sitting in the form, easy to miss and silently apply to the
     // wrong person's slip.
-    setPaidDaysOverride("");
     setLopDaysOverride("");
     setTotalWorkingDaysOverride("");
   }, [employeeId]);
@@ -672,7 +671,8 @@ export default function PayrollSalaryPage() {
         workLocation: payrollForm.work_location,
         employmentType: payrollForm.employment_type,
         employeeGrade: payrollForm.employee_grade,
-        paidDays: paidDaysOverride !== "" ? Number(paidDaysOverride) : daysInMonth,
+        // Paid Days = Days in Month - LOP Days (lib/payrollLop.ts); the slip shows LOP in rupees.
+        paidDays: computePaidDays(daysInMonth, lopDaysOverride !== "" ? Number(lopDaysOverride) : 0),
         lopDays: lopDaysOverride !== "" ? Number(lopDaysOverride) : 0,
         totalWorkingDays: totalWorkingDaysOverride !== "" ? Number(totalWorkingDaysOverride) : daysInMonth,
         daysInMonth,
@@ -899,7 +899,7 @@ export default function PayrollSalaryPage() {
           workLocation: payroll?.work_location,
           employmentType: payroll?.employment_type,
           employeeGrade: payroll?.employee_grade,
-          paidDays: daysInMonth,
+          paidDays: computePaidDays(daysInMonth, attendanceDeduction.skipped ? 0 : attendanceDeduction.totalLopDays),
           lopDays: attendanceDeduction.skipped ? 0 : attendanceDeduction.totalLopDays,
           totalWorkingDays: daysInMonth,
           daysInMonth,
@@ -1303,14 +1303,12 @@ export default function PayrollSalaryPage() {
               </div>
               <div>
                 <label className="text-xs font-semibold text-slate-500">Paid Days</label>
-                <input
-                  type="number"
-                  min={0}
-                  value={paidDaysOverride}
-                  onChange={(e) => setPaidDaysOverride(e.target.value)}
-                  placeholder={String(daysInMonthOf(slipMonth))}
-                  className="h-10 w-24 rounded-xl bg-slate-50 border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-300"
-                />
+                <div
+                  title="Days in month minus LOP Days"
+                  className="h-10 w-24 flex items-center rounded-xl bg-slate-100 border border-slate-200 px-2.5 text-xs font-semibold text-slate-500"
+                >
+                  {computePaidDays(daysInMonthOf(slipMonth), lopDaysOverride !== "" ? Number(lopDaysOverride) : 0)}
+                </div>
               </div>
               <div>
                 <label className="text-xs font-semibold text-slate-500">LOP Days</label>

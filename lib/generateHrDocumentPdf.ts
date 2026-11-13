@@ -1,4 +1,5 @@
 import { COMPANY_NAME, PDF_TABLE_STYLES, PDF_HEAD_STYLES, formatINR } from "@/lib/exportTable";
+import { clampLopDays, computeLopAmount, computePaidDays, lopDeductionLabel } from "@/lib/payrollLop";
 
 // Renders a generated HR document (offer letter, experience letter,
 // etc.) as a clean, official-looking PDF -- deliberately NOT reusing
@@ -482,8 +483,9 @@ function drawOneSlip(doc: import("jspdf").jsPDF, autoTable: any, GState: any, in
   const payDateLabel = input.payDate
     ? new Date(input.payDate).toLocaleDateString("en-IN", { year: "numeric", month: "short", day: "numeric" })
     : "—";
-  doc.text(`Paid Days: ${input.paidDays}`, col1X, infoY);
-  doc.text(`LOP Days: ${input.lopDays}`, col1X + 90, infoY);
+  // Paid Days = Days in Month - LOP Days (lib/payrollLop.ts), whatever the caller passed.
+  doc.text(`Paid Days: ${computePaidDays(input.daysInMonth, input.lopDays)}`, col1X, infoY);
+  doc.text(`LOP Days: ${clampLopDays(input.lopDays, input.daysInMonth)}`, col1X + 90, infoY);
   doc.text(`Working Days: ${input.totalWorkingDays}`, col1X + 175, infoY);
   doc.text(`Days in Month: ${input.daysInMonth}`, col1X + 290, infoY);
   doc.text(`Pay Date: ${payDateLabel}`, col1X + 410, infoY);
@@ -531,10 +533,13 @@ function drawOneSlip(doc: import("jspdf").jsPDF, autoTable: any, GState: any, in
     ["LWF", formatINR(0)],
     ["Other Deduction", formatINR(0)]
   ];
+  // LOP in rupees (2026-11-13): basic / days in month * LOP days, nearest rupee (lib/payrollLop.ts).
+  const lopAmount = computeLopAmount(input.basicPay, input.daysInMonth, input.lopDays);
+  deductions.push([lopDeductionLabel(clampLopDays(input.lopDays, input.daysInMonth)), formatINR(lopAmount)]);
   if (performanceCutAmount > 0) {
     deductions.push(["Performance Adjustment", formatINR(performanceCutAmount)]);
   }
-  const totalDeductions = performanceCutAmount;
+  const totalDeductions = performanceCutAmount + lopAmount;
 
   // Earnings and Deductions side by side in one grid -- padded to
   // equal length so the two columns line up row-for-row rather than
