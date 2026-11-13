@@ -10,7 +10,8 @@ const read = (p) => fs.readFileSync(path.join(root, p), "utf8");
 const problems = [];
 require.extensions[".ts"] = (m, f) =>
   m._compile(ts.transpileModule(fs.readFileSync(f, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText, f);
-const { addDaysYmd, weekdayOfYmd, istToday, isHolidayYmd, isOnLeaveYmd, monthDatesYmd, payrollDayKind, payrollCountedDates, payrollSandwichDays } = require(path.join(root, "lib/payrollWorkingDays.ts"));
+const { addDaysYmd, weekdayOfYmd, istToday, isHolidayYmd, isOnLeaveYmd, monthDatesYmd, payrollDayKind, payrollCountedDates, payrollSandwichDays, weeklyOffDayOn, WEEKLY_OFF_HISTORY } = require(path.join(root, "lib/payrollWorkingDays.ts"));
+const { hrmsWorkingDates } = require(path.join(root, "lib/calculateHrmsAttendanceStatus.ts"));
 
 const eq = (name, got, want) => {
   if (JSON.stringify(got) !== JSON.stringify(want)) problems.push(`[TZ ${process.env.TZ}] ${name}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
@@ -24,6 +25,30 @@ const ctx = (o = {}) => ({ weeklyOffDay: TUE, ranges: [], leavePeriods: [], join
 
 for (const tz of ["Asia/Kolkata", "UTC"]) {
   process.env.TZ = tz;
+
+  // Weekly off per date (2026-11-13): Tue until 2 Nov, Sat 3-11 Nov, live setting from 12 Nov
+  const H = WEEKLY_OFF_HISTORY;
+  const hctx = (o = {}) => ctx({ weeklyOffHistory: H, ...o });
+  eq("history: 2 Nov is Tue era", weeklyOffDayOn("2026-11-02", TUE, H), TUE);
+  eq("history: 3 Nov is Sat era", weeklyOffDayOn("2026-11-03", TUE, H), SAT);
+  eq("history: 11 Nov is Sat era", weeklyOffDayOn("2026-11-11", TUE, H), SAT);
+  eq("history: 12 Nov uses live", weeklyOffDayOn("2026-11-12", TUE, H), TUE);
+  eq("history: live change moves only later dates", weeklyOffDayOn("2026-10-06", 0, H), TUE);
+  eq("no history: live everywhere", weeklyOffDayOn("2026-10-06", 0), 0);
+  eq("Oct: Tuesdays off even if live is Sunday", payrollCountedDates("2026-10", hctx({ weeklyOffDay: 0 })).length, 27);
+  eq("Oct 6 (Tue) is WEEKLY_OFF with live Sunday", payrollDayKind("2026-10-06", hctx({ weeklyOffDay: 0 })), "WEEKLY_OFF");
+  eq("Oct 4 (Sun) counted with live Sunday", payrollDayKind("2026-10-04", hctx({ weeklyOffDay: 0 })), "COUNTED");
+  eq("3 Nov (Tue) counted: Sat era", payrollDayKind("2026-11-03", hctx()), "COUNTED");
+  eq("7 Nov (Sat) weekly off: Sat era", payrollDayKind("2026-11-07", hctx()), "WEEKLY_OFF");
+  eq("14 Nov (Sat) counted: Tue era", payrollDayKind("2026-11-14", hctx()), "COUNTED");
+  eq("17 Nov (Tue) weekly off", payrollDayKind("2026-11-17", hctx()), "WEEKLY_OFF");
+  // Nov 30 days: off Sat 7 (Sat era) + Tue 17, 24 = 27; with Diwali 7-10 (7 already off): 24
+  eq("Nov with history", payrollCountedDates("2026-11", hctx()).length, 27);
+  eq("Nov with history + Diwali", payrollCountedDates("2026-11", hctx({ ranges: [diwali] })).length, 24);
+  eq("Nov old single-value (no history) still works", payrollCountedDates("2026-11", ctx()).length, 26);
+  eq("HR dates Nov to 13th", hrmsWorkingDates("2026-11", TUE, 13), ["2026-11-01","2026-11-02","2026-11-03","2026-11-04","2026-11-05","2026-11-06","2026-11-08","2026-11-09","2026-11-10","2026-11-11","2026-11-12","2026-11-13"]);
+  eq("HR dates Oct with live Sunday", hrmsWorkingDates("2026-10", 0, 31).length, 27);
+  eq("HR dates Oct 6 skipped", hrmsWorkingDates("2026-10", 0, 31).includes("2026-10-06"), false);
 
   // Dates never move
   eq("add day", addDaysYmd("2026-11-16", 1), "2026-11-17");
@@ -101,6 +126,8 @@ if (!fn.includes("fetchWorkingCalendar(")) problems.push("the LOP compute must r
 if (!fn.includes("employee_leave_periods")) problems.push("the LOP compute must read leave periods");
 if (!fn.includes("date_of_joining")) problems.push("the LOP compute must read the joining date");
 if (/\.created_at|"created_at"/.test(fn)) problems.push("created_at is not a joining date");
+if (!fn.includes("weeklyOffHistory: WEEKLY_OFF_HISTORY")) problems.push("the LOP compute must pass the weekly off history");
+if (!read("app/hr/attendance/page.tsx").includes("hrmsWorkingDates(")) problems.push("HR monthly summary must use hrmsWorkingDates");
 if (!fn.includes("payrollCountedDates(") || !fn.includes("payrollSandwichDays(")) problems.push("the LOP compute must use lib/payrollWorkingDays");
 
 if (problems.length) {

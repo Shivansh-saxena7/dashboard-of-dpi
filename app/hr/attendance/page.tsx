@@ -11,7 +11,8 @@ import {
   calculateDailyHrmsStatus,
   applyMonthlyLateComingRule,
   DailyHrmsStatus,
-  MonthlyHrmsStatus
+  MonthlyHrmsStatus,
+  hrmsWorkingDates
 } from "@/lib/calculateHrmsAttendanceStatus";
 import {
   exportAttendanceDetailToExcel,
@@ -220,11 +221,7 @@ export default function HrAttendancePage() {
     const isCurrentMonth = selectedMonth === todayStr.slice(0, 7);
     const lastDay = isCurrentMonth ? new Date().getDate() : daysInMonth;
 
-    const workingDates: string[] = [];
-    for (let d = 1; d <= lastDay; d++) {
-      if (new Date(y, m - 1, d).getDay() === weeklyOffDay) continue;
-      workingDates.push(`${selectedMonth}-${String(d).padStart(2, "0")}`);
-    }
+    const workingDates = hrmsWorkingDates(selectedMonth, weeklyOffDay, lastDay);
 
     return filteredEmployees.map((emp) => {
       const daily: DailyHrmsStatus[] = workingDates.map((date) => {

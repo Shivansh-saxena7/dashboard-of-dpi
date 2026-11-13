@@ -1,4 +1,5 @@
 import { toISTMinutesSinceMidnight, timeStringToMinutes } from "./istTime.ts";
+import { monthDatesYmd, weekdayOfYmd, weeklyOffDayOn, WEEKLY_OFF_HISTORY } from "./payrollWorkingDays.ts";
 
 // HRMS Attendance status -- genuinely independent from the existing
 // Lead-Distribution Shift-Start gate (calculateAttendanceType.ts /
@@ -95,4 +96,15 @@ export function applyMonthlyLateComingRule(
 
     return lateComingCount > MAX_FREE_LATE_COMINGS_PER_MONTH ? "HALF_DAY" : "LATE_COMING";
   });
+}
+
+// Days of a month the HR monthly summary counts, up to lastDay (2026-11-13). The weekly off is the one in force on each date
+// (WEEKLY_OFF_HISTORY, then the live setting), so a past month keeps the weekly off it really had.
+export function hrmsWorkingDates(yyyyMm: string, liveWeeklyOffDay: number | null, lastDay: number): string[] {
+  return monthDatesYmd(yyyyMm)
+    .slice(0, lastDay)
+    .filter((ymd) => {
+      const off = weeklyOffDayOn(ymd, liveWeeklyOffDay, WEEKLY_OFF_HISTORY);
+      return off === null || weekdayOfYmd(ymd) !== off;
+    });
 }

@@ -931,6 +931,9 @@ export default function PayrollSalaryPage() {
         toast.error(`Skipped: ${skipped.join(", ")}`);
       }
       toast.success(`Bulk PDF generated — ${slipsInput.length} slip(s).`);
+    } catch (err) {
+      console.error("Bulk slip generation failed", err);
+      toast.error(err instanceof Error && err.message ? `Could not generate the bulk PDF: ${err.message}` : "Could not generate the bulk PDF.");
     } finally {
       setBulkGenerating(false);
     }

@@ -1,7 +1,7 @@
 import { supabase } from "./supabase";
 import { calculateDailyHrmsStatus, applyMonthlyLateComingRule, DailyHrmsStatus } from "./calculateHrmsAttendanceStatus";
 import { fetchWorkingCalendar } from "./workingCalendar";
-import { addDaysYmd, istToday, payrollCountedDates, payrollSandwichDays, type PayrollDayContext } from "./payrollWorkingDays";
+import { addDaysYmd, istToday, payrollCountedDates, payrollSandwichDays, WEEKLY_OFF_HISTORY, type PayrollDayContext } from "./payrollWorkingDays";
 
 // Three independent monthly-close computations, one per system built in
 // this payroll phase. Each is a pure "read inputs, upsert one result"
@@ -289,6 +289,7 @@ export async function computeAttendanceDeductionForMonth(
   const monthAttendance = attendanceResult.data || [];
   const dayContext: PayrollDayContext = {
     weeklyOffDay,
+    weeklyOffHistory: WEEKLY_OFF_HISTORY,
     ranges: calendar.ranges,
     leavePeriods: leaveResult.data || [],
     joiningDate: detailsResult.data?.date_of_joining ?? null,

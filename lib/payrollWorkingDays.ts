@@ -5,7 +5,8 @@
 // work), an approved or open leave, before the joining date, or still to come. Today counts only once it has an attendance
 // row, because a shift that has not started yet is not an absence.
 //
-// Still one weekly off for the whole month: changing the setting changes past months too. Per-date history is a separate job.
+// The weekly off is read per date (2026-11-13): a date on or before a WEEKLY_OFF_HISTORY entry's lastDate uses that entry's
+// day, every later date uses the live setting. So changing the setting only moves days after the last entry.
 
 export type PayrollDayKind = "COUNTED" | "WEEKLY_OFF" | "HOLIDAY" | "LEAVE" | "BEFORE_JOINING" | "NOT_YET";
 
@@ -20,8 +21,22 @@ export interface PayrollLeavePeriod {
   end_date: string | null;
 }
 
+// Past weekly off values, oldest first. Taken from the settings backups in C:/work/reports: Tuesday (2) until 2 Nov 2026,
+// Saturday (6) from 3 Nov (the owner said there was no weekly off that week) to 11 Nov, Tuesday again from 12 Nov 14:54.
+// When the setting changes again, add the old value here with the last date it was in force.
+export interface WeeklyOffPeriod {
+  lastDate: string;
+  day: number | null;
+}
+
+export const WEEKLY_OFF_HISTORY: readonly WeeklyOffPeriod[] = [
+  { lastDate: "2026-11-02", day: 2 },
+  { lastDate: "2026-11-11", day: 6 }
+];
+
 export interface PayrollDayContext {
   weeklyOffDay: number | null;
+  weeklyOffHistory?: readonly WeeklyOffPeriod[];
   ranges: PayrollHolidayRange[];
   leavePeriods: PayrollLeavePeriod[];
   joiningDate: string | null;
@@ -66,10 +81,16 @@ export function monthDatesYmd(yyyyMm: string): string[] {
   return Array.from({ length: daysInMonth }, (_, i) => `${yyyyMm}-${String(i + 1).padStart(2, "0")}`);
 }
 
+export function weeklyOffDayOn(ymd: string, liveDay: number | null, history: readonly WeeklyOffPeriod[] = []): number | null {
+  const period = history.find((h) => ymd <= h.lastDate);
+  return period ? period.day : liveDay;
+}
+
 export function payrollDayKind(ymd: string, ctx: PayrollDayContext): PayrollDayKind {
   if (ctx.joiningDate && ymd < ctx.joiningDate) return "BEFORE_JOINING";
   if (ymd > ctx.today || (ymd === ctx.today && !ctx.attendanceDates.has(ymd))) return "NOT_YET";
-  if (ctx.weeklyOffDay !== null && weekdayOfYmd(ymd) === ctx.weeklyOffDay) return "WEEKLY_OFF";
+  const weeklyOff = weeklyOffDayOn(ymd, ctx.weeklyOffDay, ctx.weeklyOffHistory);
+  if (weeklyOff !== null && weekdayOfYmd(ymd) === weeklyOff) return "WEEKLY_OFF";
   if (isHolidayYmd(ymd, ctx.ranges)) return "HOLIDAY";
   if (isOnLeaveYmd(ymd, ctx.leavePeriods)) return "LEAVE";
   return "COUNTED";
