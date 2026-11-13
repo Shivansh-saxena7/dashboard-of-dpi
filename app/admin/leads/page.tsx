@@ -24,6 +24,7 @@ import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 import PageHeader from "@/components/PageHeader";
 import { splitAdminEmployeeOptions, adminEmployeeLabel } from "@/lib/adminEmployeeOptions";
 import { ADMIN_JUNK_MAX_PER_CALL, summarizeAdminJunkResult } from "@/lib/adminJunk";
+import { ADMIN_SELECT_ALL_SELECT } from "@/lib/adminLeadsSelect";
 
 type SortOption = "NEWEST" | "OLDEST" | "SLA_URGENCY";
 
@@ -812,7 +813,7 @@ export default function AdminLeadsPage() {
     if (selectAllIsFullSet && fullMatchingIds === null) {
       setSelectAllFetching(true);
       try {
-        const rows = await fetchAllMatching("id, status, board_stage");
+        const rows = await fetchAllMatching(ADMIN_SELECT_ALL_SELECT);
         const fetchedIds = rows.filter((r: any) => !isLeadTerminal(r.status, r.board_stage || "LEADS")).map((r: any) => r.id);
         setFullMatchingIds(fetchedIds);
         ids = fetchedIds;
