@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
@@ -16,6 +16,8 @@ import { getRecycleCutoff } from "@/lib/calculateSLAStatus";
 import { normalizeMobile } from "@/lib/normalizeMobile";
 import { consumeRecentlyCalledCardId, scrollToAndHighlightCard, consumeQuickDialNumber } from "@/lib/lastCalledLead";
 import { usePendingOutcomeSheet } from "@/lib/usePendingOutcomeSheet";
+import { useActiveCallRestore, keepActiveLeadInList } from "@/lib/useActiveCallRestore";
+import ResumeCallStrip from "./ResumeCallStrip";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
 import { istDateStringToRangeStartUTC, istDateStringToRangeEndUTC } from "@/lib/istTime";
@@ -324,8 +326,12 @@ export default function LeadList({ employeeId }: LeadListProps) {
     return () => clearInterval(interval);
   }, []);
 
+  // Call-return (2026-11-13): "Loading..." only on the very first load. A background reload (realtime after a Call
+  // tap, a saved result, a sweep) keeps the list on screen, so the scroll position never jumps back to the top.
+  const loadedOnceRef = useRef(false);
+
   async function loadLeads() {
-    setLoading(true);
+    if (!loadedOnceRef.current) setLoading(true);
 
     const { data, error } = await supabase
       .from("leads")
@@ -377,6 +383,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
       setLeads(data);
     }
 
+    loadedOnceRef.current = true;
     setLoading(false);
   }
 
@@ -520,6 +527,28 @@ export default function LeadList({ employeeId }: LeadListProps) {
     [leads]
   );
 
+  // Call-return (2026-11-13): lib/useActiveCallRestore.ts brings the employee back to the lead they were calling.
+  const visibleIdsRef = useRef<string[]>([]);
+  const activeCall = useActiveCallRestore({
+    listType: "LEAD",
+    employeeId,
+    loading,
+    leads,
+    getVisibleIds: () => visibleIdsRef.current,
+    getListState: () => ({ tab: activeTab, statusFilter, sortBy, searchQuery, sourceFilter, projectFilter }),
+    applyListState: (state) => {
+      const tabs: string[] = [...BOARD_STAGES.map((t) => t.stage), "HISTORY"];
+      if (tabs.includes(state.tab)) setActiveTab(state.tab as ActiveTab);
+      setStatusFilter(state.statusFilter || "");
+      if (state.sortBy) setSortBy(state.sortBy as SortOption);
+      setSearchQuery(state.searchQuery || "");
+      setSourceFilter(state.sourceFilter || "");
+      setProjectFilter(state.projectFilter || "");
+    },
+    openLead: (id) => setSelectedLeadId(id),
+    cardDomId: (id) => `lead-card-${id}`
+  });
+
   const visibleLeads = useMemo(() => {
 
     if (activeTab === "HISTORY") {
@@ -659,6 +688,9 @@ export default function LeadList({ employeeId }: LeadListProps) {
       });
     }
 
+    // The lead being called stays in the list until its result is saved (a call drops it from "New" / "Needs your call").
+    result = keepActiveLeadInList(result, leads, activeCall.activeLeadId, (lead) => bypassTabFilter || (lead.board_stage || "LEADS") === activeTab);
+
     result = [...result].sort((a, b) => {
       // Recycling Tomorrow: whichever goes first is shown first.
       if (recyclingTomorrowFilter) {
@@ -688,7 +720,8 @@ export default function LeadList({ employeeId }: LeadListProps) {
 
     return result;
 
-  }, [leads, givenContext.byLeadId, needsCall, activeTab, searchQuery, projectFilter, sourceFilter, statusFilter, recyclingSoonFilter, dateRangeFilter, customStart, customEnd, sortBy, personalOnlyFilter, originFilter, priorityFilter, recyclingTomorrowFilter, workingCalendar]);
+  }, [leads, givenContext.byLeadId, needsCall, activeTab, searchQuery, projectFilter, sourceFilter, statusFilter, recyclingSoonFilter, dateRangeFilter, customStart, customEnd, sortBy, personalOnlyFilter, originFilter, priorityFilter, recyclingTomorrowFilter, workingCalendar, activeCall.activeLeadId]);
+  visibleIdsRef.current = visibleLeads.map((lead: any) => lead.id);
 
   // Same fix as app/admin/leads/page.tsx's cardLeads (2026-09-18) — the
   // render loop below used to build `lead={{ ...inline object... }}`
@@ -759,6 +792,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
 
   return (
     <>
+      <ResumeCallStrip employeeId={employeeId} currentList="LEAD" openLeadId={selectedLeadId} onResumeHere={(id) => setSelectedLeadId(id)} />
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}

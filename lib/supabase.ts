@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { createReportingFetch } from "./reportingFetch";
 import { createSessionGuardFetch, SESSION_EXPIRED_EVENT } from "./sessionGuard";
+import { clientIdentityContext } from "./clientIdentity";
 
 // Every failed PostgREST/RPC call made through this browser client is
 // reported to system_anomaly_log (2026-10-03), tagged with the page it
@@ -14,7 +15,8 @@ export const supabase = createClient(
       fetch: createSessionGuardFetch(
         createReportingFetch({
           layer: "FRONTEND",
-          source: () => (typeof window !== "undefined" ? `page:${window.location.pathname}` : "frontend")
+          source: () => (typeof window !== "undefined" ? `page:${window.location.pathname}` : "frontend"),
+          context: () => (typeof window !== "undefined" ? clientIdentityContext() : {})
         }),
         {
           anonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,

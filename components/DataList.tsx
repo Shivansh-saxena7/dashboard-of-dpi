@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import { Search, ChevronDown } from "lucide-react";
@@ -11,6 +11,8 @@ import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
 import { consumeRecentlyCalledCardId, scrollToAndHighlightCard } from "@/lib/lastCalledLead";
 import { usePendingOutcomeSheet } from "@/lib/usePendingOutcomeSheet";
+import { useActiveCallRestore, keepActiveLeadInList } from "@/lib/useActiveCallRestore";
+import ResumeCallStrip from "./ResumeCallStrip";
 import { normalizeMobile } from "@/lib/normalizeMobile";
 import { istDateStringToRangeStartUTC, istDateStringToRangeEndUTC } from "@/lib/istTime";
 import { useGivenLeadContext } from "@/lib/useGivenLeadContext";
@@ -146,8 +148,12 @@ export default function DataList({ employeeId }: DataListProps) {
     }
   }, [loading, searchParams, router]);
 
+  // Call-return (2026-11-13): "Loading..." only on the very first load. A background reload (realtime after a Call
+  // tap, a saved result, a sweep) keeps the list on screen, so the scroll position never jumps back to the top.
+  const loadedOnceRef = useRef(false);
+
   async function loadLeads() {
-    setLoading(true);
+    if (!loadedOnceRef.current) setLoading(true);
 
     const { data, error } = await supabase
       .from("leads")
@@ -182,6 +188,7 @@ export default function DataList({ employeeId }: DataListProps) {
       setLeads(data);
     }
 
+    loadedOnceRef.current = true;
     setLoading(false);
   }
 
@@ -271,8 +278,30 @@ export default function DataList({ employeeId }: DataListProps) {
     [filteredLeads, givenContext.enabled, givenContext.byLeadId, needsCall]
   );
 
+  // Call-return (2026-11-13): same shared hook as the Leads list (lib/useActiveCallRestore.ts).
+  const visibleIdsRef = useRef<string[]>([]);
+  const activeCall = useActiveCallRestore({
+    listType: "DATA",
+    employeeId,
+    loading,
+    leads,
+    getVisibleIds: () => visibleIdsRef.current,
+    getListState: () => ({ tab: activeTab, statusFilter, sortBy, searchQuery, sourceFilter }),
+    applyListState: (state) => {
+      if (BOARD_STAGES.some((t) => t.stage === state.tab)) setActiveTab(state.tab as BoardStage);
+      setStatusFilter(state.statusFilter || "");
+      if (state.sortBy) setSortBy(state.sortBy as SortOption);
+      setSearchQuery(state.searchQuery || "");
+      setSourceFilter(state.sourceFilter || "");
+    },
+    openLead: (id) => setSelectedLeadId(id),
+    cardDomId: (id) => `data-card-${id}`
+  });
+
   const visibleLeads = useMemo(() => {
-    const result = [...dataFilterByStatus(filteredLeads, activeStatusFilter, givenContext.byLeadId, needsCall)].sort((a, b) => {
+    // The lead being called stays in the list until its result is saved (a call drops it from "New" / "Needs your call").
+    const shown = keepActiveLeadInList(dataFilterByStatus(filteredLeads, activeStatusFilter, givenContext.byLeadId, needsCall), leads, activeCall.activeLeadId, (lead) => Boolean(searchQuery.trim()) || (lead.board_stage || "LEADS") === activeTab);
+    const result = [...shown].sort((a, b) => {
       const aAssigned = new Date(a.lead_history[0]?.assigned_at || a.created_at).getTime();
       const bAssigned = new Date(b.lead_history[0]?.assigned_at || b.created_at).getTime();
       return sortBy === "OLDEST" ? aAssigned - bAssigned : bAssigned - aAssigned;
@@ -280,7 +309,8 @@ export default function DataList({ employeeId }: DataListProps) {
 
     return result;
 
-  }, [filteredLeads, activeStatusFilter, givenContext.byLeadId, needsCall, sortBy]);
+  }, [filteredLeads, activeStatusFilter, givenContext.byLeadId, needsCall, sortBy, leads, activeCall.activeLeadId, searchQuery, activeTab]);
+  visibleIdsRef.current = visibleLeads.map((lead: any) => lead.id);
 
   // Same fix as LeadList.tsx/app/admin/leads/page.tsx (2026-09-18 perf
   // audit) — DataCard had NO re-render protection at all before this
@@ -352,6 +382,7 @@ export default function DataList({ employeeId }: DataListProps) {
 
   return (
     <>
+      <ResumeCallStrip employeeId={employeeId} currentList="DATA" openLeadId={selectedLeadId} onResumeHere={(id) => setSelectedLeadId(id)} />
       {leads.length === 0 ? (
         <div className="flex flex-col items-center justify-center mt-16 text-center px-4">
           <div className="text-5xl mb-3">🗂️</div>

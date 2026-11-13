@@ -30,6 +30,8 @@ export interface ReportingFetchOptions {
   // Stable name for where this client lives, e.g. "recycle-stale-leads".
   // Called per failure so the browser can include the current page.
   source: () => string;
+  // Extra fields for the anomaly row (2026-11-13): the browser client adds the employee id and OS family.
+  context?: () => Record<string, unknown>;
 }
 
 const ANOMALY_PATH = "/rest/v1/system_anomaly_log";
@@ -106,6 +108,14 @@ export function createReportingFetch(options: ReportingFetchOptions, baseFetch: 
   };
 }
 
+function extraContext(options: ReportingFetchOptions): Record<string, unknown> {
+  try {
+    return options.context ? options.context() : {};
+  } catch {
+    return {};
+  }
+}
+
 async function report(
   options: ReportingFetchOptions,
   baseFetch: FetchLike,
@@ -145,7 +155,7 @@ async function report(
         severity,
         layer: options.layer,
         message: `${method} ${endpoint} failed (${code}): ${body.message || "no message"}`.slice(0, 500),
-        context: { endpoint, method, status: status ?? null, code, details: body.details ?? null, hint: body.hint ?? null }
+        context: { endpoint, method, status: status ?? null, code, details: body.details ?? null, hint: body.hint ?? null, ...extraContext(options) }
       })
     });
   } catch {

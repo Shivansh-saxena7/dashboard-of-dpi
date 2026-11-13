@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import { logAnomaly } from "@/lib/logAnomaly";
+import { clientIdentityContext } from "@/lib/clientIdentity";
 
 const THROTTLE_MS = 10 * 60 * 1000;
 const recentlyReported = new Map<string, number>();
@@ -23,7 +24,7 @@ export function reportClientError(where: string, err: unknown, severity: "warnin
       severity,
       layer: "FRONTEND",
       message: `${where}: ${message}`.slice(0, 500),
-      context: { where, stack: err instanceof Error ? String(err.stack || "").slice(0, 1500) : null }
+      context: { where, stack: err instanceof Error ? String(err.stack || "").slice(0, 1500) : null, ...clientIdentityContext() }
     });
   } catch {
     // reporting must never break the page

@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import { rememberPendingOutcome } from "@/lib/lastCalledLead";
+import { attachActiveCallClickId, startActiveCall } from "@/lib/activeCall";
 
 // The one place every Call button logs its click (Call Quality, 2026-10-28).
 // log_call_click_atomic records the click with server time and returns the
@@ -11,6 +12,8 @@ export function logCallClick(leadHistoryId: string, leadId: string) {
   // Remembered right away (the browser may background or drop this tab the
   // moment the dialer opens), then again with the click id once it arrives.
   rememberPendingOutcome(leadId, null);
+  // Call-return (2026-11-13): remember this call in localStorage before the dialer opens (lib/activeCall.ts).
+  startActiveCall(leadId);
   supabase
     .rpc("log_call_click_atomic", { p_lead_history_id: leadHistoryId })
     .then(({ data, error }) => {
@@ -19,5 +22,6 @@ export function logCallClick(leadHistoryId: string, leadId: string) {
         return;
       }
       rememberPendingOutcome(leadId, typeof data === "string" ? data : null);
+      attachActiveCallClickId(leadId, typeof data === "string" ? data : null);
     });
 }

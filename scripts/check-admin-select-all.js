@@ -71,7 +71,7 @@ eq("title no name", reassignConfirmTitle(3, null), "Reassign 3 leads to this emp
 if (!page.includes("onClick={() => setReassignDialogOpen(true)}")) problems.push("Reassign must open the confirm dialog first");
 if (!page.includes("!canBulkReassign(selectedLeadIds.size)}")) problems.push("Reassign must be disabled above the limit");
 if (!page.includes("Select at most {ADMIN_REASSIGN_MAX_PER_CALL} leads")) problems.push('the "Select at most 500 leads" message is missing');
-if (!/async function handleBulkReassign\(\) \{\n\s+if \(!canBulkReassign\(selectedLeadIds\.size\)/.test(page)) problems.push("handleBulkReassign must refuse above the limit too");
+if (!/async function handleBulkReassign\(\) \{\r?\n\s+if \(!canBulkReassign\(selectedLeadIds\.size\)/.test(page)) problems.push("handleBulkReassign must refuse above the limit too");
 
 if (problems.length) {
   console.error("check-admin-select-all: FAILED");

@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node scripts/check-unbounded-queries.js && node scripts/check-working-calendar.js && node scripts/check-positive-junk.js && node scripts/check-call-quality.js && node scripts/check-session-guard.js && node scripts/check-given-context.js && node scripts/check-api-data-auth.js && node scripts/check-admin-routes-auth.js && node scripts/check-guard-held.js && node scripts/check-data-previous-positive.js && node scripts/check-data-status-filter.js && node scripts/check-payroll-calendar.js && node scripts/check-needs-your-call.js && node scripts/check-owner-leave-calendar.js && node scripts/check-admin-employee-options.js && node scripts/check-admin-select-all.js",
+    "prebuild": "node scripts/check-unbounded-queries.js && node scripts/check-working-calendar.js && node scripts/check-positive-junk.js && node scripts/check-call-quality.js && node scripts/check-session-guard.js && node scripts/check-given-context.js && node scripts/check-api-data-auth.js && node scripts/check-admin-routes-auth.js && node scripts/check-guard-held.js && node scripts/check-data-previous-positive.js && node scripts/check-data-status-filter.js && node scripts/check-payroll-calendar.js && node scripts/check-needs-your-call.js && node scripts/check-owner-leave-calendar.js && node scripts/check-admin-employee-options.js && node scripts/check-admin-select-all.js && node scripts/check-active-call.js",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -14,6 +14,7 @@
     "check:positive-junk": "node scripts/check-positive-junk.js",
     "check:call-quality": "node scripts/check-call-quality.js",
     "check:recycle-deploy": "node scripts/check-recycle-deploy.js",
+    "test:e2e": "playwright test",
     "deploy:recycle": "node scripts/check-recycle-deploy.js && npx supabase functions deploy recycle-stale-leads --use-api"
   },
   "dependencies": {
@@ -36,6 +37,7 @@
     "recharts": "^3.8.1"
   },
   "devDependencies": {
+    "@playwright/test": "1.56.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

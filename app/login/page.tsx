@@ -8,7 +8,10 @@ import toast from "react-hot-toast";
 import { Building2, ShieldCheck, Mail, Lock, Eye, EyeOff, ArrowRight } from "lucide-react";
 import { Playfair_Display } from "next/font/google";
 
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
+import { takeColdStartResume } from "@/lib/activeCall";
+import { rememberEmployeeId } from "@/lib/clientIdentity";
+
 import { safeNextPath } from "@/lib/sessionGuard";
 import { reportClientError } from "@/lib/reportClientError";
 
@@ -69,7 +72,9 @@ export default function LoginPage() {
       } else if (employee?.role === "payroll") {
         router.replace("/payroll");
       } else {
-        router.replace(safeNextPath(new URLSearchParams(window.location.search).get("next")) ?? "/");
+        // Call-return (2026-11-13): an app started again during a call goes straight back to that lead.
+        rememberEmployeeId(employee?.id);
+        router.replace(safeNextPath(new URLSearchParams(window.location.search).get("next")) ?? takeColdStartResume(employee?.id) ?? "/");
       }
       // Deliberately no setCheckingSession(false) here — stays on the
       // neutral loading screen until the redirect above actually
@@ -133,7 +138,8 @@ reportClientError("session check", err);
       } else {
         toast.success("Login Successful!");
         setTimeout(() => {
-          router.replace(safeNextPath(new URLSearchParams(window.location.search).get("next")) ?? "/");
+          rememberEmployeeId(employee?.id);
+          router.replace(safeNextPath(new URLSearchParams(window.location.search).get("next")) ?? takeColdStartResume(employee?.id) ?? "/");
         }, 600);
       }
 

@@ -9,6 +9,9 @@ import Header from "@/components/Header";
 import StartShiftCard from "@/components/StartShiftCard";
 import EmployeeTabBar from "@/components/EmployeeTabBar";
 import PostsTrackingView from "@/components/PostsTrackingView";
+import ResumeCallStrip from "@/components/ResumeCallStrip";
+import { takeColdStartResume } from "@/lib/activeCall";
+import { rememberEmployeeId } from "@/lib/clientIdentity";
 
 export default function Page() {
 
@@ -92,6 +95,17 @@ if (data.role === "payroll") {
 
 }
 
+// Call-return (2026-11-13): an app started again during a call goes straight back to that lead (lib/activeCall.ts).
+rememberEmployeeId(data.id);
+const resumePath = takeColdStartResume(data.id);
+if (resumePath) {
+
+  router.replace(resumePath);
+
+  return;
+
+}
+
 setEmployee(data);
 
 setAuthChecked(true);
@@ -122,6 +136,8 @@ to-blue-100
 <Header />
 
 <EmployeeTabBar role={employee?.role} department={employee?.department} />
+
+<ResumeCallStrip employeeId={employee?.id} />
 
 {/* GPS shift-start is a Sales/field concern -- same isNonSales rule
     EmployeeTabBar already uses (department set and not "sales"), so
