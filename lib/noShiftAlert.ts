@@ -12,6 +12,14 @@ import { logAnomaly } from "./logAnomaly.ts";
 
 export const NO_SHIFT_WORKING_DAYS = 3;
 export const NO_SHIFT_SOURCE = "no_shift_alert";
+// Accounts that are not real people (test logins): never alerted. By id, or by exact name (case-insensitive).
+export const NO_SHIFT_EXCLUDED_IDS: ReadonlySet<string> = new Set(["d970af89-063d-48b4-98aa-b89260fb3d87"]);
+export const NO_SHIFT_EXCLUDED_NAMES: ReadonlySet<string> = new Set(["testing"]);
+
+export function isExcludedFromNoShift(e: { id: string; name: string }): boolean {
+  return NO_SHIFT_EXCLUDED_IDS.has(e.id) || NO_SHIFT_EXCLUDED_NAMES.has((e.name || "").trim().toLowerCase());
+}
+
 // Only these start shifts (same field-staff rule as Start Shift: no department, or Sales).
 export const SHIFT_ROLES: ReadonlySet<string> = new Set(["employee", "team_leader"]);
 
@@ -79,7 +87,7 @@ export function employeesWithoutShift(args: {
   const n = args.n ?? NO_SHIFT_WORKING_DAYS;
   const out: { id: string; name: string; since: string }[] = [];
   for (const e of args.employees) {
-    if (!isFieldEmployee(e)) continue;
+    if (!isFieldEmployee(e) || isExcludedFromNoShift(e)) continue;
     const leave = args.leaveRows.filter((r) => r.employee_id === e.id);
     if (leave.some((r) => isOnLeaveOn(r, args.todayYmd))) continue;
     const days = lastWorkingDaysOffLeave(args.todayYmd, n, args.cal, leave);
