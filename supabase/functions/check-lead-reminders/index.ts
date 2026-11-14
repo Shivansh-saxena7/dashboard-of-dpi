@@ -6,6 +6,7 @@ import { fetchAllRows } from "../../../lib/fetchAllRows.ts";
 import { recyclingTomorrowCutoff } from "../../../lib/recyclingTomorrow.ts";
 import { isNotificationWindowOpen, loadJobWorkingCalendar, nonWorkingStatusAt, timerCalendar } from "../../../lib/workingCalendar.ts";
 import { logAnomaly } from "../../../lib/logAnomaly.ts";
+import { runNoShiftAlertOncePerDay } from "../../../lib/noShiftAlert.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 
 // Scheduled sweep (pg_cron, once daily) — reminders now carry
@@ -180,6 +181,14 @@ serve(withMonitoring("check-lead-reminders", async () => {
         JSON.stringify({ success: true, held: "outside working notification window", nonWorking }),
         { headers: { "Content-Type": "application/json" } }
       );
+    }
+
+    // No-shift alert (2026-11-14, lib/noShiftAlert.ts): once a day, on a working day inside the notification window.
+    // Its own failures never stop the reminders below.
+    try {
+      await runNoShiftAlertOncePerDay(supabase, workingCalendar);
+    } catch (noShiftError) {
+      await logAnomaly(supabase, { source: "no_shift_alert:job", severity: "warning", message: `No-shift check failed: ${noShiftError instanceof Error ? noShiftError.message : String(noShiftError)}` });
     }
 
     const { data: dueNotes, error: dueNotesError } = await supabase
