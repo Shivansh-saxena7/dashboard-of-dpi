@@ -52,6 +52,8 @@ test("Leads: both tries fail -> update kept, survives a reload, saved once later
   expect(savesFor("lead-40")).toBe(0);
 
   await page.reload(); // app closed and opened again: the kept update is still on the phone
+  // Let the reloaded page finish loading (login check, list) before navigating again, so the two do not overlap.
+  await expect(page.locator("#lead-card-lead-01")).toBeVisible();
   expect(JSON.parse((await draft(page, "lead-40")) || "{}").status).toBe("NOT_CONNECTED");
   await openLead(page, "/leads", "lead-40", "Test Lead 40"); // opening the lead brings it back
   await expect(page.getByText("Your unsaved update was restored. Check it and save again.")).toBeVisible();

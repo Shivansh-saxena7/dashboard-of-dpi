@@ -8,6 +8,7 @@ import Footer from "@/components/Footer";
 import EmployeeTabBar from "@/components/EmployeeTabBar";
 import StartShiftCard from "@/components/StartShiftCard";
 import LeadList from "@/components/LeadList";
+import { getCurrentUser } from "@/lib/currentUser";
 
 // New V2 route — deliberately its own page rather than folded into
 // app/page.tsx (V1's employee dashboard), so V1 stays untouched. No
@@ -24,9 +25,8 @@ export default function LeadsPage() {
   useEffect(() => {
     async function getLoggedInEmployee() {
 
-      const {
-        data: { user }
-      } = await supabase.auth.getUser();
+      // Network-safe: a dropped connection no longer sends a logged-in employee to /login (lib/currentUser.ts).
+      const user = await getCurrentUser();
 
       if (!user) {
         router.replace("/login");

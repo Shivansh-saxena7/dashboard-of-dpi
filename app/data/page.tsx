@@ -8,6 +8,7 @@ import Footer from "@/components/Footer";
 import EmployeeTabBar from "@/components/EmployeeTabBar";
 import StartShiftCard from "@/components/StartShiftCard";
 import DataList from "@/components/DataList";
+import { getCurrentUser } from "@/lib/currentUser";
 
 // Data's own top-level route — mirrors app/leads/page.tsx exactly
 // (same inline auth-check block, same reasoning: no shared employee
@@ -25,9 +26,8 @@ export default function DataPage() {
   useEffect(() => {
     async function getLoggedInEmployee() {
 
-      const {
-        data: { user }
-      } = await supabase.auth.getUser();
+      // Network-safe: a dropped connection no longer sends a logged-in employee to /login (lib/currentUser.ts).
+      const user = await getCurrentUser();
 
       if (!user) {
         router.replace("/login");
