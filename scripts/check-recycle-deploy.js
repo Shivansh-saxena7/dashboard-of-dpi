@@ -114,6 +114,7 @@ if (problems.length === 0) {
     execFileSync(process.execPath, [path.join(__dirname, "check-working-calendar.js")], { stdio: "inherit" });
     execFileSync(process.execPath, [path.join(__dirname, "check-owner-leave-calendar.js")], { stdio: "inherit" });
     execFileSync(process.execPath, [path.join(__dirname, "check-recycle-per-owner-cap.js")], { stdio: "inherit" });
+    execFileSync(process.execPath, [path.join(__dirname, "check-return-grace.js")], { stdio: "inherit" });
   } catch {
     problems.push("known-answer tests failed");
   }

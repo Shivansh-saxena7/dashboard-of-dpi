@@ -9,7 +9,7 @@ import { isLeadTerminal } from "../../../lib/isLeadTerminal.ts";
 import { fetchAllRows } from "../../../lib/fetchAllRows.ts";
 import { logAnomaly } from "../../../lib/logAnomaly.ts";
 import { istDateYmd, ownerLeaveEvents, ownerLeaveSkipReason, ownersOnLeave } from "../../../lib/ownerLeave.ts";
-import { leaveAdjustedSlaDeadline, ownerCalendar } from "../../../lib/ownerLeaveCalendar.ts";
+import { leaveAdjustedSlaDeadline, ownerCalendar, employeesInReturnGrace } from "../../../lib/ownerLeaveCalendar.ts";
 import { isNotificationWindowOpen, loadJobWorkingCalendar, nonWorkingStatusAt, timerCalendar, timerMsUntil } from "../../../lib/workingCalendar.ts";
 import { isWithinRecycleHours } from "../../../lib/recycleHours.ts";
 import { buildPreviousOwnerEndTimes } from "../../../lib/pickRecycleOwner.ts";
@@ -325,6 +325,8 @@ serve(withMonitoring("recycle-stale-leads", async () => {
       });
     }
     const leaveHistoryRows = leaveHistoryData || [];
+    // Return grace (2026-11-14, lib/ownerLeaveCalendar.ts): the first working days back from leave, no recycled leads.
+    const returnGraceIds = employeesInReturnGrace(leaveHistoryRows, leaveToday, workingCalendar);
     // Owner on leave (2026-11-12): their leads are skipped below, counted here per owner for one log row a day.
     const ownerLeaveSkips = new Map<string, string[]>();
 
@@ -449,7 +451,7 @@ serve(withMonitoring("recycle-stale-leads", async () => {
     }
 
     const shiftActiveEmployees = (allActiveEmployees || []).filter((employee) =>
-      shiftStartedEmployeeIds.has(employee.id)
+      shiftStartedEmployeeIds.has(employee.id) && !returnGraceIds.has(employee.id)
     );
 
     // Team-scoping lookup for recycling a Team-Leader-assigned lead
@@ -1377,6 +1379,7 @@ serve(withMonitoring("recycle-stale-leads", async () => {
           (id) =>
             id !== lead.current_owner_id &&
             shiftStartedEmployeeIds.has(id) &&
+            !returnGraceIds.has(id) &&
             (isActiveByEmployeeId.get(id) ?? false) &&
             !(forcedRemovalsByLead.get(lead.id)?.has(id))
         );
@@ -1762,6 +1765,7 @@ serve(withMonitoring("recycle-stale-leads", async () => {
         success: true,
         recycledCount,
         cappedRecycleAttempts,
+        returnGrace: returnGraceIds.size,
         perOwnerCap: { cap: RECYCLE_PER_OWNER_CAP_PER_SWEEP, skipped: perOwnerCapSkipped, given: Object.fromEntries(recycleGivenThisSweep) },
         withinRecycleHours,
         junkedCount,
