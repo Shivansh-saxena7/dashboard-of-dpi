@@ -23,7 +23,7 @@ const sla = read("lib/calculateSLAStatus.ts");
 if (!sla.includes("RECYCLE_DUE_STATUSES") || !sla.includes("function calculateBaseSLAStatus")) {
   problems.push("lib/calculateSLAStatus.ts has no max-recycles wrapper (3rd-recycle trap fix missing)");
 }
-for (const lib of ["lib/autoJunkGuard.ts", "lib/recycleSiblingGuard.ts", "lib/positiveLead.ts", "lib/reminderHold.ts", "lib/restoreHold.ts", "lib/ownerLeave.ts", "lib/ownerLeaveCalendar.ts"]) {
+for (const lib of ["lib/autoJunkGuard.ts", "lib/recycleSiblingGuard.ts", "lib/positiveLead.ts", "lib/reminderHold.ts", "lib/restoreHold.ts", "lib/ownerLeave.ts", "lib/ownerLeaveCalendar.ts", "lib/recyclePerOwnerCap.ts"]) {
   if (!fs.existsSync(path.join(root, lib))) problems.push(`${lib} is missing`);
 }
 const fn = read("supabase/functions/recycle-stale-leads/index.ts");
@@ -113,6 +113,7 @@ if (problems.length === 0) {
   try {
     execFileSync(process.execPath, [path.join(__dirname, "check-working-calendar.js")], { stdio: "inherit" });
     execFileSync(process.execPath, [path.join(__dirname, "check-owner-leave-calendar.js")], { stdio: "inherit" });
+    execFileSync(process.execPath, [path.join(__dirname, "check-recycle-per-owner-cap.js")], { stdio: "inherit" });
   } catch {
     problems.push("known-answer tests failed");
   }
