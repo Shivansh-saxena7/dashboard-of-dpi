@@ -13,11 +13,20 @@ const eq = (name, got, want) => {
 
 // isAuthNetworkError is pure; load just that function without the Supabase client.
 const src = read("lib/currentUser.ts");
-const fnSrc = src.slice(src.indexOf("export function isAuthNetworkError"), src.indexOf("export async function getCurrentUser"));
+const fnSrc =
+  src.slice(src.indexOf("export function isAuthNetworkError"), src.indexOf("export async function getCurrentUser")) +
+  src.slice(src.indexOf("export function isQueryNetworkError"), src.indexOf("export async function withNetworkRetry"));
 const js = ts.transpileModule(fnSrc, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
 const mod = { exports: {} };
 new Function("module", "exports", js)(mod, mod.exports);
-const { isAuthNetworkError } = mod.exports;
+const { isAuthNetworkError, isQueryNetworkError } = mod.exports;
+
+// Layout employee/role query (PostgREST): only a dropped connection counts as a network failure.
+eq("query: Chrome dropped connection", isQueryNetworkError({ error: { message: "TypeError: Failed to fetch" }, status: 0 }), true);
+eq("query: iPhone dropped connection", isQueryNetworkError({ error: { message: "TypeError: Load failed" }, status: 0 }), true);
+eq("query: no employee row is a real answer", isQueryNetworkError({ error: { message: "JSON object requested, multiple (or no) rows returned" }, status: 406 }), false);
+eq("query: permission denied is a real answer", isQueryNetworkError({ error: { message: "permission denied for table employees" }, status: 403 }), false);
+eq("query: success", isQueryNetworkError({ error: null, status: 200 }), false);
 
 eq("retryable fetch error", isAuthNetworkError({ name: "AuthRetryableFetchError", status: 0, message: "Load failed" }), true);
 eq("iPhone Load failed", isAuthNetworkError({ message: "TypeError: Load failed" }), true);
@@ -61,6 +70,26 @@ for (const f of [...walk("app"), ...walk("components")]) {
   });
 }
 if (!/if \(!isAuthNetworkError\(first\.error\)\) return null;/.test(src)) problems.push("a real 'not logged in' answer must still return no user");
+
+// Admin / HR / Payroll layouts: session read and employee/role query go through withNetworkRetry, a network failure
+// shows the retry notice, and the access rules themselves are unchanged.
+const LAYOUTS = [
+  { f: "app/admin/layout.tsx", roles: ['data.role !== "admin" && data.role !== "super_admin"'] },
+  { f: "app/hr/layout.tsx", roles: ['data.role !== "hr" && data.role !== "admin" && data.role !== "super_admin"'] },
+  { f: "app/payroll/layout.tsx", roles: ['data.role !== "payroll" && data.role !== "admin" && data.role !== "super_admin"'] }
+];
+for (const { f, roles } of LAYOUTS) {
+  const s = read(f).replace(/\r\n/g, "\n");
+  const flat = s.replace(/\s+/g, " ");
+  if (!/withNetworkRetry\(async ?\(\) ?=> ?\{ const r = await supabase\.auth\.getSession\(\);/.test(flat)) problems.push(`${f}: session read must go through withNetworkRetry`);
+  if (!/withNetworkRetry\(\(\) ?=> ?supabase ?\.from\("employees"\)/.test(flat)) problems.push(`${f}: employee/role query must go through withNetworkRetry`);
+  if ((s.match(/networkFailed\)\s*\{\s*setConnectionLost\(true\);\s*return;/g) || []).length !== 2) problems.push(`${f}: a network failure must show the retry notice and stop (twice)`);
+  if (!s.includes("<ConnectionRetryNotice onRetry=")) problems.push(`${f}: must render ConnectionRetryNotice`);
+  if (/await supabase\.auth\.getSession\(\);\s*\n\s*if ?\(!session\)/.test(s)) problems.push(`${f}: bare getSession() before the /login check`);
+  for (const r of roles) if (!flat.includes(r)) problems.push(`${f}: role check changed (${r})`);
+  if (!/if ?\(!session\) ?\{ router\.replace\("\/login"\);/.test(flat)) problems.push(`${f}: no session must still go to /login`);
+  if (!/is_active/.test(s) || !/supabase\.auth\.signOut\(\)/.test(s)) problems.push(`${f}: inactive check must stay`);
+}
 
 if (problems.length) {
   console.error("check-current-user: FAILED");

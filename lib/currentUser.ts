@@ -35,3 +35,27 @@ export async function getCurrentUser(): Promise<User | null> {
   } = await supabase.auth.getSession();
   return session?.user ?? null;
 }
+
+// Layout access check (Admin / HR / Payroll), 2026-11-14: the same network rule for the session read and the
+// employee/role query. A network failure gets one more try after AUTH_RETRY_DELAY_MS; if it still fails, the answer
+// is { networkFailed: true } and the layout stays on the page (with a retry notice) instead of sending to /login.
+// Every real answer (no session, no employee row, inactive, wrong role) is returned as-is and the layout's own
+// checks run unchanged. A PostgREST network failure has status 0 and a "Failed to fetch" / "Load failed" message; a
+// real "no row" answer has a status (406, PGRST116), so it is never treated as a network failure.
+type QueryAnswer = { data: unknown; error: { name?: string; message?: string } | null; status?: number };
+
+export function isQueryNetworkError(answer: { error: { name?: string; message?: string } | null; status?: number }): boolean {
+  if (!answer.error) return false;
+  return isAuthNetworkError({ name: answer.error.name, message: answer.error.message, status: answer.status });
+}
+
+export async function withNetworkRetry<R extends QueryAnswer>(
+  run: () => PromiseLike<R>
+): Promise<{ data: R["data"] | null; networkFailed: boolean }> {
+  const first = await run();
+  if (first.data || !isQueryNetworkError(first)) return { data: first.data, networkFailed: false };
+  await new Promise((resolve) => setTimeout(resolve, AUTH_RETRY_DELAY_MS));
+  const second = await run();
+  if (second.data || !isQueryNetworkError(second)) return { data: second.data, networkFailed: false };
+  return { data: null, networkFailed: true };
+}

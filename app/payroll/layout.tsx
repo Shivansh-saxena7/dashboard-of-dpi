@@ -6,6 +6,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { Menu, X } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import SessionGuard from "@/components/SessionGuard";
+import { withNetworkRetry } from "@/lib/currentUser";
+import ConnectionRetryNotice from "@/components/ConnectionRetryNotice";
 import Footer from "@/components/Footer";
 import SidebarNavLink, { isNavItemActive } from "@/components/SidebarNavLink";
 
@@ -33,24 +35,37 @@ const menu = [
 export default function PayrollLayout({ children }: { children: React.ReactNode }) {
   const [payrollName, setPayrollName] = useState("Payroll");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [connectionLost, setConnectionLost] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
 
   async function loadPayroll() {
-    const {
-      data: { session }
-    } = await supabase.auth.getSession();
+    setConnectionLost(false);
+
+    // Network-safe (lib/currentUser.ts withNetworkRetry): a dropped connection shows a retry notice instead of /login.
+    const sessionRead = await withNetworkRetry(async () => {
+      const r = await supabase.auth.getSession();
+      return { data: r.data.session, error: r.error };
+    });
+    if (sessionRead.networkFailed) {
+      setConnectionLost(true);
+      return;
+    }
+    const session = sessionRead.data;
 
     if (!session) {
       router.replace("/login");
       return;
     }
 
-    const { data } = await supabase
-      .from("employees")
-      .select("name, role, is_active")
-      .eq("auth_user_id", session.user.id)
-      .single();
+    const employeeRead = await withNetworkRetry(() =>
+      supabase.from("employees").select("name, role, is_active").eq("auth_user_id", session.user.id).single()
+    );
+    if (employeeRead.networkFailed) {
+      setConnectionLost(true);
+      return;
+    }
+    const data = employeeRead.data;
 
     if (!data || !data.is_active) {
       if (data && !data.is_active) await supabase.auth.signOut();
@@ -141,6 +156,7 @@ export default function PayrollLayout({ children }: { children: React.ReactNode 
             {children}
             <Footer />
           </div>
+          {connectionLost && <ConnectionRetryNotice onRetry={loadPayroll} />}
         </div>
       </div>
     </SessionGuard>
