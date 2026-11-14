@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { X, Phone, Loader2, Send, Repeat, MessageCircle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { logCallClick } from "@/lib/logCallClick";
-import { logLeadUpdate } from "@/lib/logLeadUpdate";
+import { saveLeadUpdate, showSaveKeptToast } from "@/lib/resultSave";
 import { SESSION_EXPIRED_CODE } from "@/lib/sessionGuard";
 import { clearLeadUpdateDraft, draftReturnPath, loadLeadUpdateDraft, saveLeadUpdateDraft } from "@/lib/leadUpdateDraft";
 import GivenLeadContextBox from "./GivenLeadContextBox";
@@ -128,8 +128,32 @@ export default function LeadDetailModal({ lead, givenContext, onClose, onUpdated
     setReminderValue(draft.reminderValue);
     setReminderUnit(draft.reminderUnit as "hours" | "days");
     if (draft.contactMethod) setContactMethod(draft.contactMethod as ContactMethod);
-    toast.success("Your unsaved update was restored. Check it and save again.");
+    setKeptDraft(true);
+    toast.success("Your unsaved update was restored. Check it and save again.", { id: "draft-restored" });
   }, [lead.id]);
+
+  // Result save on a bad network (2026-11-14, lib/resultSave.tsx): a kept update is tried again once the phone is
+  // back online, and can be discarded.
+  const [keptDraft, setKeptDraft] = useState(false);
+  const submitRef = useRef<() => Promise<void>>(async () => {});
+  useEffect(() => {
+    const onOnline = () => {
+      if (keptDraft && !submitting) void submitRef.current();
+    };
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, [keptDraft, submitting]);
+
+  function discardKeptUpdate() {
+    clearLeadUpdateDraft(lead.id);
+    setKeptDraft(false);
+    setNoteText("");
+    setReminderValue("");
+    setReminderUnit("days");
+    setSelectedStatus(null);
+    setContactMethod("CRM_CALL");
+    toast.success("Kept update discarded.");
+  }
 
   useEffect(() => {
     loadNotes();
@@ -193,20 +217,38 @@ export default function LeadDetailModal({ lead, givenContext, onClose, onUpdated
   // isLeadTerminal.
   const boardMovesDisabled = isTerminal || lead.boardStage === "BOOKING";
 
+  submitRef.current = submitUpdate;
+
   async function submitUpdate() {
     setSubmitting(true);
 
     try {
 
-      const { error } = await logLeadUpdate({
+      const startedAt = Date.now();
+      const kept = loadLeadUpdateDraft(lead.id);
+      const outcome = await saveLeadUpdate({
         p_lead_id: lead.id,
         p_lead_history_id: lead.leadHistoryId,
         p_new_status: selectedStatus,
         p_note: noteText.trim() || null,
         p_reminder_value: reminderValue ? parseInt(reminderValue, 10) : null,
         p_reminder_unit: reminderValue ? reminderUnit : null
-      }, contactMethod);
+      }, contactMethod, kept?.pendingSince ?? null);
 
+      if (outcome.kind === "network") {
+        // Not saved and no answer from the server: keep everything typed, try again later (never twice: the next try
+        // first checks whether this one landed).
+        saveLeadUpdateDraft(
+          lead.id,
+          { status: selectedStatus, note: noteText, reminderValue, reminderUnit, contactMethod, pendingSince: kept?.pendingSince ?? startedAt },
+          null
+        );
+        setKeptDraft(true);
+        showSaveKeptToast(() => void submitRef.current());
+        return;
+      }
+
+      const error = outcome.kind === "server" ? outcome.error : null;
       if (error) {
         if (error.code === SESSION_EXPIRED_CODE) {
           saveLeadUpdateDraft(
@@ -220,6 +262,7 @@ export default function LeadDetailModal({ lead, givenContext, onClose, onUpdated
       }
 
       clearLeadUpdateDraft(lead.id);
+      setKeptDraft(false);
       toast.success("Update logged.");
 
       onUpdated({
@@ -918,6 +961,11 @@ export default function LeadDetailModal({ lead, givenContext, onClose, onUpdated
                 {submitting ? <Loader2 className="animate-spin" size={16} /> : <Send size={15} />}
                 {submitting ? "Logging..." : "Log Update"}
               </motion.button>
+              {keptDraft && !submitting && (
+                <button onClick={discardKeptUpdate} className="mt-2 w-full text-center text-xs font-semibold text-slate-500 hover:text-slate-800">
+                  Discard kept update
+                </button>
+              )}
             </div>
           )}
 

@@ -3,6 +3,7 @@ import { resolveAdminCaller } from "@/lib/resolveAdminCaller";
 import { canDeleteEmployee } from "@/lib/adminUserPolicy";
 import { createClient } from "@supabase/supabase-js";
 import { createReportingFetch } from "@/lib/reportingFetch";
+import { deleteBlockedMessage } from "@/lib/fkErrorMessage";
 
 const supabaseAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
   global: { fetch: createReportingFetch({ layer: "API", source: () => "api:delete-employee" }) }
@@ -98,11 +99,9 @@ export async function POST(req: Request) {
       // never reaches the Admin as a technical error, even if it's a
       // table this route doesn't name individually.
       if (deleteEmployeeError.code === "23503") {
+        // Names the table that still points at this employee (lib/fkErrorMessage.ts, 2026-11-14).
         return NextResponse.json(
-          {
-            success: false,
-            message: "This employee has other related records (e.g. tickets, imports, or notes) — please Deactivate instead of Delete."
-          },
+          { success: false, message: deleteBlockedMessage("employee", deleteEmployeeError) },
           { status: 400 }
         );
       }

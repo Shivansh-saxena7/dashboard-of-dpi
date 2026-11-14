@@ -9,6 +9,7 @@ import { buildHrDocumentBlob, LetterheadImage } from "@/lib/generateHrDocumentPd
 import DateInput from "@/components/DateInput";
 import { exportCandidatesToExcel, exportCandidatesToPDF, CandidateExportRow } from "@/lib/exportCandidateReport";
 import DeleteModal from "../../admin/components/DeleteModal";
+import { deleteBlockedMessage } from "@/lib/fkErrorMessage";
 
 // Candidate / Interview / Offer-Appointment flow (2026-09-24) — the
 // real replacement for the old theoretical "Interview Tracking"
@@ -706,7 +707,7 @@ export default function HrCandidatesPage() {
       });
 
       if (error) {
-        toast.error(error.message || "Could not delete candidate.");
+        toast.error(deleteBlockedMessage("candidate", error) || error.message || "Could not delete candidate.");
         return;
       }
 
