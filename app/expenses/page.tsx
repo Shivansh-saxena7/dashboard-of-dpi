@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
+import { getCurrentUser } from "@/lib/currentUser";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import EmployeeTabBar from "@/components/EmployeeTabBar";
@@ -59,9 +60,7 @@ export default function ExpensesPage() {
 
   useEffect(() => {
     async function getLoggedInEmployee() {
-      const {
-        data: { user }
-      } = await supabase.auth.getUser();
+      const user = await getCurrentUser();
 
       if (!user) {
         router.replace("/login");

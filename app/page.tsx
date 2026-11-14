@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { getCurrentUser } from "@/lib/currentUser";
 import Footer from "@/components/Footer";
 
 import Header from "@/components/Header";
@@ -26,9 +27,7 @@ useEffect(()=>{
 
 async function getLoggedInEmployee(){
 
-const {
-data:{user},
-}=await supabase.auth.getUser();
+const user = await getCurrentUser();
 
 if(!user){
 

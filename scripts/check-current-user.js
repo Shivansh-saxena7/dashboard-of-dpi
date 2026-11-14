@@ -26,10 +26,39 @@ eq("no session is not network", isAuthNetworkError({ name: "AuthSessionMissingEr
 eq("expired / invalid token is not network", isAuthNetworkError({ name: "AuthApiError", status: 403, message: "invalid JWT" }), false);
 eq("no error", isAuthNetworkError(null), false);
 
-for (const f of ["app/leads/page.tsx", "app/data/page.tsx"]) {
+const LOGIN_CHECK_PAGES = [
+  "app/leads/page.tsx",
+  "app/data/page.tsx",
+  "app/page.tsx",
+  "app/attendance/page.tsx",
+  "app/documents/page.tsx",
+  "app/expenses/page.tsx",
+  "app/leaderboard/page.tsx",
+  "app/report/page.tsx",
+  "app/team/page.tsx",
+  "app/tickets/page.tsx"
+];
+for (const f of LOGIN_CHECK_PAGES) {
   const page = read(f);
   if (!page.includes("const user = await getCurrentUser();")) problems.push(`${f} must use the network-safe login check`);
   if (/await supabase\.auth\.getUser\(\)/.test(page)) problems.push(`${f} must not call auth.getUser() directly`);
+}
+
+// Any new page or component: an auth.getUser() answer that leads to a /login redirect within the next few lines must
+// use getCurrentUser() instead, or a dropped connection sends a logged-in employee to /login.
+const walk = (dir) =>
+  fs.readdirSync(path.join(root, dir), { withFileTypes: true }).flatMap((d) => {
+    const rel = `${dir}/${d.name}`;
+    if (d.isDirectory()) return d.name === "api" || d.name === "node_modules" ? [] : walk(rel);
+    return /\.tsx?$/.test(d.name) ? [rel] : [];
+  });
+for (const f of [...walk("app"), ...walk("components")]) {
+  const lines = read(f).split(/\r?\n/);
+  lines.forEach((line, i) => {
+    if (!/await supabase\.auth\.getUser\(\)/.test(line)) return;
+    if (lines.slice(i, i + 12).some((l) => /(router\.(replace|push)|location\.(href\s*=|replace|assign))\(?\s*[`"']\/login/.test(l)))
+      problems.push(`${f}:${i + 1} sends to /login on an auth.getUser() answer; use getCurrentUser() from lib/currentUser.ts`);
+  });
 }
 if (!/if \(!isAuthNetworkError\(first\.error\)\) return null;/.test(src)) problems.push("a real 'not logged in' answer must still return no user");
 

@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import { ChevronDown, FileSpreadsheet, FileText, Loader2, UserPlus, Table2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
+import { getCurrentUser } from "@/lib/currentUser";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import EmployeeTabBar from "@/components/EmployeeTabBar";
@@ -111,9 +112,7 @@ export default function TeamPage() {
   useEffect(() => {
     async function getLoggedInEmployee() {
 
-      const {
-        data: { user }
-      } = await supabase.auth.getUser();
+      const user = await getCurrentUser();
 
       if (!user) {
         router.replace("/login");
