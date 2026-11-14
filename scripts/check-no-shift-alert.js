@@ -43,6 +43,9 @@ eq("non-sales department -> no alert", run([emp("m", { department: "marketing" }
 eq("no department, team leader -> checked", run([emp("tl", { role: "team_leader", department: null })], shifts({})), ["tl"]);
 eq("joined inside the window -> too new", run([emp("nw", { joined: "2026-11-15" })], shifts({})), []);
 eq("joined just before the window -> checked", run([emp("ol", { joined: "2026-11-13" })], shifts({})), ["ol"]);
+eq("test account excluded by id", run([emp("d970af89-063d-48b4-98aa-b89260fb3d87", { name: "QA login" })], shifts({})), []);
+eq("test account excluded by name", run([emp("tt", { name: " Testing " })], shifts({})), []);
+eq("a real 'Testing' surname is not a full-name match", run([emp("rt", { name: "Ravi Testing" })], shifts({})), ["rt"]);
 eq("message", na.noShiftMessage([{ name: "Himanshu Singh", lastShift: "2026-10-15" }, { name: "Vivek S", lastShift: null }]),
   "2 employees without a shift for 3+ working days and no leave on record: Himanshu (last shift 2026-10-15), Vivek (no shift on record). Mark leave or check with them; their Data does not move on its own.");
 
