@@ -60,3 +60,55 @@ export function reassignKeptCount(data: unknown): number {
   const kept = (data ?? {}) as { kept?: unknown };
   return typeof kept.kept === "number" ? kept.kept : 0;
 }
+
+// Chunked bulk Reassign (2026-11-15): 500 leads in one call took 8.3 s in a live dry run, over the 8 s API statement
+// limit, so the page sends ADMIN_REASSIGN_CHUNK leads per call, one call after the other. A call that fails as a whole
+// (network, timeout, server refusal) stops the rest: those leads were not processed and stay selected for a retry.
+export const ADMIN_REASSIGN_CHUNK = 100;
+
+export function chunkLeadIds(ids: readonly string[], size: number = ADMIN_REASSIGN_CHUNK): string[][] {
+  const out: string[][] = [];
+  for (let i = 0; i < ids.length; i += size) out.push(ids.slice(i, i + size));
+  return out;
+}
+
+export interface ChunkedReassignResult {
+  reassigned: number;
+  kept: number;
+  failed: string[];
+  notProcessed: string[];
+  stoppedError: string | null;
+  calls: number;
+}
+
+export async function runChunkedReassign(
+  ids: readonly string[],
+  callChunk: (chunk: string[]) => PromiseLike<{ data: unknown; error: { message?: string } | null }>,
+  onProgress?: (sent: number, total: number) => void,
+  size: number = ADMIN_REASSIGN_CHUNK
+): Promise<ChunkedReassignResult> {
+  const chunks = chunkLeadIds(ids, size);
+  const result: ChunkedReassignResult = { reassigned: 0, kept: 0, failed: [], notProcessed: [], stoppedError: null, calls: 0 };
+  let sent = 0;
+  for (let i = 0; i < chunks.length; i++) {
+    onProgress?.(sent + chunks[i].length, ids.length);
+    let answer: { data: unknown; error: { message?: string } | null };
+    try {
+      answer = await callChunk(chunks[i]);
+    } catch (err) {
+      answer = { data: null, error: { message: err instanceof Error ? err.message : String(err) } };
+    }
+    result.calls += 1;
+    if (answer.error) {
+      result.stoppedError = answer.error.message || "the server did not answer";
+      result.notProcessed = chunks.slice(i).flat();
+      return result;
+    }
+    const summary = summarizeAdminReassignResult(answer.data);
+    result.reassigned += summary.reassigned;
+    result.kept += reassignKeptCount(answer.data);
+    result.failed.push(...summary.failed);
+    sent += chunks[i].length;
+  }
+  return result;
+}

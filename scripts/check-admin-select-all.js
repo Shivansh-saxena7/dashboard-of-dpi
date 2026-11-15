@@ -84,7 +84,8 @@ eq(
 );
 eq("summary empty answer", summarizeAdminReassignResult(null), { reassigned: 0, failed: [] });
 if (!page.includes("supabase.rpc(ADMIN_REASSIGN_RPC, {")) problems.push("bulk Reassign must call admin_reassign_leads");
-if (!page.includes("p_to_employee_id: bulkTargetEmployeeId")) problems.push("bulk Reassign must pass p_to_employee_id");
+// One receiver for every chunk: captured once before the first call.
+if (!page.includes("const toEmployeeId = bulkTargetEmployeeId;") || !page.includes("p_to_employee_id: toEmployeeId")) problems.push("bulk Reassign must pass p_to_employee_id");
 for (const dir of ["app", "components", "lib"]) {
   const walk = (d) => fs.readdirSync(path.join(root, d), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(`${d}/${e.name}`) : /\.tsx?$/.test(e.name) ? [`${d}/${e.name}`] : []));
   for (const f of walk(dir)) if (read(f).includes("bulk_reassign_leads_atomic")) problems.push(`${f} still calls bulk_reassign_leads_atomic (no server limit)`);
@@ -118,7 +119,7 @@ eq("summary all reset", reassignStageSummary({ kept: 0, reset: 2 }), "2 leads wi
 eq("summary all kept", reassignStageSummary({ kept: 3, reset: 0 }), "3 leads will keep their stage.");
 eq("kept count", reassignKeptCount({ kept: 4 }), 4);
 eq("kept count missing", reassignKeptCount(null), 0);
-if (!page.includes("p_stage_mode: bulkStageMode")) problems.push("bulk Reassign must send p_stage_mode");
+if (!page.includes("const stageMode = bulkStageMode;") || !page.includes("p_stage_mode: stageMode")) problems.push("bulk Reassign must send p_stage_mode");
 if (!page.includes("useState<AdminReassignStageMode>(ADMIN_REASSIGN_DEFAULT_STAGE_MODE)")) problems.push("stage mode must default to ADMIN_REASSIGN_DEFAULT_STAGE_MODE");
 if (!page.includes("Keep stage for positive leads (default)") || !page.includes("Reset all leads to New")) problems.push("stage selector options are missing");
 if (!page.includes("Kept leads are protected from recycling for {KEEP_STAGE_PROTECTION_DAYS} days.")) problems.push("confirm dialog must mention the protection");
@@ -132,9 +133,61 @@ if (!stageSql.includes("revoke all on function public.admin_reassign_leads(uuid[
 if (/\bdrop\b/i.test(stageSql.replace(/--.*$/gm, ""))) problems.push(`${stageSqlFile}: must be additive (no drop)`);
 if (!fs.existsSync(path.join(root, "supabase/sql/2026-11-15_admin_reassign_stage_mode_rollback.sql"))) problems.push("stage mode rollback SQL is missing");
 
-if (problems.length) {
-  console.error("check-admin-select-all: FAILED");
-  for (const p of problems) console.error("  " + p);
-  process.exit(1);
-}
-console.log("check-admin-select-all: all known answers and guards pass.");
+// 7) Chunked bulk Reassign (2026-11-15): 100 leads per call, one after the other; a call that fails stops the rest.
+const { ADMIN_REASSIGN_CHUNK, chunkLeadIds, runChunkedReassign } = require(path.join(root, "lib/adminReassign.ts"));
+eq("chunk size", ADMIN_REASSIGN_CHUNK, 100);
+const ids250 = Array.from({ length: 250 }, (_, i) => `id${i}`);
+eq("chunks of 250", chunkLeadIds(ids250).map((c) => c.length), [100, 100, 50]);
+eq("chunks of 100", chunkLeadIds(ids250.slice(0, 100)).map((c) => c.length), [100]);
+eq("chunks of 0", chunkLeadIds([]), []);
+if (!page.includes("const result = await runChunkedReassign(")) problems.push("bulk Reassign must go through runChunkedReassign");
+if (/supabase\.rpc\(ADMIN_REASSIGN_RPC, \{\s*p_lead_ids: ids,/.test(page)) problems.push("bulk Reassign must not send every selected lead in one call");
+if (!page.includes("setSelectedLeadIds(new Set(result.notProcessed));")) problems.push("leads that were not processed must stay selected");
+if (!page.includes("`Reassigning ${bulkProgress.sent} of ${bulkProgress.total}...`")) problems.push("bulk Reassign must show progress");
+const okAnswer = (chunk) => ({ data: { reassigned: chunk.length, kept: 1, results: chunk.map((lead_id) => ({ lead_id, success: true })) }, error: null });
+const asyncChecks = [
+  (async () => {
+    const seen = [];
+    let inFlight = 0;
+    let overlap = false;
+    const r = await runChunkedReassign(ids250, async (chunk) => {
+      inFlight += 1;
+      if (inFlight > 1) overlap = true;
+      seen.push(chunk.length);
+      await new Promise((res) => setTimeout(res, 5));
+      inFlight -= 1;
+      return okAnswer(chunk);
+    });
+    eq("runner: sizes in order", seen, [100, 100, 50]);
+    eq("runner: sequential", overlap, false);
+    eq("runner: totals", { reassigned: r.reassigned, kept: r.kept, calls: r.calls, notProcessed: r.notProcessed.length, stopped: r.stoppedError }, { reassigned: 250, kept: 3, calls: 3, notProcessed: 0, stopped: null });
+  })(),
+  (async () => {
+    let n = 0;
+    const r = await runChunkedReassign(ids250, async (chunk) => (++n === 2 ? { data: null, error: { message: "statement timeout" } } : okAnswer(chunk)));
+    eq("runner: stops after a failed call", { calls: r.calls, reassigned: r.reassigned, notProcessed: r.notProcessed.length, first: r.notProcessed[0], stopped: r.stoppedError }, { calls: 2, reassigned: 100, notProcessed: 150, first: "id100", stopped: "statement timeout" });
+  })(),
+  (async () => {
+    const r = await runChunkedReassign(ids250.slice(0, 120), async (chunk) => {
+      if (chunk.length === 20) throw new Error("Failed to fetch");
+      return okAnswer(chunk);
+    });
+    eq("runner: a thrown network error stops too", { reassigned: r.reassigned, notProcessed: r.notProcessed.length, stopped: r.stoppedError }, { reassigned: 100, notProcessed: 20, stopped: "Failed to fetch" });
+  })(),
+  (async () => {
+    const r = await runChunkedReassign(ids250.slice(0, 2), async () => ({
+      data: { reassigned: 1, results: [{ lead_id: "aaaaaaaa-1", success: true }, { lead_id: "bbbbbbbb-2", success: false, error: "admin_reassign_leads: lead not found" }] },
+      error: null
+    }));
+    eq("runner: per-lead failures are added up", { reassigned: r.reassigned, failed: r.failed }, { reassigned: 1, failed: ["bbbbbbbb lead not found"] });
+  })()
+];
+
+Promise.all(asyncChecks).then(() => {
+  if (problems.length) {
+    console.error("check-admin-select-all: FAILED");
+    for (const p of problems) console.error("  " + p);
+    process.exit(1);
+  }
+  console.log("check-admin-select-all: all known answers and guards pass.");
+});

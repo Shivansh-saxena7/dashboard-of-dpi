@@ -33,10 +33,9 @@ import {
   KEEP_STAGE_PROTECTION_DAYS,
   canBulkReassign,
   reassignConfirmTitle,
-  reassignKeptCount,
   reassignStageSplit,
   reassignStageSummary,
-  summarizeAdminReassignResult
+  runChunkedReassign
 } from "@/lib/adminReassign";
 import { logAnomaly } from "@/lib/logAnomaly";
 
@@ -167,6 +166,8 @@ export default function AdminLeadsPage() {
     for (const l of leads) leadStageById.current.set(l.id, { status: l.status ?? null, board_stage: l.board_stage ?? null });
   }, [leads]);
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  // Chunked bulk Reassign progress (2026-11-15): leads sent so far / total.
+  const [bulkProgress, setBulkProgress] = useState<{ sent: number; total: number } | null>(null);
 
   const [searchQuery, setSearchQuery] = useState("");
   // Debounced separately from searchQuery itself so every keystroke
@@ -573,48 +574,64 @@ export default function AdminLeadsPage() {
     });
   }, []);
 
-  // One RPC call for the whole batch (admin_reassign_leads, 2026-11-15),
-  // not a client-side loop — the server enforces Admin only, reason
-  // required, at most ADMIN_REASSIGN_MAX_PER_CALL leads and an active
-  // receiver, then reassigns each lead in its own savepoint, so one bad
-  // lead in the batch can't abort the others. The per-lead results are
-  // surfaced as a single summary toast; a partial failure is also
-  // logged to System Health.
+  // Bulk Reassign in chunks (2026-11-15): ADMIN_REASSIGN_CHUNK leads per admin_reassign_leads call, one call after
+  // the other (500 in one call took 8.3 s live, over the 8 s limit). The server still enforces Admin only, reason,
+  // the 500 limit and an active receiver, and reassigns each lead in its own savepoint. Same receiver, reason and
+  // stage mode for every chunk. A chunk that fails as a whole stops the rest; those leads stay selected for a retry.
+  // A partial failure is logged to System Health.
   async function handleBulkReassign() {
     if (!canBulkReassign(selectedLeadIds.size) || !bulkTargetEmployeeId || !bulkReason.trim()) return;
 
+    const ids = Array.from(selectedLeadIds);
+    const toEmployeeId = bulkTargetEmployeeId;
+    const reason = bulkReason.trim();
+    const stageMode = bulkStageMode;
     setBulkSubmitting(true);
+    setBulkProgress({ sent: 0, total: ids.length });
     try {
-      const ids = Array.from(selectedLeadIds);
-      const { data, error } = await supabase.rpc(ADMIN_REASSIGN_RPC, {
-        p_lead_ids: ids,
-        p_to_employee_id: bulkTargetEmployeeId,
-        p_reason: bulkReason.trim(),
-        p_stage_mode: bulkStageMode
-      });
+      const result = await runChunkedReassign(
+        ids,
+        (chunk) =>
+          supabase.rpc(ADMIN_REASSIGN_RPC, {
+            p_lead_ids: chunk,
+            p_to_employee_id: toEmployeeId,
+            p_reason: reason,
+            p_stage_mode: stageMode
+          }),
+        (sent, total) => setBulkProgress({ sent, total })
+      );
 
-      if (error) {
-        toast.error(error.message || "Could not bulk-reassign these leads.");
-        return;
-      }
-
-      const summary = summarizeAdminReassignResult(data);
-
-      if (summary.failed.length === 0) {
-        const kept = reassignKeptCount(data);
-        toast.success(`Reassigned ${summary.reassigned} lead${summary.reassigned === 1 ? "" : "s"}${kept > 0 ? ` (${kept} kept ${kept === 1 ? "its" : "their"} stage)` : ""}.`);
+      const lead = (n: number) => `${n} lead${n === 1 ? "" : "s"}`;
+      const keptText = result.kept > 0 ? ` (${result.kept} kept ${result.kept === 1 ? "its" : "their"} stage)` : "";
+      if (result.stoppedError) {
+        toast.error(
+          `${result.reassigned} reassigned${keptText}, ${result.notProcessed.length} not processed: ${result.stoppedError}${
+            result.failed.length > 0 ? `. ${result.failed.length} failed: ${result.failed.join("; ")}` : ""
+          }`,
+          { duration: 10000 }
+        );
+      } else if (result.failed.length === 0) {
+        toast.success(`Reassigned ${lead(result.reassigned)}${keptText}.`);
       } else {
-        toast.error(`${summary.reassigned} reassigned, ${summary.failed.length} failed: ${summary.failed.join("; ")}`, {
+        toast.error(`${result.reassigned} reassigned${keptText}, ${result.failed.length} failed: ${result.failed.join("; ")}`, {
           duration: 8000
         });
+      }
+      if (result.failed.length > 0 || result.stoppedError) {
         await logAnomaly(supabase, {
           source: "admin_reassign:partial",
           severity: "warning",
-          message: `Bulk Reassign: ${summary.reassigned} of ${ids.length} reassigned, ${summary.failed.length} failed`,
-          context: { toEmployeeId: bulkTargetEmployeeId, failed: summary.failed.slice(0, 20) }
+          message: `Bulk Reassign: ${result.reassigned} of ${ids.length} reassigned, ${result.failed.length} failed, ${result.notProcessed.length} not processed`,
+          context: { toEmployeeId, stageMode, calls: result.calls, failed: result.failed.slice(0, 20), stoppedError: result.stoppedError }
         });
       }
 
+      if (result.notProcessed.length > 0) {
+        // Only the leads that were never sent stay selected, so Reassign can simply be pressed again.
+        setSelectedLeadIds(new Set(result.notProcessed));
+        if (result.reassigned > 0) loadLeads();
+        return;
+      }
       setReassignDialogOpen(false);
       setSelectedLeadIds(new Set());
       setBulkTargetEmployeeId("");
@@ -626,6 +643,7 @@ export default function AdminLeadsPage() {
       toast.error("Something went wrong bulk-reassigning these leads.");
     } finally {
       setBulkSubmitting(false);
+      setBulkProgress(null);
     }
   }
 
@@ -1354,7 +1372,7 @@ export default function AdminLeadsPage() {
               disabled={bulkSubmitting || !bulkTargetEmployeeId || !bulkReason.trim() || !canBulkReassign(selectedLeadIds.size)}
               className="h-10 px-4 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60 transition shrink-0"
             >
-              {bulkSubmitting ? "Reassigning..." : `Reassign (${selectedLeadIds.size})`}
+              {bulkSubmitting ? (bulkProgress ? `Reassigning ${bulkProgress.sent} of ${bulkProgress.total}...` : "Reassigning...") : `Reassign (${selectedLeadIds.size})`}
             </button>
 
             <button
@@ -1407,7 +1425,7 @@ export default function AdminLeadsPage() {
                 disabled={bulkSubmitting || !canBulkReassign(selectedLeadIds.size)}
                 className="h-10 px-4 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
               >
-                {bulkSubmitting ? "Reassigning..." : "Reassign"}
+                {bulkSubmitting ? (bulkProgress ? `Reassigning ${bulkProgress.sent} of ${bulkProgress.total}...` : "Reassigning...") : "Reassign"}
               </button>
             </div>
           </div>
