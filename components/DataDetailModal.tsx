@@ -6,7 +6,7 @@ import { X, Phone, Loader2, Send, MessageCircle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { logCallClick } from "@/lib/logCallClick";
 import { saveLeadUpdate, showLeadMovedAwayToast, showSaveKeptToast } from "@/lib/resultSave";
-import { isLeadMovedAwayError } from "@/lib/resilientLeadUpdate";
+import { isLeadMovedAwayError, LEAD_TAKEN_WHILE_OPEN_MESSAGE } from "@/lib/resilientLeadUpdate";
 import { logAnomaly } from "@/lib/logAnomaly";
 import { SESSION_EXPIRED_CODE } from "@/lib/sessionGuard";
 import { clearLeadUpdateDraft, draftReturnPath, loadLeadUpdateDraft, saveLeadUpdateDraft } from "@/lib/leadUpdateDraft";
@@ -48,6 +48,8 @@ interface DataDetailModalProps {
   onBoardStageChanged: (boardStage: BoardStage) => void;
   // The lead was given to someone else while this was open (2026-11-15): the list drops the card.
   onLeadGone?: () => void;
+  // Realtime saw this lead leave the employee while the card was open (2026-11-15, DataList).
+  leadGone?: boolean;
 }
 
 // The Data-tab counterpart to LeadDetailModal. Previously had no
@@ -80,7 +82,7 @@ interface DataDetailModalProps {
 // reminder phases: 4/5/6-param versions all still exist), and always
 // matching the exact shape already proven in production avoids any
 // risk of PostgREST resolving to the wrong overload.
-export default function DataDetailModal({ lead, givenContext, previousPositive, onClose, onUpdated, onBoardStageChanged, onLeadGone }: DataDetailModalProps) {
+export default function DataDetailModal({ lead, givenContext, previousPositive, onClose, onUpdated, onBoardStageChanged, onLeadGone, leadGone }: DataDetailModalProps) {
 
   const [notes, setNotes] = useState<LeadNote[]>([]);
   const [loadingNotes, setLoadingNotes] = useState(true);
@@ -112,6 +114,19 @@ export default function DataDetailModal({ lead, givenContext, previousPositive, 
   // Result save on a bad network (2026-11-14, lib/resultSave.tsx): a kept update is tried again once the phone is
   // back online, and can be discarded.
   const [keptDraft, setKeptDraft] = useState(false);
+
+  // The sweep or an Admin gave this lead to someone else while it was open (realtime, DataList): same ending as a
+  // refused save, before anything is sent: what was typed is shown with Copy, nothing is kept, the card closes.
+  const noteTextRef = useRef("");
+  noteTextRef.current = noteText;
+  useEffect(() => {
+    if (!leadGone) return;
+    clearLeadUpdateDraft(lead.id);
+    showLeadMovedAwayToast(noteTextRef.current, LEAD_TAKEN_WHILE_OPEN_MESSAGE);
+    if (onLeadGone) onLeadGone();
+    else onClose();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leadGone]);
   const submitRef = useRef<() => Promise<void>>(async () => {});
   useEffect(() => {
     const onOnline = () => {

@@ -136,6 +136,28 @@ function run(sends, checks, options = {}) {
   if (!libRe || !rfSrc.includes(`${libRe}.test(body.message || "")`)) problems.push("reportingFetch must skip the moved-away refusal with the same rule as isLeadMovedAwayError");
   if (/^import /m.test(rfSrc)) problems.push("lib/reportingFetch.ts must stay import-free (Edge Functions load it)");
 
+  // /data realtime (2026-11-15): same channel pattern as LeadList; an ended assignment drops the card, an open card
+  // closes the way a refused save does; channel only once there is an employee id (after the login check).
+  const dl = read("components/DataList.tsx").replace(/\r\n/g, "\n");
+  for (const need of [
+    "if (!employeeId) return;",
+    ".channel(`data-list-${employeeId}`)",
+    '{ event: "*", schema: "public", table: "leads", filter: `current_owner_id=eq.${employeeId}` }',
+    '{ event: "*", schema: "public", table: "lead_history", filter: `employee_id=eq.${employeeId}` }',
+    "if (row.is_active === false && row.lead_id) {",
+    "setGoneLeadId(goneId);",
+    "supabase.removeChannel(channel);",
+    "leadGone={goneLeadId === selectedLead.id}"
+  ])
+    if (!dl.includes(need)) problems.push(`components/DataList.tsx: realtime must include ${need}`);
+  if (/setInterval\(\s*\(\)\s*=>\s*loadLeads/.test(dl)) problems.push("components/DataList.tsx: no polling, realtime only");
+  const dm = read("components/DataDetailModal.tsx").replace(/\r\n/g, "\n");
+  const gi = dm.indexOf("if (!leadGone) return;");
+  const gone = gi < 0 ? "" : dm.slice(gi, dm.indexOf("}, [leadGone]);", gi));
+  for (const need of ["clearLeadUpdateDraft(lead.id);", "showLeadMovedAwayToast(noteTextRef.current, LEAD_TAKEN_WHILE_OPEN_MESSAGE);", "onLeadGone()"])
+    if (!gone.includes(need)) problems.push(`components/DataDetailModal.tsx: a lead gone while open must ${need}`);
+  eq("taken while open message", rs.LEAD_TAKEN_WHILE_OPEN_MESSAGE, "This lead has been reassigned to someone else, so it was closed.");
+
   if (problems.length) {
     console.error("check-result-save: FAILED");
     for (const p of problems) console.error("  " + p);

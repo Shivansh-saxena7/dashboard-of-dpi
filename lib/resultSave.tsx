@@ -78,12 +78,12 @@ export function showSaveKeptToast(onRetry: () => void) {
 
 // The lead was given to someone else while the card was open (lib/resilientLeadUpdate.ts isLeadMovedAwayError): the
 // update can never be saved, so it is not kept, but what the employee typed is shown with a Copy button.
-export function showLeadMovedAwayToast(note: string) {
+export function showLeadMovedAwayToast(note: string, message: string = LEAD_MOVED_AWAY_MESSAGE) {
   const typed = note.trim();
   toast.error(
     (t) => (
       <span className="flex flex-col gap-2" data-testid="lead-moved-away-toast">
-        <span>{LEAD_MOVED_AWAY_MESSAGE}</span>
+        <span>{message}</span>
         {typed && (
           <>
             <span className="rounded-lg bg-slate-100 px-2 py-1 text-xs text-slate-700 whitespace-pre-wrap break-words">{typed}</span>

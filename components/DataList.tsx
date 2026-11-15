@@ -152,6 +152,61 @@ export default function DataList({ employeeId }: DataListProps) {
   // tap, a saved result, a sweep) keeps the list on screen, so the scroll position never jumps back to the top.
   const loadedOnceRef = useRef(false);
 
+  // Realtime (2026-11-15), same pattern as LeadList.tsx: any change to this employee's own leads or own assignments
+  // reloads the list. When one of the employee's assignments ends (is_active false: the sweep or an Admin gave the
+  // lead to someone else, or it was junked), its card leaves at once; if that lead is open, the modal closes the way
+  // a refused save does (DataDetailModal leadGone). Only reached with an employee id, so only after the login check.
+  const selectedLeadIdRef = useRef<string | null>(null);
+  selectedLeadIdRef.current = selectedLeadId;
+  const [goneLeadId, setGoneLeadId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!employeeId) return;
+
+    let cancelled = false;
+
+    const existing = supabase.getChannels().find((ch) => ch.topic === `realtime:data-list-${employeeId}`);
+    if (existing) {
+      supabase.removeChannel(existing);
+    }
+
+    const channel = supabase
+      .channel(`data-list-${employeeId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "leads", filter: `current_owner_id=eq.${employeeId}` },
+        () => {
+          if (cancelled) return;
+          loadLeads();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "lead_history", filter: `employee_id=eq.${employeeId}` },
+        (payload) => {
+          if (cancelled) return;
+          const row = (payload.new || {}) as { lead_id?: string; is_active?: boolean };
+          if (row.is_active === false && row.lead_id) {
+            const goneId = row.lead_id;
+            if (selectedLeadIdRef.current === goneId) {
+              // Open right now: the modal shows the message (with anything typed) first, then its onLeadGone drops
+              // the card and reloads. Dropping it here would unmount the modal and lose what was typed.
+              setGoneLeadId(goneId);
+              return;
+            }
+            setLeads((prev) => prev.filter((l) => l.id !== goneId));
+          }
+          loadLeads();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employeeId]);
+
   async function loadLeads() {
     if (!loadedOnceRef.current) setLoading(true);
 
@@ -531,10 +586,12 @@ export default function DataList({ employeeId }: DataListProps) {
             givenContext.refresh();
           }}
           onBoardStageChanged={(stage) => handleBoardStageChanged(selectedLead.id, stage)}
+          leadGone={goneLeadId === selectedLead.id}
           onLeadGone={() => {
             // Given to someone else while the card was open (2026-11-15): drop the card now, then reload the list.
             const goneId = selectedLead.id;
             setSelectedLeadId(null);
+            setGoneLeadId(null);
             setLeads((prev) => prev.filter((l) => l.id !== goneId));
             loadLeads();
           }}

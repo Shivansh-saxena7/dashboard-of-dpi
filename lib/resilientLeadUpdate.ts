@@ -102,6 +102,8 @@ export function landedFromRows(
 // log_lead_update_atomic then refuses with one of these two answers. It is a server answer, so it is never retried,
 // and the save can never succeed for this employee again, so no draft is kept for it either.
 export const LEAD_MOVED_AWAY_MESSAGE = "This lead has been reassigned to someone else, so your update was not saved.";
+// Same, noticed by realtime while the card was open (nothing was being saved yet): the card closes.
+export const LEAD_TAKEN_WHILE_OPEN_MESSAGE = "This lead has been reassigned to someone else, so it was closed.";
 const MOVED_AWAY = /is not owned by the calling employee|does not belong to the calling employee for this lead/i;
 
 export function isLeadMovedAwayError(error: { message?: string | null } | null | undefined): boolean {
