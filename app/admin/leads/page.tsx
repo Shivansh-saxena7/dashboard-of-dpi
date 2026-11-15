@@ -26,10 +26,16 @@ import { splitAdminEmployeeOptions, adminEmployeeLabel } from "@/lib/adminEmploy
 import { ADMIN_JUNK_MAX_PER_CALL, summarizeAdminJunkResult } from "@/lib/adminJunk";
 import { ADMIN_SELECT_ALL_SELECT, adminSearchTerm } from "@/lib/adminLeadsSelect";
 import {
+  ADMIN_REASSIGN_DEFAULT_STAGE_MODE,
   ADMIN_REASSIGN_MAX_PER_CALL,
   ADMIN_REASSIGN_RPC,
+  AdminReassignStageMode,
+  KEEP_STAGE_PROTECTION_DAYS,
   canBulkReassign,
   reassignConfirmTitle,
+  reassignKeptCount,
+  reassignStageSplit,
+  reassignStageSummary,
   summarizeAdminReassignResult
 } from "@/lib/adminReassign";
 import { logAnomaly } from "@/lib/logAnomaly";
@@ -153,6 +159,13 @@ export default function AdminLeadsPage() {
   const [junkSubmitting, setJunkSubmitting] = useState(false);
   const [bulkTargetEmployeeId, setBulkTargetEmployeeId] = useState("");
   const [bulkReason, setBulkReason] = useState("");
+  // Stage mode for bulk Reassign (2026-11-15): positive leads keep their stage by default.
+  const [bulkStageMode, setBulkStageMode] = useState<AdminReassignStageMode>(ADMIN_REASSIGN_DEFAULT_STAGE_MODE);
+  // status / board_stage of every lead seen on a page or fetched by "Select all", for the confirm dialog's counts.
+  const leadStageById = useRef(new Map<string, { status: string | null; board_stage: string | null }>());
+  useEffect(() => {
+    for (const l of leads) leadStageById.current.set(l.id, { status: l.status ?? null, board_stage: l.board_stage ?? null });
+  }, [leads]);
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -576,7 +589,8 @@ export default function AdminLeadsPage() {
       const { data, error } = await supabase.rpc(ADMIN_REASSIGN_RPC, {
         p_lead_ids: ids,
         p_to_employee_id: bulkTargetEmployeeId,
-        p_reason: bulkReason.trim()
+        p_reason: bulkReason.trim(),
+        p_stage_mode: bulkStageMode
       });
 
       if (error) {
@@ -587,7 +601,8 @@ export default function AdminLeadsPage() {
       const summary = summarizeAdminReassignResult(data);
 
       if (summary.failed.length === 0) {
-        toast.success(`Reassigned ${summary.reassigned} lead${summary.reassigned === 1 ? "" : "s"}.`);
+        const kept = reassignKeptCount(data);
+        toast.success(`Reassigned ${summary.reassigned} lead${summary.reassigned === 1 ? "" : "s"}${kept > 0 ? ` (${kept} kept ${kept === 1 ? "its" : "their"} stage)` : ""}.`);
       } else {
         toast.error(`${summary.reassigned} reassigned, ${summary.failed.length} failed: ${summary.failed.join("; ")}`, {
           duration: 8000
@@ -831,6 +846,7 @@ export default function AdminLeadsPage() {
       setSelectAllFetching(true);
       try {
         const rows = await fetchAllMatching(ADMIN_SELECT_ALL_SELECT);
+        for (const r of rows as any[]) leadStageById.current.set(r.id, { status: r.status ?? null, board_stage: r.board_stage ?? null });
         const fetchedIds = rows.filter((r: any) => !isLeadTerminal(r.status, r.board_stage || "LEADS")).map((r: any) => r.id);
         setFullMatchingIds(fetchedIds);
         ids = fetchedIds;
@@ -1328,6 +1344,11 @@ export default function AdminLeadsPage() {
               className="flex-1 h-10 rounded-lg bg-slate-50 border border-slate-200 px-3 text-xs outline-none"
             />
 
+            <FilterSelect value={bulkStageMode} onChange={(e) => setBulkStageMode(e.target.value as AdminReassignStageMode)} className="w-full sm:w-64">
+              <option value="auto">Keep stage for positive leads (default)</option>
+              <option value="reset">Reset all leads to New</option>
+            </FilterSelect>
+
             <button
               onClick={() => setReassignDialogOpen(true)}
               disabled={bulkSubmitting || !bulkTargetEmployeeId || !bulkReason.trim() || !canBulkReassign(selectedLeadIds.size)}
@@ -1363,6 +1384,16 @@ export default function AdminLeadsPage() {
             <p className="mt-2 text-xs text-slate-500">
               Reason: <span className="font-semibold text-slate-700">{bulkReason.trim()}</span>
             </p>
+            {(() => {
+              const selected = Array.from(selectedLeadIds).map((id) => leadStageById.current.get(id) ?? { status: null, board_stage: null });
+              const split = reassignStageSplit(selected, bulkStageMode);
+              return (
+                <div data-testid="reassign-stage-summary" className="mt-2 text-xs text-slate-600">
+                  <p>{reassignStageSummary(split)}</p>
+                  {split.kept > 0 && <p className="mt-1 text-slate-500">Kept leads are protected from recycling for {KEEP_STAGE_PROTECTION_DAYS} days.</p>}
+                </div>
+              );
+            })()}
             <div className="mt-4 flex justify-end gap-2">
               <button
                 onClick={() => setReassignDialogOpen(false)}

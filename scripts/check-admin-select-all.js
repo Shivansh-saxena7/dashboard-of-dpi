@@ -99,6 +99,39 @@ if (!sql.includes("revoke all on function public.admin_reassign_leads(uuid[], uu
 if (/\bdrop\b/i.test(sql.replace(/--.*$/gm, ""))) problems.push(`${sqlFile}: must be additive (no drop)`);
 if (!fs.existsSync(path.join(root, "supabase/sql/2026-11-15_admin_reassign_leads_rollback.sql"))) problems.push("rollback SQL is missing");
 
+// 6) Stage mode (2026-11-15): positive leads keep their stage by default; the UI's counts use the SQL's rule.
+const { ADMIN_REASSIGN_DEFAULT_STAGE_MODE, KEEP_STAGE_PROTECTION_DAYS, isPositiveForReassign, reassignStageSplit, reassignStageSummary, reassignKeptCount } =
+  require(path.join(root, "lib/adminReassign.ts"));
+eq("default stage mode", ADMIN_REASSIGN_DEFAULT_STAGE_MODE, "auto");
+eq("protection days", KEEP_STAGE_PROTECTION_DAYS, 14);
+eq("positive: follow-up", isPositiveForReassign("NEW", "FOLLOW_UP"), true);
+eq("positive: visit", isPositiveForReassign("CONNECTED", "VISIT"), true);
+eq("positive: booking", isPositiveForReassign("CONVERTED", "BOOKING"), true);
+eq("positive: connected on leads", isPositiveForReassign("CONNECTED", "LEADS"), true);
+eq("not positive: new", isPositiveForReassign("NEW", "LEADS"), false);
+eq("not positive: not connected", isPositiveForReassign("NOT_CONNECTED", null), false);
+const mix = [{ status: "CONNECTED", board_stage: "FOLLOW_UP" }, { status: "NEW", board_stage: "LEADS" }, { status: "NOT_INTERESTED", board_stage: "LEADS" }];
+eq("split auto", reassignStageSplit(mix, "auto"), { kept: 1, reset: 2 });
+eq("split reset", reassignStageSplit(mix, "reset"), { kept: 0, reset: 3 });
+eq("summary mixed", reassignStageSummary({ kept: 1, reset: 2 }), "1 lead will keep its stage, 2 leads will be reset to New.");
+eq("summary all reset", reassignStageSummary({ kept: 0, reset: 2 }), "2 leads will be reset to New.");
+eq("summary all kept", reassignStageSummary({ kept: 3, reset: 0 }), "3 leads will keep their stage.");
+eq("kept count", reassignKeptCount({ kept: 4 }), 4);
+eq("kept count missing", reassignKeptCount(null), 0);
+if (!page.includes("p_stage_mode: bulkStageMode")) problems.push("bulk Reassign must send p_stage_mode");
+if (!page.includes("useState<AdminReassignStageMode>(ADMIN_REASSIGN_DEFAULT_STAGE_MODE)")) problems.push("stage mode must default to ADMIN_REASSIGN_DEFAULT_STAGE_MODE");
+if (!page.includes("Keep stage for positive leads (default)") || !page.includes("Reset all leads to New")) problems.push("stage selector options are missing");
+if (!page.includes("Kept leads are protected from recycling for {KEEP_STAGE_PROTECTION_DAYS} days.")) problems.push("confirm dialog must mention the protection");
+const stageSqlFile = "supabase/sql/2026-11-15_admin_reassign_stage_mode.sql";
+const stageSql = read(stageSqlFile);
+if (!stageSql.includes("create function public.admin_reassign_leads(p_lead_ids uuid[], p_to_employee_id uuid, p_reason text, p_stage_mode text)")) problems.push(`${stageSqlFile}: 4-parameter overload missing (and p_stage_mode must have no default: a default makes 3-argument calls ambiguous)`);
+if (/p_stage_mode text default/i.test(stageSql)) problems.push(`${stageSqlFile}: p_stage_mode must have no database default`);
+if (!stageSql.includes(`cardinality(v_ids) > ${ADMIN_REASSIGN_MAX_PER_CALL} then`)) problems.push(`${stageSqlFile}: server limit must match ADMIN_REASSIGN_MAX_PER_CALL`);
+if (!stageSql.includes("v_positive := coalesce(v_stage, 'LEADS') in ('FOLLOW_UP', 'VISIT', 'BOOKING') or v_status in ('CONNECTED', 'CONVERTED');")) problems.push(`${stageSqlFile}: positive rule must match isPositiveForReassign`);
+if (!stageSql.includes("revoke all on function public.admin_reassign_leads(uuid[], uuid, text, text) from public, anon;")) problems.push(`${stageSqlFile}: anon must be revoked`);
+if (/\bdrop\b/i.test(stageSql.replace(/--.*$/gm, ""))) problems.push(`${stageSqlFile}: must be additive (no drop)`);
+if (!fs.existsSync(path.join(root, "supabase/sql/2026-11-15_admin_reassign_stage_mode_rollback.sql"))) problems.push("stage mode rollback SQL is missing");
+
 if (problems.length) {
   console.error("check-admin-select-all: FAILED");
   for (const p of problems) console.error("  " + p);

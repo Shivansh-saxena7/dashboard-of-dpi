@@ -29,3 +29,34 @@ export function summarizeAdminReassignResult(data: unknown): AdminReassignSummar
   const reassigned = typeof d.reassigned === "number" ? d.reassigned : results.filter((r) => r.success).length;
   return { reassigned, failed };
 }
+
+// Stage mode (2026-11-15): the 4-parameter admin_reassign_leads (supabase/sql/2026-11-15_admin_reassign_stage_mode.sql).
+// "auto" keeps the stage of positive leads (reassign_keep_state_atomic, 14-day protection) and resets the rest;
+// "reset" resets every lead to New. The same positive rule as the SQL, so the confirm dialog's counts match.
+export type AdminReassignStageMode = "auto" | "reset";
+export const ADMIN_REASSIGN_DEFAULT_STAGE_MODE: AdminReassignStageMode = "auto";
+export const KEEP_STAGE_PROTECTION_DAYS = 14;
+
+export function isPositiveForReassign(status: string | null | undefined, boardStage: string | null | undefined): boolean {
+  return ["FOLLOW_UP", "VISIT", "BOOKING"].includes(boardStage || "LEADS") || ["CONNECTED", "CONVERTED"].includes(status || "");
+}
+
+export function reassignStageSplit(
+  leads: readonly { status?: string | null; board_stage?: string | null }[],
+  mode: AdminReassignStageMode
+): { kept: number; reset: number } {
+  const kept = mode === "auto" ? leads.filter((l) => isPositiveForReassign(l.status, l.board_stage)).length : 0;
+  return { kept, reset: leads.length - kept };
+}
+
+export function reassignStageSummary(split: { kept: number; reset: number }): string {
+  const lead = (n: number) => `${n} lead${n === 1 ? "" : "s"}`;
+  if (split.kept === 0) return `${lead(split.reset)} will be reset to New.`;
+  if (split.reset === 0) return `${lead(split.kept)} will keep ${split.kept === 1 ? "its" : "their"} stage.`;
+  return `${lead(split.kept)} will keep ${split.kept === 1 ? "its" : "their"} stage, ${lead(split.reset)} will be reset to New.`;
+}
+
+export function reassignKeptCount(data: unknown): number {
+  const kept = (data ?? {}) as { kept?: unknown };
+  return typeof kept.kept === "number" ? kept.kept : 0;
+}
