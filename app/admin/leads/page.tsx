@@ -25,7 +25,14 @@ import PageHeader from "@/components/PageHeader";
 import { splitAdminEmployeeOptions, adminEmployeeLabel } from "@/lib/adminEmployeeOptions";
 import { ADMIN_JUNK_MAX_PER_CALL, summarizeAdminJunkResult } from "@/lib/adminJunk";
 import { ADMIN_SELECT_ALL_SELECT, adminSearchTerm } from "@/lib/adminLeadsSelect";
-import { ADMIN_REASSIGN_MAX_PER_CALL, canBulkReassign, reassignConfirmTitle } from "@/lib/adminReassign";
+import {
+  ADMIN_REASSIGN_MAX_PER_CALL,
+  ADMIN_REASSIGN_RPC,
+  canBulkReassign,
+  reassignConfirmTitle,
+  summarizeAdminReassignResult
+} from "@/lib/adminReassign";
+import { logAnomaly } from "@/lib/logAnomaly";
 
 type SortOption = "NEWEST" | "OLDEST" | "SLA_URGENCY";
 
@@ -553,20 +560,22 @@ export default function AdminLeadsPage() {
     });
   }, []);
 
-  // One RPC call for the whole batch (bulk_reassign_leads_atomic),
-  // not a client-side loop — it does its own per-lead try/catch
-  // internally (a real Postgres savepoint per lead), so one bad lead
-  // in the batch can't abort the others. The per-lead results it
-  // returns are surfaced as a single summary toast rather than one
-  // toast per lead, which would be noise for a 50-lead batch.
+  // One RPC call for the whole batch (admin_reassign_leads, 2026-11-15),
+  // not a client-side loop — the server enforces Admin only, reason
+  // required, at most ADMIN_REASSIGN_MAX_PER_CALL leads and an active
+  // receiver, then reassigns each lead in its own savepoint, so one bad
+  // lead in the batch can't abort the others. The per-lead results are
+  // surfaced as a single summary toast; a partial failure is also
+  // logged to System Health.
   async function handleBulkReassign() {
     if (!canBulkReassign(selectedLeadIds.size) || !bulkTargetEmployeeId || !bulkReason.trim()) return;
 
     setBulkSubmitting(true);
     try {
-      const { data, error } = await supabase.rpc("bulk_reassign_leads_atomic", {
-        p_lead_ids: Array.from(selectedLeadIds),
-        p_new_employee_id: bulkTargetEmployeeId,
+      const ids = Array.from(selectedLeadIds);
+      const { data, error } = await supabase.rpc(ADMIN_REASSIGN_RPC, {
+        p_lead_ids: ids,
+        p_to_employee_id: bulkTargetEmployeeId,
         p_reason: bulkReason.trim()
       });
 
@@ -575,18 +584,20 @@ export default function AdminLeadsPage() {
         return;
       }
 
-      const results = (data || []) as { lead_id: string; success: boolean; error?: string }[];
-      const failed = results.filter((r) => !r.success);
+      const summary = summarizeAdminReassignResult(data);
 
-      if (failed.length === 0) {
-        toast.success(`Reassigned ${results.length} lead${results.length === 1 ? "" : "s"}.`);
+      if (summary.failed.length === 0) {
+        toast.success(`Reassigned ${summary.reassigned} lead${summary.reassigned === 1 ? "" : "s"}.`);
       } else {
-        toast.error(
-          `${results.length - failed.length} reassigned, ${failed.length} failed: ${failed
-            .map((f) => f.error)
-            .join("; ")}`,
-          { duration: 8000 }
-        );
+        toast.error(`${summary.reassigned} reassigned, ${summary.failed.length} failed: ${summary.failed.join("; ")}`, {
+          duration: 8000
+        });
+        await logAnomaly(supabase, {
+          source: "admin_reassign:partial",
+          severity: "warning",
+          message: `Bulk Reassign: ${summary.reassigned} of ${ids.length} reassigned, ${summary.failed.length} failed`,
+          context: { toEmployeeId: bulkTargetEmployeeId, failed: summary.failed.slice(0, 20) }
+        });
       }
 
       setReassignDialogOpen(false);

@@ -73,6 +73,32 @@ if (!page.includes("!canBulkReassign(selectedLeadIds.size)}")) problems.push("Re
 if (!page.includes("Select at most {ADMIN_REASSIGN_MAX_PER_CALL} leads")) problems.push('the "Select at most 500 leads" message is missing');
 if (!/async function handleBulkReassign\(\) \{\r?\n\s+if \(!canBulkReassign\(selectedLeadIds\.size\)/.test(page)) problems.push("handleBulkReassign must refuse above the limit too");
 
+// 5) Server-side limit (2026-11-15): the page calls admin_reassign_leads, which enforces the same rules in the database.
+const { ADMIN_REASSIGN_RPC, summarizeAdminReassignResult } = require(path.join(root, "lib/adminReassign.ts"));
+eq("reassign rpc", ADMIN_REASSIGN_RPC, "admin_reassign_leads");
+eq("summary all ok", summarizeAdminReassignResult({ requested: 2, reassigned: 2, results: [{ lead_id: "aaaaaaaa-1", success: true }, { lead_id: "bbbbbbbb-2", success: true }] }), { reassigned: 2, failed: [] });
+eq(
+  "summary partial",
+  summarizeAdminReassignResult({ reassigned: 1, results: [{ lead_id: "aaaaaaaa-1", success: true }, { lead_id: "bbbbbbbb-2", success: false, error: "force_reassign_lead_atomic: lead x is already assigned to that employee" }] }),
+  { reassigned: 1, failed: ["bbbbbbbb lead x is already assigned to that employee"] }
+);
+eq("summary empty answer", summarizeAdminReassignResult(null), { reassigned: 0, failed: [] });
+if (!page.includes("supabase.rpc(ADMIN_REASSIGN_RPC, {")) problems.push("bulk Reassign must call admin_reassign_leads");
+if (!page.includes("p_to_employee_id: bulkTargetEmployeeId")) problems.push("bulk Reassign must pass p_to_employee_id");
+for (const dir of ["app", "components", "lib"]) {
+  const walk = (d) => fs.readdirSync(path.join(root, d), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(`${d}/${e.name}`) : /\.tsx?$/.test(e.name) ? [`${d}/${e.name}`] : []));
+  for (const f of walk(dir)) if (read(f).includes("bulk_reassign_leads_atomic")) problems.push(`${f} still calls bulk_reassign_leads_atomic (no server limit)`);
+}
+const sqlFile = "supabase/sql/2026-11-15_admin_reassign_leads.sql";
+const sql = read(sqlFile);
+if (!sql.includes(`cardinality(v_ids) > ${ADMIN_REASSIGN_MAX_PER_CALL} then`)) problems.push(`${sqlFile}: server limit must match ADMIN_REASSIGN_MAX_PER_CALL`);
+if (!sql.includes("not coalesce(is_admin(), false)")) problems.push(`${sqlFile}: must check is_admin()`);
+if (!sql.includes("p_to_employee_id is null or not exists (select 1 from employees where id = p_to_employee_id and is_active)")) problems.push(`${sqlFile}: receiver must be active`);
+if (!sql.includes("if v_reason = '' then")) problems.push(`${sqlFile}: reason must be required`);
+if (!sql.includes("revoke all on function public.admin_reassign_leads(uuid[], uuid, text) from public, anon;")) problems.push(`${sqlFile}: anon must be revoked`);
+if (/\bdrop\b/i.test(sql.replace(/--.*$/gm, ""))) problems.push(`${sqlFile}: must be additive (no drop)`);
+if (!fs.existsSync(path.join(root, "supabase/sql/2026-11-15_admin_reassign_leads_rollback.sql"))) problems.push("rollback SQL is missing");
+
 if (problems.length) {
   console.error("check-admin-select-all: FAILED");
   for (const p of problems) console.error("  " + p);
