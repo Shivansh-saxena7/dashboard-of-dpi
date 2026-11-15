@@ -183,6 +183,14 @@ const asyncChecks = [
   })()
 ];
 
+// 8) /coordinator single Reassign (2026-11-15): same stage mode as bulk, through admin_reassign_leads; Admin only.
+const coord = read("app/coordinator/page.tsx");
+if (/rpc\("force_reassign_lead_atomic"/.test(coord)) problems.push("/coordinator Reassign must not call force_reassign_lead_atomic directly (stage would be lost)");
+if (!coord.includes("supabase.rpc(ADMIN_REASSIGN_RPC, {") || !coord.includes("p_lead_ids: [leadId],") || !coord.includes("p_stage_mode: reassignStageMode")) problems.push("/coordinator Reassign must send one lead with p_stage_mode to admin_reassign_leads");
+if (!coord.includes("useState<AdminReassignStageMode>(ADMIN_REASSIGN_DEFAULT_STAGE_MODE)")) problems.push("/coordinator stage mode must default to ADMIN_REASSIGN_DEFAULT_STAGE_MODE");
+if (!coord.includes("Keep stage for positive leads (default)") || !coord.includes('<option value="reset">Reset to New</option>')) problems.push("/coordinator stage selector options are missing");
+if (!coord.includes('{viewerRole === "admin" && (')) problems.push("/coordinator Force Reassign must stay Admin only");
+
 Promise.all(asyncChecks).then(() => {
   if (problems.length) {
     console.error("check-admin-select-all: FAILED");

@@ -23,6 +23,15 @@ import { exportSnoozesToExcel, exportSnoozesToPDF, SnoozeExportRow } from "@/lib
 import { DateRangeOption, isWithinDateRange, dateRangeFilterLabel } from "@/lib/dateRangeFilter";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 import { normalizeMobile } from "@/lib/normalizeMobile";
+import {
+  ADMIN_REASSIGN_DEFAULT_STAGE_MODE,
+  ADMIN_REASSIGN_RPC,
+  AdminReassignStageMode,
+  KEEP_STAGE_PROTECTION_DAYS,
+  isPositiveForReassign,
+  reassignKeptCount,
+  summarizeAdminReassignResult
+} from "@/lib/adminReassign";
 
 type ActiveTab = "LEADS" | "SUMMARY" | "VERIFY" | "SNOOZE" | "LEADERBOARD" | "TICKETS" | "LEGACY";
 type SortOption = "NEWEST" | "OLDEST" | "SLA_URGENCY";
@@ -199,6 +208,8 @@ export default function CoordinatorDashboard() {
   const [reassignTargetEmployeeId, setReassignTargetEmployeeId] = useState("");
   const [reassignReason, setReassignReason] = useState("");
   const [reassignSubmitting, setReassignSubmitting] = useState(false);
+  // Stage mode for this single Reassign (2026-11-15), same as the Admin Leads bulk Reassign: positive leads keep their stage.
+  const [reassignStageMode, setReassignStageMode] = useState<AdminReassignStageMode>(ADMIN_REASSIGN_DEFAULT_STAGE_MODE);
 
   const [verifying, setVerifying] = useState<string | null>(null);
   const [denyingVisitId, setDenyingVisitId] = useState<string | null>(null);
@@ -822,7 +833,7 @@ export default function CoordinatorDashboard() {
         visits: number;
         verifiedVisits: number;
         noContactClickUpdates: number;
-        noContactClickLeads: { id: string; leadHistoryId: string | null; name: string; mobile: string; status: string; action: string; evidenceAt: string | null; employeeName: string; employeeId: string }[];
+        noContactClickLeads: { id: string; leadHistoryId: string | null; name: string; mobile: string; status: string; boardStage: string; action: string; evidenceAt: string | null; employeeName: string; employeeId: string }[];
         responseTimes: number[];
       }
     >();
@@ -907,6 +918,7 @@ export default function CoordinatorDashboard() {
           name: lead.name,
           mobile: lead.mobile,
           status: lead.status,
+          boardStage: lead.board_stage || "LEADS",
           action: describeNoContactAction(lead.status, lead.board_stage || "LEADS"),
           evidenceAt,
           // Carried explicitly (not inferred from the containing
@@ -950,7 +962,7 @@ export default function CoordinatorDashboard() {
         visits: number;
         verifiedVisits: number;
         noContactClickUpdates: number;
-        noContactClickLeads: { id: string; leadHistoryId: string | null; name: string; mobile: string; status: string; action: string; evidenceAt: string | null; employeeName: string; employeeId: string }[];
+        noContactClickLeads: { id: string; leadHistoryId: string | null; name: string; mobile: string; status: string; boardStage: string; action: string; evidenceAt: string | null; employeeName: string; employeeId: string }[];
         responseTimes: number[];
       }
     >();
@@ -1074,25 +1086,36 @@ export default function CoordinatorDashboard() {
   // back through automatic recycling (recycle-stale-leads honors
   // lead_forced_removals; manual Team-Leader/Admin assignment is
   // deliberately unaffected by it).
+  // Stage mode (2026-11-15): goes through admin_reassign_leads (4 parameters) with this one lead, like the Admin
+  // Leads bulk Reassign: "auto" keeps a positive lead's stage (reassign_keep_state_atomic, 14-day protection) and
+  // resets the rest (force_reassign_lead_atomic, as before); "reset" always resets. Admin only on the server.
   async function handleForceReassign(leadId: string) {
     if (!reassignTargetEmployeeId || !reassignReason.trim() || reassignSubmitting) return;
 
     setReassignSubmitting(true);
     try {
-      const { error } = await supabase.rpc("force_reassign_lead_atomic", {
-        p_lead_id: leadId,
-        p_new_employee_id: reassignTargetEmployeeId,
-        p_reason: reassignReason.trim()
+      const { data, error } = await supabase.rpc(ADMIN_REASSIGN_RPC, {
+        p_lead_ids: [leadId],
+        p_to_employee_id: reassignTargetEmployeeId,
+        p_reason: reassignReason.trim(),
+        p_stage_mode: reassignStageMode
       });
       if (error) {
         toast.error(error.message);
         return;
       }
+      const summary = summarizeAdminReassignResult(data);
+      if (summary.reassigned !== 1) {
+        toast.error(summary.failed[0] ? `Not reassigned: ${summary.failed[0].replace(/^\S+ /, "")}` : "Not reassigned.");
+        return;
+      }
+      const kept = reassignKeptCount(data) > 0;
       setReassignOpenLeadId(null);
       setReassignTargetEmployeeId("");
       setReassignReason("");
+      setReassignStageMode(ADMIN_REASSIGN_DEFAULT_STAGE_MODE);
       await loadLeads();
-      toast.success("Lead force-reassigned");
+      toast.success(kept ? `Lead reassigned, stage kept (protected from recycling for ${KEEP_STAGE_PROTECTION_DAYS} days)` : "Lead reassigned and reset to New");
     } catch (err) {
       console.error(err);
       toast.error("Failed to reassign. Please try again.");
@@ -1716,6 +1739,7 @@ export default function CoordinatorDashboard() {
                                                             setReassignOpenLeadId(l.id);
                                                             setReassignTargetEmployeeId("");
                                                             setReassignReason("");
+                                                            setReassignStageMode(ADMIN_REASSIGN_DEFAULT_STAGE_MODE);
                                                           }}
                                                           className="text-[11px] font-bold text-red-600 hover:text-red-700"
                                                         >
@@ -1748,6 +1772,21 @@ export default function CoordinatorDashboard() {
                                                               rows={1}
                                                               className="flex-1 min-w-[160px] rounded-lg bg-slate-50 border border-slate-200 px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-red-200"
                                                             />
+                                                          </div>
+                                                          <div className="flex flex-wrap items-center gap-2">
+                                                            <FilterSelect
+                                                              value={reassignStageMode}
+                                                              onChange={(e) => setReassignStageMode(e.target.value as AdminReassignStageMode)}
+                                                              className="w-64"
+                                                            >
+                                                              <option value="auto">Keep stage for positive leads (default)</option>
+                                                              <option value="reset">Reset to New</option>
+                                                            </FilterSelect>
+                                                            <p data-testid="coordinator-reassign-stage-note" className="text-[11px] text-slate-500">
+                                                              {reassignStageMode === "auto" && isPositiveForReassign(l.status, l.boardStage)
+                                                                ? `This lead keeps its stage and is protected from recycling for ${KEEP_STAGE_PROTECTION_DAYS} days.`
+                                                                : "This lead will be reset to New."}
+                                                            </p>
                                                           </div>
                                                           <div className="flex items-center gap-2">
                                                             <button
