@@ -1089,6 +1089,13 @@ export default function LeadList({ employeeId }: LeadListProps) {
             givenContext.refresh();
           }}
           onBoardStageChanged={(stage) => handleBoardStageChanged(selectedLead.id, stage)}
+          onLeadGone={() => {
+            // Given to someone else while the card was open (2026-11-15): drop the card now, then reload the list.
+            const goneId = selectedLead.id;
+            setSelectedLeadId(null);
+            setLeads((prev) => prev.filter((l) => l.id !== goneId));
+            loadLeads();
+          }}
           onPauseChanged={(pause) => handlePauseChanged(selectedLead.id, pause)}
         />
       )}

@@ -5,7 +5,9 @@ import { motion } from "framer-motion";
 import { X, Phone, Loader2, Send, Repeat, MessageCircle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { logCallClick } from "@/lib/logCallClick";
-import { saveLeadUpdate, showSaveKeptToast } from "@/lib/resultSave";
+import { saveLeadUpdate, showLeadMovedAwayToast, showSaveKeptToast } from "@/lib/resultSave";
+import { isLeadMovedAwayError } from "@/lib/resilientLeadUpdate";
+import { logAnomaly } from "@/lib/logAnomaly";
 import { SESSION_EXPIRED_CODE } from "@/lib/sessionGuard";
 import { clearLeadUpdateDraft, draftReturnPath, loadLeadUpdateDraft, saveLeadUpdateDraft } from "@/lib/leadUpdateDraft";
 import GivenLeadContextBox from "./GivenLeadContextBox";
@@ -59,6 +61,8 @@ interface LeadDetailModalProps {
   onClose: () => void;
   onUpdated: (updates: { status?: LeadStatus; callCount: number }) => void;
   onBoardStageChanged: (boardStage: BoardStage) => void;
+  // The lead was given to someone else while this was open (2026-11-15): the list drops the card.
+  onLeadGone?: () => void;
   onPauseChanged: (pause: { pausedUntil: string | null; pauseReason: string | null; pauseNote: string | null }) => void;
 }
 
@@ -73,7 +77,7 @@ interface LeadDetailModalProps {
 // status and board_stage are deliberately independent state, per the
 // approved design — Log Update never touches board_stage, and Move
 // Lead never touches status except the one explicit case (Booking).
-export default function LeadDetailModal({ lead, givenContext, onClose, onUpdated, onBoardStageChanged, onPauseChanged }: LeadDetailModalProps) {
+export default function LeadDetailModal({ lead, givenContext, onClose, onUpdated, onBoardStageChanged, onPauseChanged, onLeadGone }: LeadDetailModalProps) {
 
   const [notes, setNotes] = useState<LeadNote[]>([]);
   const [loadingNotes, setLoadingNotes] = useState(true);
@@ -249,6 +253,22 @@ export default function LeadDetailModal({ lead, givenContext, onClose, onUpdated
       }
 
       const error = outcome.kind === "server" ? outcome.error : null;
+      if (error && isLeadMovedAwayError(error)) {
+        // Given to someone else while the card was open: never retried, never kept (it can not be saved any more),
+        // what was typed is shown with a Copy button, and the card leaves the list.
+        clearLeadUpdateDraft(lead.id);
+        setKeptDraft(false);
+        showLeadMovedAwayToast(noteText);
+        void logAnomaly(supabase, {
+          source: "lead_update:moved_away",
+          severity: "info",
+          message: "An update was refused because the lead had been given to someone else while its card was open",
+          context: { leadId: lead.id, page: window.location.pathname, hadNote: noteText.trim().length > 0 }
+        });
+        if (onLeadGone) onLeadGone();
+        else onClose();
+        return;
+      }
       if (error) {
         if (error.code === SESSION_EXPIRED_CODE) {
           saveLeadUpdateDraft(

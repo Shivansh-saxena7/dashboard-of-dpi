@@ -110,6 +110,32 @@ function run(sends, checks, options = {}) {
   if (!read("app/api/delete-employee/route.ts").includes('deleteBlockedMessage("employee", deleteEmployeeError)')) problems.push("delete-employee must name the blocking table");
   if (!read("app/hr/candidates/page.tsx").includes('deleteBlockedMessage("candidate", error)')) problems.push("candidate delete must name the blocking table");
 
+  // Lead moved away while its card was open (2026-11-15): never retried, never kept, clear message, card dropped.
+  eq("moved away: not owned", rs.isLeadMovedAwayError({ message: "log_lead_update_atomic: lead x is not owned by the calling employee" }), true);
+  eq("moved away: history not mine", rs.isLeadMovedAwayError({ message: "log_lead_update_atomic: lead_history y does not belong to the calling employee for this lead" }), true);
+  eq("moved away: terminal is not", rs.isLeadMovedAwayError({ message: "log_lead_update_atomic: lead x is already in a terminal status and cannot be updated" }), false);
+  eq("moved away: network is not", rs.isLeadMovedAwayError({ message: "TypeError: Load failed" }), false);
+  eq("moved away: no error", rs.isLeadMovedAwayError(null), false);
+  eq("moved away message", rs.LEAD_MOVED_AWAY_MESSAGE, "This lead has been reassigned to someone else, so your update was not saved.");
+  const moved = await run([{ error: { code: "P0001", message: "log_lead_update_atomic: lead x is not owned by the calling employee" }, status: 400 }], []);
+  eq("moved away: a server answer, sent once, not retried", [moved.out.kind, moved.log.sent, moved.log.waited], ["server", 1, 0]);
+  for (const f of ["components/LeadDetailModal.tsx", "components/DataDetailModal.tsx"]) {
+    const m = read(f).replace(/\r\n/g, "\n");
+    const i = m.indexOf("if (error && isLeadMovedAwayError(error)) {");
+    const block = i < 0 ? "" : m.slice(i, m.indexOf("return;", i));
+    if (i < 0) problems.push(`${f}: a moved-away refusal must be handled before the other server errors`);
+    for (const need of ["clearLeadUpdateDraft(lead.id);", "setKeptDraft(false);", "showLeadMovedAwayToast(noteText);", 'severity: "info"', "onLeadGone()"])
+      if (!block.includes(need)) problems.push(`${f}: moved-away handling must include ${need}`);
+    if (/saveLeadUpdateDraft|showSaveKeptToast/.test(block)) problems.push(`${f}: a moved-away update must not be kept for a retry`);
+  }
+  for (const f of ["components/LeadList.tsx", "components/DataList.tsx"]) {
+    if (!read(f).includes("setLeads((prev) => prev.filter((l) => l.id !== goneId));")) problems.push(`${f}: onLeadGone must drop the card`);
+  }
+  const rfSrc = read("lib/reportingFetch.ts");
+  const libRe = (read("lib/resilientLeadUpdate.ts").match(/const MOVED_AWAY = (\/[^\n]+\/i);/) || [])[1];
+  if (!libRe || !rfSrc.includes(`${libRe}.test(body.message || "")`)) problems.push("reportingFetch must skip the moved-away refusal with the same rule as isLeadMovedAwayError");
+  if (/^import /m.test(rfSrc)) problems.push("lib/reportingFetch.ts must stay import-free (Edge Functions load it)");
+
   if (problems.length) {
     console.error("check-result-save: FAILED");
     for (const p of problems) console.error("  " + p);

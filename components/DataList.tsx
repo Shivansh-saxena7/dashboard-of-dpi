@@ -531,6 +531,13 @@ export default function DataList({ employeeId }: DataListProps) {
             givenContext.refresh();
           }}
           onBoardStageChanged={(stage) => handleBoardStageChanged(selectedLead.id, stage)}
+          onLeadGone={() => {
+            // Given to someone else while the card was open (2026-11-15): drop the card now, then reload the list.
+            const goneId = selectedLead.id;
+            setSelectedLeadId(null);
+            setLeads((prev) => prev.filter((l) => l.id !== goneId));
+            loadLeads();
+          }}
         />
       )}
     </>

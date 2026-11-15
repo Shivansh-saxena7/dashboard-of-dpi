@@ -110,6 +110,16 @@ export function createReportingFetch(options: ReportingFetchOptions, baseFetch: 
     // Same for the Data page "Previously connected" box.
     if (url.includes("/rpc/get_data_previous_positive") && ["PGRST202", "42501", "42883"].includes(code)) return response;
     if (response.status === 401 && /JWT|PGRST30/i.test(`${code} ${body.message || ""}`)) return response;
+    // A result save refused because the lead was given to someone else while its card was open: the modal shows the
+    // employee a clear message and logs it as info. Not a warning: five of those would notify every Admin for something
+    // the system did on purpose. Same rule as lib/resilientLeadUpdate.ts isLeadMovedAwayError, inlined because this
+    // file has no imports (Edge Functions load it too); scripts/check-result-save.js checks the two stay identical.
+    if (
+      url.includes("/rpc/log_lead_update_atomic") &&
+      code === "P0001" &&
+      /is not owned by the calling employee|does not belong to the calling employee for this lead/i.test(body.message || "")
+    )
+      return response;
 
     const severity = code === "P0001" || code === "23505" ? "warning" : "error";
     void report(options, baseFetch, url, init, input, severity, code, body, response.status);
