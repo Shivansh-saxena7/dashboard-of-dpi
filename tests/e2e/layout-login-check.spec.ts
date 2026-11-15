@@ -1,7 +1,7 @@
 import { expect, test, type BrowserContext } from "@playwright/test";
 import { EMP, FAKE_SUPABASE, UID, mockSupabase } from "./mockSupabase";
 
-// Admin / HR / Payroll layout access check on a bad network (2026-11-14). The layout reads the session, then the
+// Admin / HR / Payroll / Coordinator layout access check on a bad network (2026-11-14). The layout reads the session, then the
 // employee's own row (name, role, is_active). A network failure on that row must not send a logged-in admin / HR /
 // Payroll user to /login; a real answer (no session, wrong role) must redirect exactly as before. Every navigation
 // is checked, not only the final URL. Pixel 7 (Chromium) and iPhone 14 (WebKit), fake Supabase.
@@ -12,7 +12,8 @@ import { EMP, FAKE_SUPABASE, UID, mockSupabase } from "./mockSupabase";
 const LAYOUTS = [
   { path: "/admin", role: "admin" },
   { path: "/hr", role: "hr" },
-  { path: "/payroll", role: "payroll" }
+  { path: "/payroll", role: "payroll" },
+  { path: "/coordinator", role: "sales_coordinator" }
 ] as const;
 const DROP_MS = 7800;
 const SETTLE_MS = 14000;

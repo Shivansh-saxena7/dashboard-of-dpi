@@ -71,12 +71,13 @@ for (const f of [...walk("app"), ...walk("components")]) {
 }
 if (!/if \(!isAuthNetworkError\(first\.error\)\) return null;/.test(src)) problems.push("a real 'not logged in' answer must still return no user");
 
-// Admin / HR / Payroll layouts: session read and employee/role query go through withNetworkRetry, a network failure
+// Admin / HR / Payroll / Coordinator layouts: session read and employee/role query go through withNetworkRetry, a network failure
 // shows the retry notice, and the access rules themselves are unchanged.
 const LAYOUTS = [
   { f: "app/admin/layout.tsx", roles: ['data.role !== "admin" && data.role !== "super_admin"'] },
   { f: "app/hr/layout.tsx", roles: ['data.role !== "hr" && data.role !== "admin" && data.role !== "super_admin"'] },
-  { f: "app/payroll/layout.tsx", roles: ['data.role !== "payroll" && data.role !== "admin" && data.role !== "super_admin"'] }
+  { f: "app/payroll/layout.tsx", roles: ['data.role !== "payroll" && data.role !== "admin" && data.role !== "super_admin"'] },
+  { f: "app/coordinator/layout.tsx", roles: ['data.role !== "admin" && data.role !== "super_admin" && data.role !== "sales_coordinator"'] }
 ];
 for (const { f, roles } of LAYOUTS) {
   const s = read(f).replace(/\r\n/g, "\n");
@@ -97,7 +98,7 @@ for (const { f, gate } of [
   { f: "app/admin/layout.tsx", gate: "{accessChecked || connectionLost ? children : " },
   { f: "app/hr/layout.tsx", gate: "{accessChecked || connectionLost ? children : " },
   { f: "app/payroll/layout.tsx", gate: "{accessChecked || connectionLost ? children : " },
-  { f: "app/coordinator/layout.tsx", gate: "{accessChecked ? children : " }
+  { f: "app/coordinator/layout.tsx", gate: "{accessChecked || connectionLost ? children : " }
 ]) {
   const s = read(f);
   if (!s.includes(gate)) problems.push(`${f}: page must render only after the access check (${gate.trim()})`);

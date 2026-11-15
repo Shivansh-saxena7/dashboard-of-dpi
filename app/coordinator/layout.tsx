@@ -9,6 +9,8 @@ import { useRouter } from "next/navigation";
 import SessionGuard from "@/components/SessionGuard";
 import Footer from "@/components/Footer";
 import NotificationModal from "@/components/NotificationModal";
+import { withNetworkRetry } from "@/lib/currentUser";
+import ConnectionRetryNotice from "@/components/ConnectionRetryNotice";
 
 // Sales Coordinator's own area — deliberately a SEPARATE route tree
 // from /admin (same precedent Team Leader already set with /team),
@@ -28,6 +30,7 @@ export default function CoordinatorLayout({
   const [name, setName] = useState("Coordinator");
   const [menuOpen, setMenuOpen] = useState(false);
   const [accessChecked, setAccessChecked] = useState(false);
+  const [connectionLost, setConnectionLost] = useState(false);
   const [employeeId, setEmployeeId] = useState<string | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -109,21 +112,32 @@ export default function CoordinatorLayout({
   }
 
   const loadCoordinator = async () => {
+    setConnectionLost(false);
 
-    const {
-      data: { session }
-    } = await supabase.auth.getSession();
+    // Network-safe (lib/currentUser.ts withNetworkRetry): a dropped connection shows a retry notice instead of /login.
+    const sessionRead = await withNetworkRetry(async () => {
+      const r = await supabase.auth.getSession();
+      return { data: r.data.session, error: r.error };
+    });
+    if (sessionRead.networkFailed) {
+      setConnectionLost(true);
+      return;
+    }
+    const session = sessionRead.data;
 
     if (!session) {
       router.replace("/login");
       return;
     }
 
-    const { data } = await supabase
-      .from("employees")
-      .select("id, name, role, is_active")
-      .eq("auth_user_id", session.user.id)
-      .single();
+    const employeeRead = await withNetworkRetry(() =>
+      supabase.from("employees").select("id, name, role, is_active").eq("auth_user_id", session.user.id).single()
+    );
+    if (employeeRead.networkFailed) {
+      setConnectionLost(true);
+      return;
+    }
+    const data = employeeRead.data;
 
     if (!data) {
       router.replace("/login");
@@ -249,9 +263,10 @@ export default function CoordinatorLayout({
 
           <div className="p-3 lg:p-5">
             {/* Page renders only after the access check passed (2026-11-15): no data query goes out with the anon key. */}
-            {accessChecked ? children : <p className="py-10 text-center text-sm text-slate-500" aria-busy="true">Checking access...</p>}
+            {accessChecked || connectionLost ? children : <p className="py-10 text-center text-sm text-slate-500" aria-busy="true">Checking access...</p>}
             <Footer />
           </div>
+          {connectionLost && <ConnectionRetryNotice onRetry={loadCoordinator} />}
         </div>
 
       </div>
