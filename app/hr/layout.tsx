@@ -45,6 +45,7 @@ export default function HrLayout({ children }: { children: React.ReactNode }) {
   const [hrName, setHrName] = useState("HR");
   const [menuOpen, setMenuOpen] = useState(false);
   const [connectionLost, setConnectionLost] = useState(false);
+  const [accessChecked, setAccessChecked] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
 
@@ -88,6 +89,7 @@ export default function HrLayout({ children }: { children: React.ReactNode }) {
     }
 
     setHrName(data.name);
+    setAccessChecked(true);
   }
 
   useEffect(() => {
@@ -164,7 +166,8 @@ export default function HrLayout({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="p-4 sm:p-6">
-            {children}
+            {/* Page renders only after the access check passed (2026-11-15): no data query goes out with the anon key. */}
+            {accessChecked || connectionLost ? children : <p className="py-10 text-center text-sm text-slate-500" aria-busy="true">Checking access...</p>}
             <Footer />
           </div>
           {connectionLost && <ConnectionRetryNotice onRetry={loadHr} />}

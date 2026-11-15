@@ -36,6 +36,7 @@ export default function PayrollLayout({ children }: { children: React.ReactNode 
   const [payrollName, setPayrollName] = useState("Payroll");
   const [menuOpen, setMenuOpen] = useState(false);
   const [connectionLost, setConnectionLost] = useState(false);
+  const [accessChecked, setAccessChecked] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
 
@@ -79,6 +80,7 @@ export default function PayrollLayout({ children }: { children: React.ReactNode 
     }
 
     setPayrollName(data.name);
+    setAccessChecked(true);
   }
 
   useEffect(() => {
@@ -153,7 +155,8 @@ export default function PayrollLayout({ children }: { children: React.ReactNode 
           </div>
 
           <div className="p-6">
-            {children}
+            {/* Page renders only after the access check passed (2026-11-15): no data query goes out with the anon key. */}
+            {accessChecked || connectionLost ? children : <p className="py-10 text-center text-sm text-slate-500" aria-busy="true">Checking access...</p>}
             <Footer />
           </div>
           {connectionLost && <ConnectionRetryNotice onRetry={loadPayroll} />}

@@ -27,6 +27,7 @@ export default function CoordinatorLayout({
 
   const [name, setName] = useState("Coordinator");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [accessChecked, setAccessChecked] = useState(false);
   const [employeeId, setEmployeeId] = useState<string | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -141,6 +142,7 @@ export default function CoordinatorLayout({
     }
 
     setName(data.name);
+    setAccessChecked(true);
     setEmployeeId(data.id);
     loadUnreadCount(data.id);
 
@@ -246,7 +248,8 @@ export default function CoordinatorLayout({
           </div>
 
           <div className="p-3 lg:p-5">
-            {children}
+            {/* Page renders only after the access check passed (2026-11-15): no data query goes out with the anon key. */}
+            {accessChecked ? children : <p className="py-10 text-center text-sm text-slate-500" aria-busy="true">Checking access...</p>}
             <Footer />
           </div>
         </div>

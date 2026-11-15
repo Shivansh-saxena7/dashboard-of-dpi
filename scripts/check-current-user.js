@@ -91,6 +91,20 @@ for (const { f, roles } of LAYOUTS) {
   if (!/is_active/.test(s) || !/supabase\.auth\.signOut\(\)/.test(s)) problems.push(`${f}: inactive check must stay`);
 }
 
+// Pre-session queries (2026-11-15): each section layout renders its page only after the access check passed, so no
+// page query goes out with the anon key on a visit without a session.
+for (const { f, gate } of [
+  { f: "app/admin/layout.tsx", gate: "{accessChecked || connectionLost ? children : " },
+  { f: "app/hr/layout.tsx", gate: "{accessChecked || connectionLost ? children : " },
+  { f: "app/payroll/layout.tsx", gate: "{accessChecked || connectionLost ? children : " },
+  { f: "app/coordinator/layout.tsx", gate: "{accessChecked ? children : " }
+]) {
+  const s = read(f);
+  if (!s.includes(gate)) problems.push(`${f}: page must render only after the access check (${gate.trim()})`);
+  if ((s.match(/setAccessChecked\(true\)/g) || []).length !== 1) problems.push(`${f}: setAccessChecked(true) exactly once, after the role check`);
+  if (/^\s*\{children\}\s*$/m.test(s)) problems.push(`${f}: bare {children} renders the page before the access check`);
+}
+
 if (problems.length) {
   console.error("check-current-user: FAILED");
   for (const p of problems) console.error("  " + p);
