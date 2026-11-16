@@ -6,6 +6,8 @@ import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
 import { isLeadTerminal } from "@/lib/isLeadTerminal";
 import MarkEmployeeLeaveModal from "@/components/MarkEmployeeLeaveModal";
+import { istDateYmd } from "@/lib/ownerLeave";
+import { ADMIN_EDIT_LEAVE_END_DATE_RPC, RETURNED_TODAY_REASON, canMarkReturnedToday, leaveEndDateProblem, previousYmd } from "@/lib/leaveEdit";
 
 import PageHeader from "@/components/PageHeader";
 interface LeavePeriod {
@@ -41,6 +43,11 @@ export default function AdminLeavePage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [monthFilter, setMonthFilter] = useState(""); // "" = all, else "YYYY-MM"
   const [markingReturnedId, setMarkingReturnedId] = useState<string | null>(null);
+  // Edit end date (2026-11-16): any leave, with a reason, recorded on the server (admin_edit_leave_end_date).
+  const [editLeaveId, setEditLeaveId] = useState<string | null>(null);
+  const [editEndDate, setEditEndDate] = useState("");
+  const [editReason, setEditReason] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
 
   useEffect(() => {
     loadLeavePeriods();
@@ -124,6 +131,40 @@ export default function AdminLeavePage() {
   // unclosed: one tap sets end_date to today via end_employee_leave_
   // atomic, rather than Admin needing to remember a separate edit
   // flow. Only ever shown for open-ended rows (see the JSX below).
+  function openEditEndDate(r: LeavePeriod, endDate: string, reason: string) {
+    setEditLeaveId(r.id);
+    setEditEndDate(endDate);
+    setEditReason(reason);
+  }
+
+  async function handleSaveEndDate(r: LeavePeriod) {
+    const problem = leaveEndDateProblem(r, editEndDate, editReason);
+    if (problem) {
+      toast.error(problem);
+      return;
+    }
+    setEditSaving(true);
+    try {
+      const { error } = await supabase.rpc(ADMIN_EDIT_LEAVE_END_DATE_RPC, {
+        p_leave_id: r.id,
+        p_end_date: editEndDate,
+        p_reason: editReason.trim()
+      });
+      if (error) {
+        toast.error((error.message || "Could not change the end date.").replace(/^admin_edit_leave_end_date: /, ""));
+        return;
+      }
+      toast.success("Leave end date updated.");
+      setEditLeaveId(null);
+      loadLeavePeriods();
+    } catch (err) {
+      console.error(err);
+      toast.error("Something went wrong changing the end date.");
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
   async function handleMarkReturned(leaveId: string) {
     setMarkingReturnedId(leaveId);
     try {
@@ -153,6 +194,8 @@ export default function AdminLeavePage() {
   }
 
   const today = new Date().toISOString().slice(0, 10);
+  // IST calendar day for Edit end date / Mark Returned Today (lib/leaveEdit.ts).
+  const istToday = istDateYmd();
 
   const visibleLeavePeriods = useMemo(() => {
     if (!monthFilter) return leavePeriods;
@@ -282,6 +325,57 @@ export default function AdminLeavePage() {
                     </div>
                   )}
                 </div>
+
+                {/* Edit end date (2026-11-16): any leave, reason required, recorded on the server. */}
+                {editLeaveId === r.id ? (
+                  <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center gap-2" data-testid={`leave-edit-${r.id}`}>
+                    <input
+                      type="date"
+                      aria-label="New end date"
+                      value={editEndDate}
+                      min={r.start_date}
+                      onChange={(e) => setEditEndDate(e.target.value)}
+                      className="h-9 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs outline-none"
+                    />
+                    <input
+                      value={editReason}
+                      onChange={(e) => setEditReason(e.target.value)}
+                      placeholder="Reason (required)"
+                      className="flex-1 min-w-[160px] h-9 rounded-lg bg-slate-50 border border-slate-200 px-2 text-xs outline-none"
+                    />
+                    <button
+                      onClick={() => handleSaveEndDate(r)}
+                      disabled={editSaving}
+                      className="h-9 px-3 rounded-lg bg-teal-600 text-white text-xs font-bold hover:bg-teal-700 disabled:opacity-60"
+                    >
+                      {editSaving ? "Saving..." : "Save end date"}
+                    </button>
+                    <button
+                      onClick={() => setEditLeaveId(null)}
+                      disabled={editSaving}
+                      className="h-9 px-3 rounded-lg bg-slate-100 text-slate-600 text-xs font-bold hover:bg-slate-200"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      onClick={() => openEditEndDate(r, r.end_date || istToday, "")}
+                      className="text-xs font-bold px-3 py-1.5 rounded-full bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
+                    >
+                      Edit end date
+                    </button>
+                    {canMarkReturnedToday(r, istToday) && (
+                      <button
+                        onClick={() => openEditEndDate(r, previousYmd(istToday), RETURNED_TODAY_REASON)}
+                        className="text-xs font-bold px-3 py-1.5 rounded-full bg-teal-600 text-white hover:bg-teal-700"
+                      >
+                        Mark Returned Today
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
