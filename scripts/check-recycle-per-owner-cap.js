@@ -70,7 +70,7 @@ if (map < 0 || map > fn.indexOf("for (const lead of sweepOrder)")) problems.push
 // The cap must not touch junk, guards, leave or the shift rule
 const junkAt = fn.indexOf("mark_lead_junk_atomic");
 if (fn.slice(Math.max(0, junkAt - 4000), junkAt).includes("recycleGivenThisSweep")) problems.push("the cap must not affect junking");
-for (const needle of ["shiftStartedEmployeeIds.has(id)", "ownerLeaveSkipReason(lead.current_owner_id, onLeaveEmployeeIds)", "restoreHoldApplies(slaStatus, lead.lead_type, protectedUntil)", "decideSiblingGuard(", "BACKLOG_RECYCLE_CAP_PER_SWEEP = 10", "SLA_BREACHED_RECYCLE_CAP_PER_SWEEP = 30"]) {
+for (const needle of ["canReceiveRecycle(id, shiftStartedEmployeeIds, returnGraceIds, onLeaveEmployeeIds)", "ownerLeaveSkipReason(lead.current_owner_id, onLeaveEmployeeIds)", "restoreHoldApplies(slaStatus, lead.lead_type, protectedUntil)", "decideSiblingGuard(", "BACKLOG_RECYCLE_CAP_PER_SWEEP = 10", "SLA_BREACHED_RECYCLE_CAP_PER_SWEEP = 30"]) {
   if (!fn.includes(needle)) problems.push(`the sweep lost an existing rule: ${needle}`);
 }
 
