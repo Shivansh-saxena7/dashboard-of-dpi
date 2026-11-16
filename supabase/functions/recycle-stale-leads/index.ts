@@ -8,7 +8,8 @@ import { calculateLeadAssignment } from "../../../lib/calculateLeadAssignment.ts
 import { isLeadTerminal } from "../../../lib/isLeadTerminal.ts";
 import { fetchAllRows } from "../../../lib/fetchAllRows.ts";
 import { logAnomaly } from "../../../lib/logAnomaly.ts";
-import { istDateYmd, ownerLeaveEvents, ownerLeaveSkipReason, ownersOnLeave } from "../../../lib/ownerLeave.ts";
+import { istDateYmd, ownerLeaveEvents, ownerLeaveSkipReason, ownersOnLeave, canReceiveRecycle } from "../../../lib/ownerLeave.ts";
+import { prevOwnerFallbackSeverity, siblingGuardSummarySeverity } from "../../../lib/sweepAnomalySeverity.ts";
 import { leaveAdjustedSlaDeadline, ownerCalendar, employeesInReturnGrace } from "../../../lib/ownerLeaveCalendar.ts";
 import { isNotificationWindowOpen, loadJobWorkingCalendar, nonWorkingStatusAt, timerCalendar, timerMsUntil } from "../../../lib/workingCalendar.ts";
 import { isWithinRecycleHours } from "../../../lib/recycleHours.ts";
@@ -450,9 +451,13 @@ serve(withMonitoring("recycle-stale-leads", async () => {
       );
     }
 
+    // On leave today, in return grace, or no started shift: never a receiver (lib/ownerLeave.ts canReceiveRecycle).
     const shiftActiveEmployees = (allActiveEmployees || []).filter((employee) =>
-      shiftStartedEmployeeIds.has(employee.id) && !returnGraceIds.has(employee.id)
+      canReceiveRecycle(employee.id, shiftStartedEmployeeIds, returnGraceIds, onLeaveEmployeeIds)
     );
+    const onLeaveReceiversExcluded = (allActiveEmployees || []).filter(
+      (employee) => shiftStartedEmployeeIds.has(employee.id) && onLeaveEmployeeIds.has(employee.id)
+    ).length;
 
     // Team-scoping lookup for recycling a Team-Leader-assigned lead
     // (see below): keyed by the CURRENT OWNER's team, not the
@@ -1378,8 +1383,7 @@ serve(withMonitoring("recycle-stale-leads", async () => {
         const groupPoolEmployees = allMatchedEmployeeIds.filter(
           (id) =>
             id !== lead.current_owner_id &&
-            shiftStartedEmployeeIds.has(id) &&
-            !returnGraceIds.has(id) &&
+            canReceiveRecycle(id, shiftStartedEmployeeIds, returnGraceIds, onLeaveEmployeeIds) &&
             (isActiveByEmployeeId.get(id) ?? false) &&
             !(forcedRemovalsByLead.get(lead.id)?.has(id))
         );
@@ -1627,7 +1631,7 @@ serve(withMonitoring("recycle-stale-leads", async () => {
       const reviewNote = bothPositive > 0 ? ` — ${bothPositive} with two positive copies held for Admin review` : "";
       await logAnomaly(supabase, {
         source: siblingGuardMode === "enforce" ? "recycle_sibling_guard" : "recycle_sibling_guard_shadow",
-        severity: failed.length > 0 ? "error" : "warning",
+        severity: siblingGuardSummarySeverity(failed.length),
         message: siblingGuardMode === "enforce"
           ? `Sibling guard acted on ${siblingGuardEvents.length} lead(s) this sweep (${failed.length} failed)${reviewNote}`
           : `Sibling guard would have acted on ${siblingGuardEvents.length} lead(s) this sweep${reviewNote}`,
@@ -1738,7 +1742,7 @@ serve(withMonitoring("recycle-stale-leads", async () => {
     if (prevOwnerFallbacks.length > 0) {
       await logAnomaly(supabase, {
         source: "recycle_prev_owner_fallback",
-        severity: "warning",
+        severity: prevOwnerFallbackSeverity(),
         message: `${prevOwnerFallbacks.length} recycled lead(s) went back to a previous owner (nobody new was eligible)`,
         context: { leads: prevOwnerFallbacks.slice(0, 20) }
       });
@@ -1766,6 +1770,7 @@ serve(withMonitoring("recycle-stale-leads", async () => {
         recycledCount,
         cappedRecycleAttempts,
         returnGrace: returnGraceIds.size,
+        onLeaveReceiversExcluded,
         perOwnerCap: { cap: RECYCLE_PER_OWNER_CAP_PER_SWEEP, skipped: perOwnerCapSkipped, given: Object.fromEntries(recycleGivenThisSweep) },
         withinRecycleHours,
         junkedCount,

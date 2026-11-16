@@ -62,8 +62,29 @@ eq("SLA NEW: leave only", oc.leaveAdjustedSlaDeadline(tue, tanu, "tanu", today, 
 // 4) Sweep guards
 const fn = read("supabase/functions/recycle-stale-leads/index.ts");
 if (!fn.includes("const returnGraceIds = employeesInReturnGrace(leaveHistoryRows, leaveToday, workingCalendar);")) problems.push("the sweep must work out who is in return grace today");
-if (!fn.includes("shiftStartedEmployeeIds.has(employee.id) && !returnGraceIds.has(employee.id)")) problems.push("round robin must leave out employees in return grace");
-if (!/shiftStartedEmployeeIds\.has\(id\) &&\s*!returnGraceIds\.has\(id\) &&/.test(fn)) problems.push("project-rule groups must leave out employees in return grace");
+// Receivers (2026-11-16): on leave today, in return grace, or no shift: never a receiver, in both pools.
+if (!fn.includes("canReceiveRecycle(employee.id, shiftStartedEmployeeIds, returnGraceIds, onLeaveEmployeeIds)")) problems.push("round robin must leave out employees in return grace or on leave");
+if (!fn.includes("canReceiveRecycle(id, shiftStartedEmployeeIds, returnGraceIds, onLeaveEmployeeIds) &&")) problems.push("project-rule groups must leave out employees in return grace or on leave");
+if (/shiftStartedEmployeeIds\.has\((employee\.)?id\) &&\s*!returnGraceIds/.test(fn)) problems.push("a receiver filter without the leave check is back");
+const ol = require(path.join(root, "lib/ownerLeave.ts"));
+const shift = new Set(["tanu", "raja", "rama"]);
+const grace = new Set(["tanu"]);
+const leave = new Set(["raja", "suraj"]);
+eq("receiver: shift, no grace, no leave", ol.canReceiveRecycle("rama", shift, grace, leave), true);
+eq("receiver: in return grace", ol.canReceiveRecycle("tanu", shift, grace, leave), false);
+eq("receiver: on leave but started a shift (Raja 16 Nov)", ol.canReceiveRecycle("raja", shift, grace, leave), false);
+eq("receiver: on leave, no shift", ol.canReceiveRecycle("suraj", shift, grace, leave), false);
+eq("receiver: no shift", ol.canReceiveRecycle("vivek", shift, grace, leave), false);
+// Routine guard summaries are info (recorded per decision in lead_guard_events); a failed guard is still an error.
+const sev = require(path.join(root, "lib/sweepAnomalySeverity.ts"));
+eq("sibling guard summary, no failure", sev.siblingGuardSummarySeverity(0), "info");
+eq("sibling guard summary, a failure", sev.siblingGuardSummarySeverity(2), "error");
+eq("previous-owner fallback summary", sev.prevOwnerFallbackSeverity(), "info");
+if (!fn.includes("severity: siblingGuardSummarySeverity(failed.length),")) problems.push("the sibling guard summary must use siblingGuardSummarySeverity");
+if (!fn.includes("severity: prevOwnerFallbackSeverity(),")) problems.push("the previous-owner fallback summary must use prevOwnerFallbackSeverity");
+if (!fn.includes("onLeaveReceiversExcluded,")) problems.push("the sweep answer must count receivers left out for leave");
+// Moved-away rule ships to the Edge Functions through the same lib/reportingFetch.ts.
+if (!read("supabase/functions/_shared/monitoring.ts").includes('from "../../../lib/reportingFetch.ts"')) problems.push("Edge monitoring must use lib/reportingFetch.ts (moved-away rule)");
 if (!fn.includes("ownerCalendar(workingCalendar, leaveHistoryRows, lead.current_owner_id, leaveToday)")) problems.push("timers must use the owner calendar (with grace by default)");
 if (!fn.includes("pickRecycleOwnerCapped(")) problems.push("the per-owner cap must stay");
 

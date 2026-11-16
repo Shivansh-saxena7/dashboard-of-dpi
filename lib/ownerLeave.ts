@@ -34,3 +34,16 @@ export function ownerLeaveSkipReason(ownerId: string | null | undefined, onLeave
 export function ownerLeaveEvents(skipped: Map<string, string[]>, ymd: string): { leadOwner: string; skipped: number; sampleLeadIds: string[]; date: string }[] {
   return [...skipped.entries()].map(([leadOwner, ids]) => ({ leadOwner, skipped: ids.length, sampleLeadIds: ids.slice(0, 5).map((id) => id.slice(0, 8)), date: ymd }));
 }
+
+// Recycle receivers (2026-11-16): someone on leave today never receives a recycled lead, even if they start a shift
+// (Tanu got 46 on her last leave day, Raja 3 on 16 Nov while on leave until 22 Nov). Also out: anyone in their return
+// grace (lib/ownerLeaveCalendar.ts) and anyone without a started shift. Pure: known-answer tested in
+// scripts/check-return-grace.js.
+export function canReceiveRecycle(
+  employeeId: string,
+  shiftStarted: ReadonlySet<string>,
+  returnGrace: ReadonlySet<string>,
+  onLeave: ReadonlySet<string>
+): boolean {
+  return shiftStarted.has(employeeId) && !returnGrace.has(employeeId) && !onLeave.has(employeeId);
+}
