@@ -1,3 +1,4 @@
+-- Rollback for the partial anon revoke APPLIED 2026-11-15 12:52 IST (live). Not run.
 -- ROLLBACK for 2026-11-15_anon_revoke_partial.sql: gives anon back TRUNCATE, TRIGGER, REFERENCES and MAINTAIN on the
 -- 87 tables and views that had them on 15 Nov.
 begin;

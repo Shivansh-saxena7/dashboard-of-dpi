@@ -1,3 +1,5 @@
+-- APPLIED 2026-11-15 12:52 IST, live (anon lost TRUNCATE, TRIGGER, REFERENCES, MAINTAIN on 87 tables/views).
+-- Rollback: 2026-11-15_anon_revoke_partial_rollback.sql.
 -- 2026-11-15. Partial anon revoke (step 1 of 2): anon loses TRUNCATE, TRIGGER, REFERENCES and MAINTAIN on every
 -- table and view in public. None of them is reachable through the API (PostgREST never issues them), and TRUNCATE
 -- would bypass RLS. SELECT / INSERT / UPDATE / DELETE, sequences and functions are NOT touched here (the full revoke

@@ -1,3 +1,5 @@
+-- Rollback to the 15 Nov state BEFORE the partial revoke (includes TRUNCATE etc.). For undoing only the full revoke of
+-- 2026-11-16 (APPLIED, live) use 2026-11-16_anon_revoke_full_rollback.sql instead. Not run.
 -- ROLLBACK for 2026-11-15_anon_revoke.sql: gives anon back exactly the grants it had on 15 Nov (captured from
 -- pg_class / pg_proc / pg_default_acl), plus the PUBLIC EXECUTE on the 6 helpers and postgres's default privileges.
 begin;

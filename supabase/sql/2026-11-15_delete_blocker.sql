@@ -1,3 +1,5 @@
+-- APPLIED 2026-11-15 12:18 IST, live (triggers employees_delete_blocker / leads_delete_blocker, delete_blocker_counts,
+-- admin_force_delete). The "DRAFT / NOT APPLIED" note below is from before the apply. Rollback: 2026-11-15_delete_blocker_rollback.sql.
 -- DRAFT / NOT APPLIED. 2026-11-15. Proposal only: apply only on the owner's "haan", from an LF copy, after a
 -- rolled-back dry run, between sweeps.
 -- Delete blocker for employees and leads. 128 foreign keys point at these two tables (108 at employees, 20 at leads).

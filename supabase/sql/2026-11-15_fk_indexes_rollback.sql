@@ -1,3 +1,4 @@
+-- Rollback for the indexes APPLIED 2026-11-15 12:17 IST (live). Not run.
 -- ROLLBACK for 2026-11-15_fk_indexes.sql: drops the three indexes (deletes become slow again, nothing else changes).
 begin;
 

@@ -1,3 +1,8 @@
+-- APPLIED 2026-11-16 14:33 IST, live (full anon revoke, on top of the partial revoke of 15 Nov): anon has no grant on any
+-- of the 91 public relations (82 tables, 5 views, 4 sequences), no EXECUTE on the 6 RLS helpers (PUBLIC neither),
+-- and no default privileges in public. The "DRAFT / NOT APPLIED" note below is from before the apply.
+-- Rollback: 2026-11-16_anon_revoke_full_rollback.sql (back to the state just before this revoke, i.e. after the
+-- partial revoke). 2026-11-15_anon_revoke_rollback.sql goes further back, to 15 Nov before the partial revoke.
 -- DRAFT / NOT APPLIED. 2026-11-15. Apply only on the owner's "haan": LF copy (git cat-file -p), rolled-back dry run
 -- first, between sweeps. Rollback: 2026-11-15_anon_revoke_rollback.sql (restores the exact grants captured on 15 Nov).
 -- Defense in depth for the anon role (no login). Today anon has every privilege (incl. TRUNCATE) on 87 public tables

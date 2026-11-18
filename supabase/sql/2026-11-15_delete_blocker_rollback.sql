@@ -1,3 +1,4 @@
+-- Rollback for the delete blocker APPLIED 2026-11-15 12:18 IST (live). Not run.
 -- ROLLBACK for 2026-11-15_delete_blocker.sql (DRAFT): removes the two triggers and the three functions. Deletes then
 -- behave exactly as before (NO ACTION foreign keys refuse, CASCADE ones delete linked rows).
 begin;

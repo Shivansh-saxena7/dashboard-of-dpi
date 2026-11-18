@@ -1,0 +1,105 @@
+-- Rollback for the full anon revoke APPLIED 2026-11-16 14:33 IST (live): the exact anon grants captured live just before
+-- it (91 relations, after the partial revoke). Not run.
+-- ROLLBACK for the full anon revoke (2026-11-16): gives anon back exactly the grants it had just before it
+-- (after the partial revoke of 15 Nov: no TRUNCATE / TRIGGER / REFERENCES / MAINTAIN), captured live at 14:20 on 16 Nov:
+-- 91 relations, EXECUTE on the 6 RLS helpers for PUBLIC and anon, and postgres's default privileges in public.
+begin;
+
+grant delete, insert, select, update on table public.hrms_attendance_overrides to anon;
+grant delete, insert, select, update on table public.employee_commission_plan_assignments to anon;
+grant delete, insert, select, update on table public.notifications_templates to anon;
+grant delete, insert, select, update on table public.employees to anon;
+grant select, update, usage on sequence public.notification_id_seq to anon;
+grant delete, insert, select, update on table public.hr_documents to anon;
+grant delete, insert, select, update on table public.payroll_condition_rules to anon;
+grant delete, insert, select, update on table public.project_rule_pointers to anon;
+grant delete, insert, select, update on table public.tracking to anon;
+grant delete, insert, select, update on table public.payroll_condition_rule_tiers to anon;
+grant delete, insert, select, update on table public.employee_payroll_rule_assignments to anon;
+grant delete, insert, select, update on table public.posts to anon;
+grant select, update, usage on sequence public.notifications_templates_id_seq to anon;
+grant delete, insert, select, update on table public.employee_monthly_performance_results to anon;
+grant delete, insert, select, update on table public.backup_run_log to anon;
+grant delete, insert, select, update on table public.cost_sheet_settings to anon;
+grant delete, insert, select, update on table public.meta_capi_events_log to anon;
+grant delete, insert, select, update on table public.employee_attendance_deduction_rule_assignments to anon;
+grant delete, insert, select, update on table public.employee_monthly_attendance_deduction_results to anon;
+grant delete, insert, select, update on table public.project_exclusion_rules to anon;
+grant delete, insert, select, update on table public.employee_advances to anon;
+grant delete, insert, select, update on table public.advance_adjustments to anon;
+grant delete, insert, select, update on table public.employee_advances_with_balance to anon;
+grant delete, insert, select, update on table public.system_anomaly_log to anon;
+grant delete, insert, select, update on table public.company_sim_assignments to anon;
+grant select, update, usage on sequence public.lead_guard_events_id_seq to anon;
+grant delete, insert, select, update on table public.site_visits to anon;
+grant delete, insert, select, update on table public.stuck_leads to anon;
+grant delete, insert, select, update on table public.hrms_settings to anon;
+grant delete, insert, select, update on table public.legacy_numbers to anon;
+grant delete, insert, select, update on table public.legacy_import_batches to anon;
+grant delete, insert, select, update on table public.tickets to anon;
+grant delete, insert, select, update on table public.lead_transfer_requests to anon;
+grant delete, insert, select, update on table public.ticket_categories to anon;
+grant delete, insert, select, update on table public.project_assignment_rules to anon;
+grant delete, insert, select, update on table public.teams to anon;
+grant delete, insert, select, update on table public.lead_history to anon;
+grant delete, insert, select, update on table public.attendance to anon;
+grant delete, insert, select, update on table public.lead_notes to anon;
+grant delete, insert, select, update on table public.leads to anon;
+grant delete, insert, select, update on table public.asset_share_log to anon;
+grant delete, insert, select, update on table public.candidates to anon;
+grant delete, insert, select, update on table public.project_asset_groups to anon;
+grant delete, insert, select, update on table public.project_assets to anon;
+grant delete, insert, select, update on table public.project_aliases to anon;
+grant delete, insert, select, update on table public.candidate_interviews to anon;
+grant delete, insert, select, update on table public.legacy_lead_conversions to anon;
+grant delete, insert, select, update on table public.attendance_shares to anon;
+grant delete, insert, select, update on table public.cron_heartbeats to anon;
+grant delete, insert, select, update on table public.employee_compensation to anon;
+grant delete, insert, select, update on table public.lead_duplicate_overrides to anon;
+grant delete, insert, select, update on table public.employee_payroll_details to anon;
+grant delete, insert, select, update on table public.employee_creation_requests to anon;
+grant delete, insert, select, update on table public.attendance_upload_batches to anon;
+grant delete, insert, select, update on table public.payroll_slip_batch_status to anon;
+grant delete, insert, select, update on table public.lead_team_reservations to anon;
+grant delete, insert, select, update on table public.team_notes to anon;
+grant delete, insert, select, update on table public.bookings to anon;
+grant delete, insert, select, update on table public.commission_plans to anon;
+grant delete, insert, select, update on table public.commission_plan_tiers to anon;
+grant delete, insert, select, update on table public.employee_leave_periods to anon;
+grant delete, insert, select, update on table public.csv_import_mappings to anon;
+grant delete, insert, select, update on table public.lead_forced_removals to anon;
+grant delete, insert, select, update on table public.csv_import_batches to anon;
+grant delete, insert, select, update on table public.no_contact_click_remarks to anon;
+grant delete, insert, select, update on table public.attendance_gap_nudge_log to anon;
+grant delete, insert, select, update on table public.commission_ledger to anon;
+grant delete, insert, select, update on table public.shift_day_overrides to anon;
+grant delete, insert, select, update on table public.expenses to anon;
+grant delete, insert, select, update on table public.hr_document_templates to anon;
+grant delete, insert, select, update on table public.notification to anon;
+grant delete, insert, select, update on table public.attendance_deduction_rules to anon;
+grant delete, insert, select, update on table public.meta_datasets to anon;
+grant delete, insert, select, update on table public.personal_lead_block_log to anon;
+grant delete, insert, select, update on table public.lead_merge_audit to anon;
+grant delete, insert, select, update on table public.sim_assignment_history to anon;
+grant delete, insert, select, update on table public.lead_snooze_log to anon;
+grant delete, insert, select, update on table public.leaderboard_popup_views to anon;
+grant delete, insert, select, update on table public.employee_project_allowlist to anon;
+grant delete, insert, select, update on table public.booking_requests to anon;
+grant delete, insert, select, update on table public.projects to anon;
+grant delete, insert, select, update on table public.non_working_periods to anon;
+grant delete, insert, select, update on table public.non_working_periods_audit to anon;
+grant delete, insert, select, update on table public.contact_click_log to anon;
+grant delete, insert, select, update on table public.lead_engine_settings to anon;
+grant delete, insert, select, update on table public.leads_distinct_sources to anon;
+grant delete, insert, select, update on table public.leads_distinct_projects to anon;
+grant delete, insert, select, update on table public.employee_sla_breach_history to anon;
+grant select, update, usage on sequence public.non_working_period_shifts_id_seq to anon;
+grant delete, insert, select, update on table public.non_working_period_shifts to anon;
+grant delete, insert, select, update on table public.lead_activity_log to anon;
+
+grant execute on function public.current_employee_department(), public.current_employee_id(), public.current_employee_role(), public.current_employee_team_id(), public.is_admin(), public.is_super_admin() to public, anon;
+
+alter default privileges for role postgres in schema public grant all on tables to anon;
+alter default privileges for role postgres in schema public grant select, update, usage on sequences to anon;
+
+commit;

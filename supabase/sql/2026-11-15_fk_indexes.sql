@@ -1,3 +1,4 @@
+-- APPLIED 2026-11-15 12:17 IST, live (3 indexes). Applied BEFORE the delete blocker. Rollback: 2026-11-15_fk_indexes_rollback.sql.
 -- 2026-11-15. Additive: three indexes on foreign-key columns that point at leads and had none, so every lead delete
 -- (CSV batch delete, delete blocker counts) scanned the whole table. Apply BEFORE 2026-11-15_delete_blocker.sql,
 -- from an LF copy, between sweeps. Rollback: 2026-11-15_fk_indexes_rollback.sql.
