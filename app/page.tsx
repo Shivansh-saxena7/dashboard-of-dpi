@@ -13,6 +13,8 @@ import PostsTrackingView from "@/components/PostsTrackingView";
 import ResumeCallStrip from "@/components/ResumeCallStrip";
 import { takeColdStartResume } from "@/lib/activeCall";
 import { rememberEmployeeId } from "@/lib/clientIdentity";
+import EmployeeHomeP1 from "@/components/EmployeeHomeP1";
+import { homeModeAllows } from "@/lib/employeeHome";
 
 export default function Page() {
 
@@ -20,6 +22,9 @@ const router = useRouter();
 
 const [employee,setEmployee]=useState<any>(null);
 const [authChecked,setAuthChecked]=useState(false);
+// Employee Home Phase 1 (2026-11-18): lead_engine_settings.employee_home_mode. Off (the old Home) unless the setting
+// says otherwise; a missing column, a failed read or a slow answer (over 2 s) all mean off.
+const [newHome,setNewHome]=useState(false);
 
 
 // ✅ AUTH CHECK
@@ -35,6 +40,12 @@ router.replace("/login");
 return;
 
 }
+
+const homeModePromise: Promise<Record<string, unknown> | null> = Promise.race([
+  Promise.resolve(supabase.from("lead_engine_settings").select("*").eq("id", 1).maybeSingle())
+    .then(({ data: settings }) => (settings as Record<string, unknown> | null) ?? null, () => null),
+  new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000))
+]);
 
 const {data,error}=await supabase
 
@@ -105,6 +116,9 @@ if (resumePath) {
 
 }
 
+const homeSettings = await homeModePromise;
+setNewHome(homeModeAllows(homeSettings, data.id));
+
 setEmployee(data);
 
 setAuthChecked(true);
@@ -147,7 +161,11 @@ to-blue-100
   <StartShiftCard employeeId={employee.id} />
 )}
 
-<PostsTrackingView employeeId={employee?.id} employeeName={employee?.name} />
+{newHome && employee?.id ? (
+  <EmployeeHomeP1 employeeId={employee.id} employeeName={employee?.name} />
+) : (
+  <PostsTrackingView employeeId={employee?.id} employeeName={employee?.name} />
+)}
 
 <Footer />
 </main>

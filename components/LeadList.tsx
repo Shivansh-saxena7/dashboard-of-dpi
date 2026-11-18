@@ -23,11 +23,11 @@ import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
 import { istDateStringToRangeStartUTC, istDateStringToRangeEndUTC } from "@/lib/istTime";
 import { useLeadSiblings } from "@/lib/useLeadSiblings";
 import { leadOrigin, LeadOrigin } from "@/lib/recycleReasonDisplay";
-import { recyclingTomorrowCutoff } from "@/lib/recyclingTomorrow";
 import { useWorkingCalendar } from "@/lib/useWorkingCalendar";
 import type { WorkingCalendar } from "@/lib/workingCalendar";
 import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 import { isUntouchedInCurrentAssignment } from "@/lib/newLeadFilter";
+import { recyclingTomorrowCutoffFor as sharedRecyclingTomorrowCutoffFor, stageCounts, tabFromParam } from "@/lib/employeeHome";
 import { useGivenLeadContext } from "@/lib/useGivenLeadContext";
 import { GIVEN_BY_ADMIN_FILTER, givenFilterCount, givenFilterLeads } from "@/lib/givenLeadContext";
 import { NEEDS_CALL_FILTER, needsCallFilterLeads, needsCallOptionText } from "@/lib/needsYourCall";
@@ -119,25 +119,9 @@ function FilterSelect({
 // Recycling Tomorrow cutoff for a loaded lead (null = not in the filter).
 // Same lead shape the Recycling Soon filter builds for getRecycleCutoff.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+// Shared with the employee Home tiles (lib/employeeHome.ts) so the Home number and this list agree.
 function recyclingTomorrowCutoffFor(lead: any, workingCalendar: WorkingCalendar | null): Date | null {
-  const h = lead.lead_history[0];
-  return recyclingTomorrowCutoff(
-    {
-      status: lead.status,
-      sla_deadline: lead.sla_deadline,
-      recycle_count: lead.recycle_count,
-      board_stage: lead.board_stage,
-      paused_until: h?.paused_until ?? null,
-      last_activity_at: h?.last_activity_at ?? null,
-      pause_reason: h?.pause_reason ?? null,
-      assigned_at: h?.assigned_at ?? null
-    },
-    h?.outcome_at ?? null,
-    h?.call_count ?? 0,
-    Boolean(lead.is_personal_lead),
-    Date.now(),
-    workingCalendar
-  );
+  return sharedRecyclingTomorrowCutoffFor(lead, workingCalendar);
 }
 
 export default function LeadList({ employeeId }: LeadListProps) {
@@ -238,10 +222,18 @@ export default function LeadList({ employeeId }: LeadListProps) {
     if (filterParam === "recycling-tomorrow") {
       setRecyclingTomorrowFilter(true);
     }
+    // Employee Home tiles (2026-11-18): ?filter=new is the Status = New filter, ?tab= opens one board tab.
+    if (filterParam === "new") {
+      setStatusFilter("NEW");
+    }
+    const tabParam = tabFromParam(searchParams.get("tab"));
+    if (tabParam) {
+      setActiveTab(tabParam);
+    }
     if (openLeadId) {
       setSelectedLeadId(openLeadId);
     }
-    if (openLeadId || filterParam) {
+    if (openLeadId || filterParam || tabParam) {
       router.replace("/leads");
     }
   }, [loading, searchParams, router]);
@@ -506,16 +498,8 @@ export default function LeadList({ employeeId }: LeadListProps) {
     if (!givenContext.enabled && statusFilter === GIVEN_BY_ADMIN_FILTER) setStatusFilter("");
   }, [givenContext.enabled, statusFilter]);
 
-  const tabCounts = useMemo(() => {
-    const counts: Record<BoardStage, number> = { LEADS: 0, FOLLOW_UP: 0, VISIT: 0, BOOKING: 0 };
-
-    leads.forEach((lead) => {
-      const stage = (lead.board_stage as BoardStage) || "LEADS";
-      counts[stage] = (counts[stage] || 0) + 1;
-    });
-
-    return counts;
-  }, [leads]);
+  // Same counting as the employee Home "My leads" card (lib/employeeHome.ts).
+  const tabCounts = useMemo(() => stageCounts(leads) as Record<BoardStage, number>, [leads]);
 
   const projectOptions = useMemo(
     () => Array.from(new Set(leads.map((l) => l.project).filter(Boolean))) as string[],

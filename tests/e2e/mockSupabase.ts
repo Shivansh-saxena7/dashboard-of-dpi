@@ -93,10 +93,14 @@ export interface MockState {
   // Network failure switches (result-save tests): abort the next N saves; or save, then lose the answer.
   failUpdates: number;
   landThenLose: number;
+  // The lead_engine_settings row the app reads (tests add e.g. employee_home_mode); a copy of the default per test.
+  settings: Record<string, unknown>;
+  // get_employee_work_report answer; null = the generic empty answer.
+  workReport: Record<string, unknown> | null;
 }
 
 export async function mockSupabase(context: BrowserContext): Promise<MockState> {
-  const state: MockState = { leads: makeLeads("LEAD", 60), data: makeLeads("DATA", 40), anomalies: [], updates: [], failUpdates: 0, landThenLose: 0 };
+  const state: MockState = { leads: makeLeads("LEAD", 60), data: makeLeads("DATA", 40), anomalies: [], updates: [], failUpdates: 0, landThenLose: 0, settings: { ...LEAD_ENGINE_SETTINGS }, workReport: null };
   const employee = { id: EMP, auth_user_id: UID, name: "Test Employee", role: "employee", department: "sales", is_active: true, team_id: null };
 
   const json = (route: Route, body: unknown, status = 200, headers: Record<string, string> = {}) =>
@@ -116,7 +120,7 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
     if (p.startsWith("/auth/v1")) return json(route, {});
 
     if (p === "/rest/v1/employees") return json(route, wantsObject ? employee : [employee]);
-    if (p === "/rest/v1/lead_engine_settings") return json(route, wantsObject ? LEAD_ENGINE_SETTINGS : [LEAD_ENGINE_SETTINGS]);
+    if (p === "/rest/v1/lead_engine_settings") return json(route, wantsObject ? state.settings : [state.settings]);
     if (p === "/rest/v1/hrms_settings") return json(route, wantsObject ? HRMS_SETTINGS : [HRMS_SETTINGS]);
     if (p === "/rest/v1/leads" && method === "GET") {
       const type = url.searchParams.get("lead_type");
@@ -168,6 +172,7 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
       }
       return json(route, null);
     }
+    if (p === "/rest/v1/rpc/get_employee_work_report" && state.workReport) return json(route, state.workReport);
     if (p === "/rest/v1/rpc/get_working_calendar") return json(route, { timezone: "Asia/Kolkata", weekly_off_day: 2, ranges: [], timers_enabled: true });
     if (p.startsWith("/rest/v1/rpc/")) return json(route, wantsObject ? {} : []);
     if (p === "/rest/v1/lead_history" && method === "GET") {
