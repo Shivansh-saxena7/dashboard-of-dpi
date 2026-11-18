@@ -48,8 +48,11 @@ if (!list.replace(/\s+/g, " ").includes("if (openLeadId) { setSelectedLeadId(ope
 if (!/filterParam === "new"/.test(list) || !/tabFromParam\(searchParams\.get\("tab"\)\)/.test(list)) problems.push("LeadList must read ?filter=new and ?tab=");
 const page = read("app/page.tsx");
 if (!/newHome && employee\?\.id \? \(\s*<EmployeeHomeP1[\s\S]*?\) : \(\s*<PostsTrackingView/.test(page)) problems.push("app/page.tsx: flag off must render the old PostsTrackingView");
-if (!/homeModeAllows\(homeSettings, data\.id\)/.test(page)) problems.push("app/page.tsx must decide the Home with homeModeAllows");
-for (const f of ["components/EmployeeHomeP1.tsx", "lib/useEmployeeHome.ts", "lib/employeeHome.ts"]) {
+if (!/useEmployeeHomeMode\(employee\?\.id\)/.test(page)) problems.push("app/page.tsx must decide the Home with useEmployeeHomeMode");
+if (/lead_engine_settings/.test(page)) problems.push("app/page.tsx: the login check must not wait for lead_engine_settings (old Home renders at once)");
+const mode = read("lib/useEmployeeHomeMode.ts");
+if (!/HOME_MODE_TIMEOUT_MS = 2000/.test(mode) || !/sessionStorage/.test(mode) || !/homeModeAllows\(/.test(mode)) problems.push("lib/useEmployeeHomeMode.ts: 2 s timeout, remembered per tab, decided by homeModeAllows");
+for (const f of ["components/EmployeeHomeP1.tsx", "lib/useEmployeeHome.ts", "lib/employeeHome.ts", "lib/useEmployeeHomeMode.ts"]) {
   const s = read(f);
   if (/setInterval\(/.test(s)) problems.push(`${f}: no interval polling on Home`);
   if (/purple|violet|fuchsia|#8b5cf6|#7c3aed|#a855f7/i.test(s)) problems.push(`${f}: no purple / violet`);

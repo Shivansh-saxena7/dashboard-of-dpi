@@ -97,10 +97,12 @@ export interface MockState {
   settings: Record<string, unknown>;
   // get_employee_work_report answer; null = the generic empty answer.
   workReport: Record<string, unknown> | null;
+  // Delay (ms) before lead_engine_settings answers: a slow settings read must not hold the page.
+  settingsDelayMs: number;
 }
 
 export async function mockSupabase(context: BrowserContext): Promise<MockState> {
-  const state: MockState = { leads: makeLeads("LEAD", 60), data: makeLeads("DATA", 40), anomalies: [], updates: [], failUpdates: 0, landThenLose: 0, settings: { ...LEAD_ENGINE_SETTINGS }, workReport: null };
+  const state: MockState = { leads: makeLeads("LEAD", 60), data: makeLeads("DATA", 40), anomalies: [], updates: [], failUpdates: 0, landThenLose: 0, settings: { ...LEAD_ENGINE_SETTINGS }, workReport: null, settingsDelayMs: 0 };
   const employee = { id: EMP, auth_user_id: UID, name: "Test Employee", role: "employee", department: "sales", is_active: true, team_id: null };
 
   const json = (route: Route, body: unknown, status = 200, headers: Record<string, string> = {}) =>
@@ -120,7 +122,11 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
     if (p.startsWith("/auth/v1")) return json(route, {});
 
     if (p === "/rest/v1/employees") return json(route, wantsObject ? employee : [employee]);
-    if (p === "/rest/v1/lead_engine_settings") return json(route, wantsObject ? state.settings : [state.settings]);
+    if (p === "/rest/v1/lead_engine_settings") {
+      if (state.settingsDelayMs > 0) await new Promise((r) => setTimeout(r, state.settingsDelayMs));
+      // The page may have moved on while the answer was held back.
+      return json(route, wantsObject ? state.settings : [state.settings]).catch(() => {});
+    }
     if (p === "/rest/v1/hrms_settings") return json(route, wantsObject ? HRMS_SETTINGS : [HRMS_SETTINGS]);
     if (p === "/rest/v1/leads" && method === "GET") {
       const type = url.searchParams.get("lead_type");

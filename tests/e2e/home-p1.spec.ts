@@ -71,14 +71,28 @@ const EXPECTED = { LEADS: 47, FOLLOW_UP: 9, VISIT: 3, BOOKING: 1, total: 60, new
 let state: MockState;
 let rt: FakeRealtime;
 let apiData: string[];
+let apiDataAt: number[];
+let loginCheckAt: number[];
+let settingsAnsweredAt: number[];
 test.beforeEach(async ({ context }) => {
   state = await mockSupabase(context);
   rt = await fakeRealtime(context);
   shapeLeads(state);
   state.workReport = { calls: 18, connected: 6, results_saved: 15, followUps: 3, visits: 1 };
   apiData = [];
+  apiDataAt = [];
+  loginCheckAt = [];
+  settingsAnsweredAt = [];
   context.on("request", (req) => {
-    if (new URL(req.url()).pathname.startsWith("/api/data")) apiData.push(req.url());
+    if (new URL(req.url()).pathname.startsWith("/api/data")) {
+      apiData.push(req.url());
+      apiDataAt.push(Date.now());
+    }
+  });
+  context.on("response", (res) => {
+    const url = decodeURIComponent(res.url());
+    if (url.includes("/rest/v1/employees") && url.includes("auth_user_id=eq.")) loginCheckAt.push(Date.now());
+    if (url.includes("/rest/v1/lead_engine_settings")) settingsAnsweredAt.push(Date.now());
   });
 });
 
@@ -127,7 +141,10 @@ for (const settings of [{ employee_home_mode: "on" }, { employee_home_mode: "adm
       const box = await page.getByTestId(id).boundingBox();
       expect(box && box.height).toBeGreaterThanOrEqual(44);
     }
-    // No social polling while collapsed (the old card asked /api/data at once and every minute).
+    // First visit of the tab: the old Home is up before the flag is known, so its social card may ask /api/data once
+    // before the switch. After that, nothing while collapsed (the old card asked at once and every minute).
+    expect(apiData.length).toBeLessThanOrEqual(1);
+    apiData.length = 0;
     await page.waitForTimeout(3000);
     expect(apiData).toHaveLength(0);
     // Exactly one Home channel (React dev mode joins the same topic twice; the topic is one).
@@ -183,4 +200,53 @@ test("realtime: a change to the employee's lead updates the tiles, no reload", a
   h.first_call_at = new Date().toISOString();
   rt.push(homeTopic, binding, { id: h.id, employee_id: EMP });
   await expect(value(page, "tile-new")).toHaveText(String(EXPECTED.newCount - 1));
+});
+
+// Risk 1 (2026-11-18): the flag is read in the background, the old Home never waits for it.
+test("slow settings (5 s), flag off: the old Home is up within 0.5 s of the login check", async ({ page }) => {
+  state.settingsDelayMs = 5000;
+  await openHome(page);
+  await expect.poll(() => apiDataAt.length).toBeGreaterThan(0);
+  const shown = apiDataAt[0];
+  const check = Math.max(...loginCheckAt.filter((t) => t <= shown));
+  console.log(`old Home ${shown - check} ms after the login check, settings still pending`);
+  expect(shown - check).toBeLessThan(500);
+  expect(settingsAnsweredAt.filter((t) => t <= shown)).toHaveLength(0);
+  await expect(page.getByTestId("employee-home-p1")).toHaveCount(0);
+});
+
+test("flag on, settings 1 s late: old Home first, then the new Home in place (no page reload)", async ({ page }) => {
+  state.settingsDelayMs = 1000;
+  state.settings.employee_home_mode = "on";
+  await openHome(page);
+  await page.evaluate(() => ((window as unknown as { __samePage?: number }).__samePage = 1));
+  await expect(page.getByTestId("employee-home-p1")).toBeVisible();
+  await expect(value(page, "tile-new")).toHaveText(String(EXPECTED.newCount));
+  expect(await page.evaluate(() => (window as unknown as { __samePage?: number }).__samePage)).toBe(1);
+  await expect(page.getByText("Today's Shift").first()).toBeVisible();
+});
+
+test("flag on, settings 5 s late: stays on the old Home (2 s timeout), nothing remembered, next visit asks again", async ({ page }) => {
+  state.settingsDelayMs = 5000;
+  state.settings.employee_home_mode = "on";
+  await openHome(page);
+  await expect.poll(() => apiData.length).toBeGreaterThan(0);
+  await page.waitForTimeout(6000);
+  await expect(page.getByTestId("employee-home-p1")).toHaveCount(0);
+  await expect(page.getByText("Today's Shift").first()).toBeVisible();
+  state.settingsDelayMs = 0;
+  await page.reload();
+  await expect(page.getByTestId("employee-home-p1")).toBeVisible();
+});
+
+test("remembered on: the next visit shows the new Home at once, the social card is never mounted", async ({ page }) => {
+  state.settings.employee_home_mode = "on";
+  await openHome(page);
+  await expect(page.getByTestId("employee-home-p1")).toBeVisible();
+  apiData.length = 0;
+  state.settingsDelayMs = 5000;
+  await page.reload();
+  await expect(page.getByTestId("employee-home-p1")).toBeVisible({ timeout: 1500 });
+  await page.waitForTimeout(2000);
+  expect(apiData).toHaveLength(0);
 });

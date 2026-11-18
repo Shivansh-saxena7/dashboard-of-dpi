@@ -43,11 +43,6 @@ export interface HomeLead {
   lead_history?: HomeLeadHistory[] | null;
 }
 
-export function stageOf(lead: { board_stage?: string | null }): HomeStage {
-  const s = lead.board_stage || "LEADS";
-  return (HOME_STAGES as string[]).includes(s) ? (s as HomeStage) : "LEADS";
-}
-
 // Same as the /leads tab badges.
 export function stageCounts(leads: { board_stage?: string | null }[]): Record<HomeStage, number> {
   const counts: Record<HomeStage, number> = { LEADS: 0, FOLLOW_UP: 0, VISIT: 0, BOOKING: 0 };
@@ -58,15 +53,16 @@ export function stageCounts(leads: { board_stage?: string | null }[]): Record<Ho
   return counts;
 }
 
-// The lead's "recycles within a working day" cutoff, as the /leads "Recycling tomorrow" filter computes it.
+// The lead's "recycles within a working day" cutoff, as the /leads "Recycling tomorrow" filter computes it. Field for
+// field what LeadList passed before 2026-11-18 (raw values, no defaults), so the answer cannot drift.
 export function recyclingTomorrowCutoffFor(lead: HomeLead, calendar: WorkingCalendar | null, now: number = Date.now()): Date | null {
   const h = lead.lead_history?.[0];
   return recyclingTomorrowCutoff(
     {
       status: lead.status,
-      sla_deadline: lead.sla_deadline ?? null,
-      recycle_count: lead.recycle_count ?? 0,
-      board_stage: lead.board_stage ?? null,
+      sla_deadline: lead.sla_deadline,
+      recycle_count: lead.recycle_count,
+      board_stage: lead.board_stage,
       paused_until: h?.paused_until ?? null,
       last_activity_at: h?.last_activity_at ?? null,
       pause_reason: h?.pause_reason ?? null,
