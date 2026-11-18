@@ -153,12 +153,14 @@ to-blue-100
 )}
 
 {newHome && employee?.id ? (
-  <EmployeeHomeP1 employeeId={employee.id} employeeName={employee?.name} />
+  <EmployeeHomeP1 employeeId={employee.id} employeeName={employee?.name} role={employee?.role} teamId={employee?.team_id} />
 ) : (
   <PostsTrackingView employeeId={employee?.id} employeeName={employee?.name} />
 )}
 
 <Footer />
+{/* Room for the new Home sticky "Start with next lead" button. */}
+{newHome && <div aria-hidden className="h-24" />}
 </main>
 
 );

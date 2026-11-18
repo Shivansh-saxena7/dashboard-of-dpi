@@ -177,7 +177,8 @@ if (process.argv[2] === "--live") {
         first_whatsapp_at: pick([null, null, null, iso(assigned + 2 * H)]),
         last_activity_at: pick([iso(lastAct), iso(lastAct), null]),
         paused_until: pick([null, null, iso(base + (rnd() - 0.3) * 4 * D)]),
-        pause_reason: pick(pauses)
+        pause_reason: pick(pauses),
+        last_call_click_at: touched ? pick([null, iso(lastAct), iso(lastAct - H), iso(lastAct + H)]) : null
       }]
     };
   };
@@ -201,6 +202,33 @@ if (process.argv[2] === "--live") {
   const all = Array.from({ length: 5000 }, () => makeLead(n++));
   const big = compare("one 5000-lead list", all, calendars[4], base);
   console.log(`random: ${totals.leads} leads x ${calendars.length} calendars x 4 clocks; recycling hits ${totals.recycling}, New hits ${totals.newCount}, overdue hits ${totals.overdue}, visit-due hits ${totals.visits}; one list of 5000: ${JSON.stringify(big)}`);
+
+  // Phase 3: the queue holds every lead of its own rules once, in rule order, and Up next is its head.
+  const qctx = { calendar: calendars[1], reminders: new Map(all.filter((_, i) => i % 11 === 0).map((l, i) => [l.id, base + i * 60e3])), now: base };
+  const q = eh.queueOrder(all, qctx);
+  const ids = q.map((x) => x.lead.id);
+  if (new Set(ids).size !== ids.length) problems.push("queue repeats a lead");
+  const rank = { PENDING: 0, REMINDER: 1, RECYCLING: 2, OVERDUE: 3, VISIT: 4, NEW: 5 };
+  if (q.some((x, i) => i > 0 && rank[x.reason] < rank[q[i - 1].reason])) problems.push("queue is not in rule order");
+  if (q.some((x) => !eh.isQueueable(x.lead, base))) problems.push("queue holds a closed or paused lead");
+  const shouldHave = all.filter((l) => eh.isQueueable(l, base) && (eh.isPendingResult(l) || qctx.reminders.has(l.id) || eh.recyclingTomorrowCutoffFor(l, qctx.calendar, base) || eh.isFollowUpOverdue(l, qctx.calendar) || eh.isVisitDueToday(l, base) || isUntouchedInCurrentAssignment(l.lead_history[0])));
+  if (shouldHave.length !== q.length) problems.push(`queue length ${q.length}, rules say ${shouldHave.length}`);
+  if (JSON.stringify(eh.upNext(all, qctx, 5).map((x) => x.lead.id)) !== JSON.stringify(ids.slice(0, 5))) problems.push("Up next is not the head of the queue");
+
+  // Phase 3: data-only counts against DataCard (reference: main 3b3fb25 components/DataCard.tsx lines 65-69, fed by
+  // DataList's card fields: call_count = lead_history[0]?.call_count ?? 0).
+  const refStillAtRisk = (lead) => {
+    const inLeadsStage = !lead.board_stage || lead.board_stage === "LEADS";
+    return inLeadsStage && (lead.status === "NEW" || lead.status === "NOT_CONNECTED" || lead.status === "SWITCHED_OFF");
+  };
+  const refAttemptsLeft = (lead) => Math.max(4 - (lead.lead_history[0]?.call_count ?? 0), 0);
+  const dataSet = all.map((l) => ({ ...l, lead_history: [{ ...l.lead_history[0], call_count: pick([0, 1, 2, 3, 4, 5, null, undefined]) }] }));
+  const atRisk = dataSet.filter(refStillAtRisk);
+  const dc = eh.dataCounts(dataSet);
+  const refCallsLeft = atRisk.reduce((s, l) => s + refAttemptsLeft(l), 0);
+  const refLast = atRisk.filter((l) => refAttemptsLeft(l) <= 1).length;
+  if (dc.callsLeft !== refCallsLeft || dc.lastAttempt !== refLast || dc.total !== dataSet.length) problems.push(`data counts ${JSON.stringify(dc)} vs DataCard ${refCallsLeft}/${refLast}`);
+  console.log(`queue: ${q.length} of 5000 (${Object.entries(q.reduce((m, x) => ((m[x.reason] = (m[x.reason] || 0) + 1), m), {})).map(([k, v]) => `${k} ${v}`).join(", ")}); data: calls left ${dc.callsLeft}, last attempt ${dc.lastAttempt}`);
 }
 
 if (problems.length) {

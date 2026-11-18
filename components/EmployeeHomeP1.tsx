@@ -10,6 +10,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import PostsTrackingView from "@/components/PostsTrackingView";
 import { useEmployeeHome } from "@/lib/useEmployeeHome";
+import { useTeamToday } from "@/lib/useTeamToday";
 import { logCallClick } from "@/lib/logCallClick";
 import { rememberCalledCard } from "@/lib/lastCalledLead";
 import { registerActiveCallContext } from "@/lib/activeCall";
@@ -121,8 +122,23 @@ function Tile({ href, value, label, tone, testId }: { href: string; value: numbe
   );
 }
 
-export default function EmployeeHomeP1({ employeeId, employeeName }: { employeeId: string; employeeName?: string | null }) {
-  const { counts, attention, upNext, today, leadsError, todayError, remindersError, loading, reload } = useEmployeeHome(employeeId);
+export default function EmployeeHomeP1({
+  employeeId,
+  employeeName,
+  role,
+  teamId
+}: {
+  employeeId: string;
+  employeeName?: string | null;
+  role?: string | null;
+  teamId?: string | null;
+}) {
+  const { counts, attention, upNext, queueLength, data, dataQueueLength, today, leadsError, todayError, remindersError, loading, reload } = useEmployeeHome(employeeId);
+  // Phase 3 variants: a data-only employee (no LEAD leads, some DATA leads) sees DATA numbers instead of the lead
+  // sections; a team leader also gets "My team today" (their own team only, RLS).
+  const isDataOnly = Boolean(data);
+  const isTeamLeader = role === "team_leader" && Boolean(teamId);
+  const teamToday = useTeamToday(teamId, isTeamLeader);
   const [socialOpen, setSocialOpen] = useState(false);
   const upNextRef = useRef(upNext);
   upNextRef.current = upNext;
@@ -156,7 +172,8 @@ export default function EmployeeHomeP1({ employeeId, employeeName }: { employeeI
   };
 
   return (
-    <div data-testid="employee-home-p1" className="mx-auto w-full max-w-xl space-y-4 px-4 pb-8 pt-4">
+    <div data-testid="employee-home-p1" className="mx-auto w-full max-w-xl space-y-4 px-4 pb-28 pt-4">
+      {!isDataOnly && (
       <section aria-labelledby="home-attention" data-testid="needs-attention" className="rounded-2xl border border-amber-200 bg-white/90 p-4 shadow-sm">
         <h2 id="home-attention" className="mb-2 text-base font-semibold text-slate-900">Needs attention</h2>
         {loading ? (
@@ -196,6 +213,7 @@ export default function EmployeeHomeP1({ employeeId, employeeName }: { employeeI
           <p className="mt-1 text-xs text-slate-500">Reminders couldn&apos;t load; they are not counted here.</p>
         )}
       </section>
+      )}
 
       <section aria-labelledby="home-today" className="rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm">
         <div className="mb-3 flex items-center justify-between">
@@ -213,7 +231,12 @@ export default function EmployeeHomeP1({ employeeId, employeeName }: { employeeI
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-3">
-            {counts ? (
+            {data ? (
+              <>
+                <Tile testId="tile-data-untouched" href="/data" value={data.untouched} label="Untouched data" tone="blue" />
+                <Tile testId="tile-data-calls-left" href="/data" value={data.callsLeft} label={`Calls left (${4} attempts)`} tone="amber" />
+              </>
+            ) : counts ? (
               <>
                 <Tile testId="tile-new" href={HOME_LINKS.newLeads} value={counts.newCount} label="New leads" tone="blue" />
                 <Tile testId="tile-recycling" href={HOME_LINKS.recyclingTomorrow} value={counts.recyclingTomorrow} label="Recycle tomorrow" tone="amber" />
@@ -239,6 +262,7 @@ export default function EmployeeHomeP1({ employeeId, employeeName }: { employeeI
         )}
       </section>
 
+      {!isDataOnly && (
       <section aria-labelledby="home-up-next" data-testid="up-next" className="rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm">
         <h2 id="home-up-next" className="mb-1 text-base font-semibold text-slate-900">Up next</h2>
         {loading ? (
@@ -259,7 +283,23 @@ export default function EmployeeHomeP1({ employeeId, employeeName }: { employeeI
           <p className="flex min-h-11 items-center text-sm text-slate-600">No leads waiting. Check back later.</p>
         )}
       </section>
+      )}
 
+      {isDataOnly && data && (
+        <section aria-labelledby="home-my-data" data-testid="my-data" className="rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 id="home-my-data" className="text-base font-semibold text-slate-900">My data</h2>
+            <Link href="/data" className="flex min-h-11 items-center px-2 text-sm font-medium text-blue-700">
+              All {data.total} ›
+            </Link>
+          </div>
+          <p className="text-sm text-slate-600">
+            <b data-testid="data-last-attempt" className="tabular-nums text-amber-800">{data.lastAttempt}</b> on their last attempt
+          </p>
+        </section>
+      )}
+
+      {!isDataOnly && (
       <section aria-labelledby="home-my-leads" className="rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm">
         <div className="mb-3 flex items-center justify-between">
           <h2 id="home-my-leads" className="text-base font-semibold text-slate-900">My leads</h2>
@@ -288,6 +328,36 @@ export default function EmployeeHomeP1({ employeeId, employeeName }: { employeeI
           leadsError && <RetryBox onRetry={reload} />
         )}
       </section>
+      )}
+
+      {isTeamLeader && (
+        <section aria-labelledby="home-team" data-testid="team-today" className="rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 id="home-team" className="text-base font-semibold text-slate-900">My team today</h2>
+            <Link href="/team" className="flex min-h-11 items-center px-2 text-sm font-medium text-blue-700">
+              Team ›
+            </Link>
+          </div>
+          {teamToday.team ? (
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { id: "team-on-shift", value: `${teamToday.team.onShift}/${teamToday.team.members}`, label: "On shift" },
+                { id: "team-waiting", value: String(teamToday.team.waiting), label: "To assign" },
+                { id: "team-at-risk", value: String(teamToday.team.atRisk), label: "At risk" }
+              ].map((t) => (
+                <Link key={t.id} href="/team" data-testid={t.id} className="flex min-h-14 flex-col items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-1 text-center">
+                  <span className="text-lg font-bold tabular-nums text-slate-900">{t.value}</span>
+                  <span className="text-xs font-medium text-slate-600">{t.label}</span>
+                </Link>
+              ))}
+            </div>
+          ) : teamToday.error ? (
+            <RetryBox onRetry={teamToday.reload} />
+          ) : (
+            <Skeleton className="h-14" />
+          )}
+        </section>
+      )}
 
       <section className="rounded-2xl border border-slate-200 bg-white/90 shadow-sm">
         <button
@@ -307,6 +377,25 @@ export default function EmployeeHomeP1({ employeeId, employeeName }: { employeeI
           </div>
         )}
       </section>
+
+      {/* Start with next lead (thumb zone): the queue runs on /leads with its own modal, Call and result-save. */}
+      {!loading && (
+        <div className="fixed inset-x-0 bottom-0 z-20 px-4" style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 12px)" }}>
+          <div className="mx-auto max-w-xl">
+            {isDataOnly ? (
+              dataQueueLength > 0 ? (
+                <Link href="/data?queue=1" data-testid="start-next" className="flex min-h-14 items-center justify-center rounded-2xl bg-blue-600 text-base font-semibold text-white shadow-lg active:bg-blue-700">
+                  Start with next lead ({dataQueueLength})
+                </Link>
+              ) : null
+            ) : queueLength > 0 ? (
+              <Link href="/leads?queue=1" data-testid="start-next" className="flex min-h-14 items-center justify-center rounded-2xl bg-blue-600 text-base font-semibold text-white shadow-lg active:bg-blue-700">
+                Start with next lead ({queueLength})
+              </Link>
+            ) : null}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

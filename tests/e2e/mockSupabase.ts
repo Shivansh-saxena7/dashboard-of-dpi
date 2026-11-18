@@ -102,11 +102,14 @@ export interface MockState {
   // lead_notes reminders the Home / ?filter=reminders-today read (Phase 2); remindersFail = answer 500.
   reminders: { lead_id: string; reminder_at: string }[];
   remindersFail: boolean;
+  // The logged-in employee row (tests may set role / team_id) and leads reserved for the team (Phase 3).
+  employee: Record<string, unknown>;
+  teamPending: { id: string }[];
 }
 
 export async function mockSupabase(context: BrowserContext): Promise<MockState> {
-  const state: MockState = { leads: makeLeads("LEAD", 60), data: makeLeads("DATA", 40), anomalies: [], updates: [], failUpdates: 0, landThenLose: 0, settings: { ...LEAD_ENGINE_SETTINGS }, workReport: null, settingsDelayMs: 0, reminders: [], remindersFail: false };
-  const employee = { id: EMP, auth_user_id: UID, name: "Test Employee", role: "employee", department: "sales", is_active: true, team_id: null };
+  const employee: Record<string, unknown> = { id: EMP, auth_user_id: UID, name: "Test Employee", role: "employee", department: "sales", is_active: true, team_id: null };
+  const state: MockState = { leads: makeLeads("LEAD", 60), data: makeLeads("DATA", 40), anomalies: [], updates: [], failUpdates: 0, landThenLose: 0, settings: { ...LEAD_ENGINE_SETTINGS }, workReport: null, settingsDelayMs: 0, reminders: [], remindersFail: false, employee, teamPending: [] };
 
   const json = (route: Route, body: unknown, status = 200, headers: Record<string, string> = {}) =>
     route.fulfill({ status, contentType: "application/json", headers: { "access-control-allow-origin": "*", "content-range": "0-0/0", ...headers }, body: JSON.stringify(body) });
@@ -124,7 +127,7 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
     if (p.startsWith("/auth/v1/logout")) return json(route, {});
     if (p.startsWith("/auth/v1")) return json(route, {});
 
-    if (p === "/rest/v1/employees") return json(route, wantsObject ? employee : [employee]);
+    if (p === "/rest/v1/employees") return json(route, wantsObject ? state.employee : [state.employee]);
     if (p === "/rest/v1/lead_engine_settings") {
       if (state.settingsDelayMs > 0) await new Promise((r) => setTimeout(r, state.settingsDelayMs));
       // The page may have moved on while the answer was held back.
@@ -133,6 +136,9 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
     if (p === "/rest/v1/hrms_settings") return json(route, wantsObject ? HRMS_SETTINGS : [HRMS_SETTINGS]);
     if (p === "/rest/v1/leads" && method === "GET") {
       const type = url.searchParams.get("lead_type");
+      if (url.searchParams.get("pending_team_id")) return json(route, state.teamPending);
+      const stage = url.searchParams.get("board_stage");
+      if (type === "eq.LEAD" && stage) return json(route, state.leads.filter((l) => `eq.${l.board_stage}` === stage));
       if (type === "eq.LEAD") return json(route, state.leads);
       if (type === "eq.DATA") return json(route, state.data);
       return json(route, wantsObject ? {} : []);

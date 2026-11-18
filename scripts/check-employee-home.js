@@ -83,16 +83,55 @@ const homeUi = read("components/EmployeeHomeP1.tsx");
 if (!/rememberCalledCard\(lead\.id\);\s*if \(historyId\) logCallClick\(historyId, lead\.id\);/.test(homeUi) || !/href=\{`tel:\$\{lead\.mobile\}`\}/.test(homeUi)) problems.push("Up next Call must be LeadCard's Call: tel: link + rememberCalledCard + logCallClick");
 if (!/registerActiveCallContext\(\{/.test(homeUi) || !/listType: "LEAD"/.test(homeUi)) problems.push("Up next must register the Home as the list on screen (call-return)");
 if (/rpc\("log_call_click_atomic"|activeCall:v1/.test(homeUi)) problems.push("Up next must not write call clicks or the active call itself");
-if (!/homeFilterLeads\(result, homeFilter,/.test(list) || !/useTodayReminders\(employeeId, homeFilter === "reminders-today"\)/.test(list)) problems.push("LeadList Home filters must use homeFilterLeads + useTodayReminders (same as the Home)");
+if (!/homeFilterLeads\(result, homeFilter,/.test(list) || !/useTodayReminders\(employeeId, homeFilter === "reminders-today"( \|\| queueRequested)?\)/.test(list)) problems.push("LeadList Home filters must use homeFilterLeads + useTodayReminders (same as the Home)");
 if (!/attentionCounts\(leads, ctx\)/.test(hook) || !/fetchTodayReminders\(employeeId\)/.test(hook)) problems.push("Home Needs attention must use attentionCounts + fetchTodayReminders");
 const rem = read("lib/todayReminders.ts");
 if (!/\.eq\("employee_id", employeeId\)/.test(rem) || !/\.limit\(TODAY_REMINDERS_LIMIT\)/.test(rem) || !/\.gte\("reminder_at"/.test(rem) || !/\.lt\("reminder_at"/.test(rem)) problems.push("lib/todayReminders.ts: employee + today's range + limit");
 if (/\.(update|insert|upsert|delete)\(/.test(rem + hook + homeUi)) problems.push("Home Phase 2 is read-only");
-for (const f of ["lib/todayReminders.ts"]) {
+for (const f of ["lib/todayReminders.ts", "lib/useTeamToday.ts"]) {
   const s = read(f);
   if (/setInterval\(/.test(s)) problems.push(`${f}: no interval polling`);
   if (/purple|violet|fuchsia/i.test(s)) problems.push(`${f}: no purple / violet`);
 }
+
+// 5) Phase 3 (2026-11-18): queue, team leader card, data-only variant.
+const hist = (o) => ({ call_count: 0, assigned_at: at, last_activity_at: at, ...o });
+const L = (id, status, stage, h, extra = {}) => ({ id, status, board_stage: stage, lead_history: [hist(h)], ...extra });
+const qLeads = [
+  L("new-late", "NEW", "LEADS", {}, { sla_deadline: "2026-11-19T05:00:00Z" }),
+  L("new-early", "NEW", "LEADS", {}, { sla_deadline: "2026-11-18T09:00:00Z" }),
+  L("pending-2", "CONNECTED", "FOLLOW_UP", { call_count: 2, outcome_at: "2026-11-18T03:00:00Z", last_call_click_at: "2026-11-18T05:00:00Z", last_activity_at: "2026-11-18T05:00:00Z" }),
+  L("pending-1", "NOT_CONNECTED", "LEADS", { call_count: 1, outcome_at: null, last_call_click_at: "2026-11-18T04:00:00Z", last_activity_at: "2026-11-18T04:00:00Z" }),
+  L("saved-after-click", "CONNECTED", "LEADS", { call_count: 1, outcome_at: "2026-11-18T05:30:00Z", last_call_click_at: "2026-11-18T05:00:00Z", last_activity_at: "2026-11-18T05:30:00Z" }),
+  L("junk", "JUNK", "LEADS", {}),
+  L("booked", "CONVERTED", "BOOKING", {}),
+  L("snoozed", "NEW", "LEADS", { paused_until: "2026-11-20T00:00:00Z", pause_reason: "SNOOZE" }),
+  L("rem", "CONNECTED", "FOLLOW_UP", { call_count: 1, outcome_at: at, last_activity_at: "2026-11-18T06:00:00Z" })
+];
+const q = eh.queueOrder(qLeads, { calendar: null, reminders: new Map([["rem", T]]), now: T });
+eq("queue: pending (oldest click first), reminder, New (SLA first); closed, snoozed and saved-after-click left out", q.map((x) => `${x.lead.id}:${x.reason}`), ["pending-1:PENDING", "pending-2:PENDING", "rem:REMINDER", "new-early:NEW", "new-late:NEW"]);
+eq("Up next = the queue's first rows", eh.upNext(qLeads, { calendar: null, reminders: new Map([["rem", T]]), now: T }, 2).map((x) => x.lead.id), ["pending-1", "pending-2"]);
+eq("skip key is per employee and IST day", eh.queueSkipKey("e1", Date.parse("2026-11-18T18:31:00Z")), "homeQueueSkip:v1:e1:2026-11-19");
+const D = (status, stage, calls) => ({ id: `${status}-${stage}-${calls}`, status, board_stage: stage, lead_history: [{ call_count: calls, assigned_at: at, last_activity_at: calls ? "2026-11-18T06:00:00Z" : at, first_call_at: calls ? at : null }] });
+eq("data counts as DataCard: attempts only while still at risk", eh.dataCounts([D("NEW", "LEADS", 0), D("NOT_CONNECTED", "LEADS", 3), D("SWITCHED_OFF", null, 5), D("CONNECTED", "LEADS", 1), D("NEW", "FOLLOW_UP", 0)]), { total: 5, untouched: 2, callsLeft: 5, lastAttempt: 2 });
+
+const leadList = read("components/LeadList.tsx");
+if (!/queueOrder\(leads, \{ calendar: workingCalendar, reminders: todayReminders\.byLead \}\)/.test(leadList)) problems.push("LeadList queue must use queueOrder with the same calendar + reminders as the Home");
+const lq = read("lib/useListQueue.ts") + read("components/QueueBar.tsx");
+if (!/sessionStorage\.setItem\(queueSkipKey\(employeeId\)/.test(lq)) problems.push("Queue Skip must stay in sessionStorage");
+if (/supabase|\.rpc\(|fetch\(/.test(lq)) problems.push("Queue code must not call the database");
+const dataList = read("components/DataList.tsx");
+for (const [name, src] of [["LeadList", leadList], ["DataList", dataList]]) {
+  if (!/listQueue\.onSaved\(selectedLead\.id\)/.test(src) || !/listQueue\.onClosed\(\)/.test(src)) problems.push(`${name}: queue advances only after the modal's own saved result (onUpdated)`);
+}
+if (!/listQueue\.start\(dataQueueOrder\(leads\)\)/.test(dataList)) problems.push("DataList queue must use dataQueueOrder (same as the Home count)");
+const dq = eh.dataQueueOrder([D("NEW", "LEADS", 0), D("NOT_CONNECTED", "LEADS", 3), D("SWITCHED_OFF", "LEADS", 1), D("CONNECTED", "LEADS", 1), { ...D("NOT_CONNECTED", "LEADS", 2), id: "pending", lead_history: [{ call_count: 2, assigned_at: at, last_activity_at: at, last_call_click_at: "2026-11-18T06:00:00Z" }] }, D("JUNK", "LEADS", 0)]);
+eq("data queue: pending, untouched, then fewest attempts left; closed and not-at-risk out", dq, ["pending", "NEW-LEADS-0", "NOT_CONNECTED-LEADS-3", "SWITCHED_OFF-LEADS-1"]);
+if (!/const isTeamLeader = role === "team_leader" && Boolean\(teamId\);/.test(read("components/EmployeeHomeP1.tsx"))) problems.push("Team card only for role team_leader with a team");
+const team = read("lib/useTeamToday.ts");
+if (/\.rpc\(|service_role|\.(update|insert|upsert|delete)\(/.test(team)) problems.push("lib/useTeamToday.ts: read-only, client under RLS, no RPC");
+if (!/\.limit\(TEAM_WAITING_LIMIT\)/.test(team) || !/fetchAllRows\(/.test(team)) problems.push("lib/useTeamToday.ts: bounded reads");
+if (!/useEmployeeHome\.ts/.test("lib/useEmployeeHome.ts") || (hook.match(/\.channel\(/g) || []).length !== 1 || /\.channel\(/.test(team)) problems.push("Still exactly one realtime channel on the Home");
 
 if (problems.length) {
   console.error("check-employee-home FAILED:\n  " + problems.join("\n  "));

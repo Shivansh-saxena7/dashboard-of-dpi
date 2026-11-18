@@ -33,6 +33,7 @@ export interface HomeLeadHistory {
   last_activity_at?: string | null;
   paused_until?: string | null;
   pause_reason?: string | null;
+  last_call_click_at?: string | null;
 }
 
 export interface HomeLead {
@@ -208,11 +209,12 @@ export function attentionCounts(leads: HomeLead[], ctx: AttentionContext): Atten
   };
 }
 
-export type UpNextReason = "REMINDER" | "OVERDUE" | "RECYCLING" | "VISIT" | "NEW";
+export type UpNextReason = "PENDING" | "REMINDER" | "RECYCLING" | "OVERDUE" | "VISIT" | "NEW";
 export const UP_NEXT_LABELS: Record<UpNextReason, string> = {
+  PENDING: "Called, no result yet",
   REMINDER: "Reminder today",
-  OVERDUE: "Follow-up overdue",
   RECYCLING: "Recycles tomorrow",
+  OVERDUE: "Follow-up overdue",
   VISIT: "Visit due today",
   NEW: "New"
 };
@@ -221,29 +223,45 @@ export interface UpNextItem {
   reason: UpNextReason;
 }
 
-// Up next: reminders due today (earliest first), overdue follow-ups (oldest activity first), recycling tomorrow
-// (soonest cutoff first), visits due today, then untouched New (oldest assignment first). One row per lead, paused
-// leads (Snooze, pending verification, sibling hold) left out except a Visit due today.
-export function upNext(leads: HomeLead[], ctx: AttentionContext, limit = 5): UpNextItem[] {
+// Pending result: Call was tapped in this assignment and no result was saved after it.
+export function isPendingResult(lead: HomeLead): boolean {
+  const h = lead.lead_history?.[0];
+  const click = h?.last_call_click_at ? Date.parse(h.last_call_click_at) : NaN;
+  if (!Number.isFinite(click)) return false;
+  const outcome = h?.outcome_at ? Date.parse(h.outcome_at) : NaN;
+  return !Number.isFinite(outcome) || outcome < click;
+}
+
+// Not in the queue: closed (Junk, Converted, Booking stage) or paused (Snooze, visit lock, pending verification,
+// sibling hold) - except a Visit whose lock ends today.
+const CLOSED_STATUSES = ["JUNK", "CONVERTED"];
+export function isQueueable(lead: HomeLead, now: number = Date.now()): boolean {
+  if (CLOSED_STATUSES.includes(lead.status) || (lead.board_stage || "LEADS") === "BOOKING") return false;
+  const h = lead.lead_history?.[0];
+  const paused = Boolean(h?.paused_until && Date.parse(h.paused_until) > now);
+  return !paused || isVisitDueToday(lead, now);
+}
+
+// "Start with next lead" queue (Phase 3, plan section 3), also the Home's Up next (its first rows):
+//   1 pending result (oldest click first), 2 reminder today (earliest first), 3 recycles tomorrow (soonest cutoff
+//   first), 4 follow-up overdue (oldest activity first), 5 visit due today, 6 untouched New (SLA deadline first, then
+//   oldest assignment). One entry per lead, own active assignment only (the list already is), no DB writes.
+export function queueOrder(leads: HomeLead[], ctx: AttentionContext): UpNextItem[] {
   const now = ctx.now ?? Date.now();
   const time = (v: string | null | undefined) => (v ? Date.parse(v) : Number.POSITIVE_INFINITY);
-  const paused = (lead: HomeLead) => {
-    const h = lead.lead_history?.[0];
-    return Boolean(h?.paused_until && Date.parse(h.paused_until) > now);
-  };
+  const h = (l: HomeLead) => l.lead_history?.[0];
   const seen = new Set<string>();
   const out: UpNextItem[] = [];
   const add = (list: HomeLead[], reason: UpNextReason) => {
     for (const lead of list) {
-      if (out.length >= limit) return;
       if (seen.has(lead.id)) continue;
       seen.add(lead.id);
       out.push({ lead, reason });
     }
   };
-  const open = leads.filter((lead) => !paused(lead));
+  const open = leads.filter((lead) => isQueueable(lead, now));
+  add(open.filter(isPendingResult).sort((a, b) => time(h(a)?.last_call_click_at) - time(h(b)?.last_call_click_at)), "PENDING");
   add(open.filter((l) => ctx.reminders.has(l.id)).sort((a, b) => (ctx.reminders.get(a.id) ?? 0) - (ctx.reminders.get(b.id) ?? 0)), "REMINDER");
-  add(open.filter((l) => isFollowUpOverdue(l, ctx.calendar)).sort((a, b) => time(a.lead_history?.[0]?.last_activity_at) - time(b.lead_history?.[0]?.last_activity_at)), "OVERDUE");
   add(
     open
       .map((l) => ({ l, at: recyclingTomorrowCutoffFor(l, ctx.calendar, now)?.getTime() ?? null }))
@@ -252,9 +270,57 @@ export function upNext(leads: HomeLead[], ctx: AttentionContext, limit = 5): UpN
       .map((x) => x.l),
     "RECYCLING"
   );
-  add(leads.filter((l) => isVisitDueToday(l, now)).sort((a, b) => time(a.lead_history?.[0]?.paused_until) - time(b.lead_history?.[0]?.paused_until)), "VISIT");
-  add(open.filter((l) => isUntouchedInCurrentAssignment(l.lead_history?.[0])).sort((a, b) => time(a.lead_history?.[0]?.assigned_at) - time(b.lead_history?.[0]?.assigned_at)), "NEW");
+  add(open.filter((l) => isFollowUpOverdue(l, ctx.calendar)).sort((a, b) => time(h(a)?.last_activity_at) - time(h(b)?.last_activity_at)), "OVERDUE");
+  add(open.filter((l) => isVisitDueToday(l, now)).sort((a, b) => time(h(a)?.paused_until) - time(h(b)?.paused_until)), "VISIT");
+  add(
+    open
+      .filter((l) => isUntouchedInCurrentAssignment(h(l)))
+      .sort((a, b) => time(a.sla_deadline) - time(b.sla_deadline) || time(h(a)?.assigned_at) - time(h(b)?.assigned_at)),
+    "NEW"
+  );
   return out;
+}
+
+export function upNext(leads: HomeLead[], ctx: AttentionContext, limit = 5): UpNextItem[] {
+  return queueOrder(leads, ctx).slice(0, limit);
+}
+
+// Skip is local only: the skipped ids for today live in this tab's sessionStorage, never in the database.
+export function queueSkipKey(employeeId: string, now: number = Date.now()): string {
+  return `homeQueueSkip:v1:${employeeId}:${new Date(istDayBounds(now).start + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10)}`;
+}
+
+// ---- Data-only variant: an employee with no LEAD leads and at least one DATA lead. ----
+export interface DataLead {
+  id: string;
+  status: string;
+  board_stage?: string | null;
+  lead_history?: HomeLeadHistory[] | null;
+}
+export const DATA_MAX_ATTEMPTS = 4; // lib/calculateSLAStatus.ts MAX_DATA_ATTEMPTS
+// As components/DataCard.tsx: attempts matter while the card is "still at risk" (Leads stage, New / Not connected /
+// Switched off); attempts left = max(4 - calls, 0).
+export function dataStillAtRisk(lead: DataLead): boolean {
+  const inLeadsStage = !lead.board_stage || lead.board_stage === "LEADS";
+  return inLeadsStage && (lead.status === "NEW" || lead.status === "NOT_CONNECTED" || lead.status === "SWITCHED_OFF");
+}
+export function dataAttemptsLeft(lead: DataLead): number {
+  return Math.max(DATA_MAX_ATTEMPTS - (lead.lead_history?.[0]?.call_count ?? 0), 0);
+}
+export interface DataCounts {
+  total: number;
+  untouched: number;
+  callsLeft: number;
+  lastAttempt: number;
+}
+export function dataCounts(leads: DataLead[]): DataCounts {
+  const atRisk = leads.filter(dataStillAtRisk);
+  return {
+    total: leads.length,
+    untouched: leads.filter((l) => isUntouchedInCurrentAssignment(l.lead_history?.[0])).length,
+    callsLeft: atRisk.reduce((sum, l) => sum + dataAttemptsLeft(l), 0),
+    lastAttempt: atRisk.filter((l) => dataAttemptsLeft(l) <= 1).length
+  };
 }
 
 export const HOME_ATTENTION_LINKS: Record<HomeFilter, string> = {
@@ -262,3 +328,29 @@ export const HOME_ATTENTION_LINKS: Record<HomeFilter, string> = {
   "reminders-today": "/leads?filter=reminders-today",
   "visits-today": "/leads?filter=visits-today"
 };
+
+// Data-only queue (/data?queue=1): 1 called, no result yet (oldest click first), 2 untouched (oldest assignment
+// first), 3 the other leads DataCard marks as still at risk with attempts left (fewest attempts left first, then
+// oldest activity). Closed (Junk, Converted) and already-used-up leads stay out. No DB writes.
+export function dataQueueOrder(leads: DataLead[]): string[] {
+  const time = (v: string | null | undefined) => (v ? Date.parse(v) : Number.POSITIVE_INFINITY);
+  const h = (l: DataLead) => l.lead_history?.[0];
+  const open = leads.filter((l) => !CLOSED_STATUSES.includes(l.status));
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (list: DataLead[]) => {
+    for (const l of list) {
+      if (seen.has(l.id)) continue;
+      seen.add(l.id);
+      out.push(l.id);
+    }
+  };
+  add(open.filter((l) => isPendingResult(l as HomeLead)).sort((a, b) => time(h(a)?.last_call_click_at) - time(h(b)?.last_call_click_at)));
+  add(open.filter((l) => isUntouchedInCurrentAssignment(h(l))).sort((a, b) => time(h(a)?.assigned_at) - time(h(b)?.assigned_at)));
+  add(
+    open
+      .filter((l) => dataStillAtRisk(l) && dataAttemptsLeft(l) > 0)
+      .sort((a, b) => dataAttemptsLeft(a) - dataAttemptsLeft(b) || time(h(a)?.last_activity_at) - time(h(b)?.last_activity_at))
+  );
+  return out;
+}
