@@ -1,3 +1,6 @@
+-- APPLIED 2026-11-18 13:32 IST, live (restore_junk_lead_to_owner, company_working_day, employee_in_return_grace). The
+-- "NOT APPLIED" note below is from before the apply. helpers: service_role EXECUTE retained by decision (server-only
+-- key; anon, PUBLIC and authenticated have no EXECUTE on them). Rollback: 2026-11-18_restore_junk_lead_to_owner_rollback.sql.
 -- NOT APPLIED. 2026-11-18. Apply only on the owner's "haan", from an LF copy (git cat-file -p), rolled-back dry run first,
 -- between sweeps.
 -- Admin "give this junk lead back" for one positive lead, LEAD or DATA (restore_positive_junk_leads refuses DATA copies

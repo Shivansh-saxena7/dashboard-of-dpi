@@ -1,3 +1,4 @@
+-- Rollback for restore_junk_lead_to_owner APPLIED 2026-11-18 13:32 IST (live). Not run.
 -- ROLLBACK for 2026-11-18_restore_junk_lead_to_owner.sql: removes the function and its two helpers. Leads already given
 -- back stay with their new owner; each one has a lead_restore_log row (prev_state) and an ADMIN_RESTORE_ONE event.
 begin;
