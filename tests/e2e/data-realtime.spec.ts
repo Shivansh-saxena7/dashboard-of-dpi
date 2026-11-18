@@ -8,7 +8,7 @@ import { EMP, mockSupabase, type MockState } from "./mockSupabase";
 
 type Binding = { event: string; schema: string; table: string; filter?: string; id: number };
 interface FakeRealtime {
-  joined: { topic: string; bindings: Binding[] }[];
+  joined: { topic: string; bindings: Binding[]; at: number }[];
   push: (topic: string, binding: Binding, record: Record<string, unknown>) => void;
 }
 
@@ -29,7 +29,7 @@ async function fakeRealtime(context: BrowserContext): Promise<FakeRealtime> {
       const [joinRef, ref, topic, event, payload] = msg as [string | null, string | null, string, string, any];
       if (event === "phx_join") {
         const bindings: Binding[] = (payload?.config?.postgres_changes || []).map((b: Omit<Binding, "id">) => ({ ...b, id: nextId++ }));
-        state.joined.push({ topic, bindings });
+        state.joined.push({ topic, bindings, at: Date.now() });
         ws.send(JSON.stringify([joinRef, ref, topic, "phx_reply", { status: "ok", response: { postgres_changes: bindings } }]));
       } else if (ref) {
         ws.send(JSON.stringify([joinRef, ref, topic, "phx_reply", { status: "ok", response: {} }]));
@@ -60,6 +60,20 @@ const historyBinding = () => {
   return join?.bindings.find((b) => b.table === "lead_history" && b.filter === `employee_id=eq.${EMP}`);
 };
 
+// In development React mounts twice, so the channel joins, leaves and joins again, and each join gets new binding
+// ids. An event sent with the first join's id is (rightly) ignored by the client. Wait until the data-list channel has
+// joined and no further join has come for a moment, so the event uses the final join's binding.
+const QUIET_MS = 1000;
+async function waitForFinalJoin() {
+  await expect
+    .poll(() => {
+      const joins = rt.joined.filter((j) => j.topic === dataTopic);
+      const last = joins[joins.length - 1];
+      return !!last && !!historyBinding() && Date.now() - last.at >= QUIET_MS;
+    }, { timeout: 20000, intervals: [200] })
+    .toBe(true);
+}
+
 async function giveAway(id: string) {
   // The lead now belongs to someone else: no longer in this employee's list, and their assignment row ended.
   state.data = state.data.filter((l: { id: string }) => l.id !== id) as typeof state.data;
@@ -69,7 +83,7 @@ async function giveAway(id: string) {
 test("/data: an assignment ending in realtime drops that card", async ({ page }) => {
   await page.goto("/data");
   await expect(page.locator("#data-card-data-30")).toBeVisible();
-  await expect.poll(() => !!historyBinding(), { timeout: 15000 }).toBe(true);
+  await waitForFinalJoin();
   await giveAway("data-30");
   await expect(page.locator("#data-card-data-30")).toHaveCount(0);
   await expect(page.locator("#data-card-data-29")).toBeVisible();
@@ -78,7 +92,7 @@ test("/data: an assignment ending in realtime drops that card", async ({ page })
 test("/data: the open card closes with the reassigned message and keeps what was typed to copy", async ({ page }) => {
   await page.goto("/data?openLead=data-30");
   await expect(page.getByRole("button", { name: /Log Update/ })).toBeVisible();
-  await expect.poll(() => !!historyBinding(), { timeout: 15000 }).toBe(true);
+  await waitForFinalJoin();
   await page.getByPlaceholder("Add a note (optional)...").fill("Asked to call back after 6 pm");
   await giveAway("data-30");
   const toast = page.getByTestId("lead-moved-away-toast");
