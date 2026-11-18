@@ -17,6 +17,7 @@ const eh = require(path.join(root, "lib/employeeHome.ts"));
 const { recyclingTomorrowCutoff } = require(path.join(root, "lib/recyclingTomorrow.ts"));
 const { isUntouchedInCurrentAssignment } = require(path.join(root, "lib/newLeadFilter.ts"));
 const { parseWorkingCalendar } = require(path.join(root, "lib/workingCalendar.ts"));
+const { calculateSLAStatus } = require(path.join(root, "lib/calculateSLAStatus.ts"));
 
 // ---- Reference: main 3b3fb25 components/LeadList.tsx (lines 122-141, 509-518, 633-634) ----
 function refRecyclingTomorrowCutoffFor(lead, workingCalendar, now) {
@@ -51,6 +52,52 @@ const refNewCount = (leads) => leads.filter((lead) => isUntouchedInCurrentAssign
 const refRecyclingCount = (leads, cal, now) => leads.filter((lead) => refRecyclingTomorrowCutoffFor(lead, cal, now) !== null).length;
 // ---- end of reference ----
 
+// ---- Reference (Phase 2): the card badge "Needs follow-up" / "Going stale". components/LeadList.tsx cardLeads
+// (the flattening LeadCard receives) + components/LeadCard.tsx lines 137-156 (its calculateSLAStatus call), main 3b3fb25.
+function refCardLead(lead) {
+  return {
+    status: lead.status,
+    board_stage: lead.board_stage,
+    sla_deadline: lead.sla_deadline,
+    recycle_count: lead.recycle_count,
+    outcome_at: lead.lead_history[0]?.outcome_at ?? null,
+    assigned_at: lead.lead_history[0]?.assigned_at ?? null,
+    last_activity_at: lead.lead_history[0]?.last_activity_at ?? null,
+    paused_until: lead.lead_history[0]?.paused_until ?? null,
+    pause_reason: lead.lead_history[0]?.pause_reason ?? null,
+    is_personal_lead: lead.is_personal_lead ?? false
+  };
+}
+function refCardSlaStatus(lead, workingCalendar) {
+  return calculateSLAStatus(
+    {
+      status: lead.status,
+      sla_deadline: lead.sla_deadline,
+      recycle_count: lead.recycle_count,
+      board_stage: lead.board_stage,
+      paused_until: lead.paused_until,
+      last_activity_at: lead.last_activity_at,
+      pause_reason: lead.pause_reason,
+      assigned_at: lead.assigned_at
+    },
+    lead.outcome_at,
+    0,
+    false,
+    lead.is_personal_lead,
+    workingCalendar
+  );
+}
+const refOverdue = (lead, cal) => ["FOLLOWUP_INACTIVITY_WARNING", "FOLLOWUP_INACTIVITY_RECYCLE_READY"].includes(refCardSlaStatus(refCardLead(lead), cal));
+// Visit due today, written out from its definition (a new rule, no older code): Visit stage, VISIT_LOCK, lock ends
+// before the end of today's IST day.
+function refVisitDue(lead, now) {
+  const h = lead.lead_history[0];
+  if ((lead.board_stage || "LEADS") !== "VISIT" || !h || h.pause_reason !== "VISIT_LOCK" || !h.paused_until) return false;
+  const ist = new Date(now + 5.5 * 3600e3);
+  const endOfDay = Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate() + 1) - 5.5 * 3600e3;
+  return Date.parse(h.paused_until) < endOfDay;
+}
+
 const problems = [];
 function compare(label, leads, cal, now) {
   const ref = { stages: refTabCounts(leads), newCount: refNewCount(leads), recyclingTomorrow: refRecyclingCount(leads, cal, now) };
@@ -66,7 +113,21 @@ function compare(label, leads, cal, now) {
     if ((a && a.getTime()) !== (b && b.getTime())) perLead++;
   }
   if (perLead) problems.push(`${label}: ${perLead} leads with a different recycle cutoff`);
-  return { ...ref, total: leads.length };
+  // Phase 2: Needs attention. The Home count and the /leads filter run homeFilterLeads; it must equal the card badge
+  // (overdue) and the written-out rule (visits), lead by lead.
+  const reminders = new Map(leads.filter((_, i) => i % 7 === 0).map((l, i) => [l.id, now + i * 60e3]));
+  const ctx = { calendar: cal, reminders, now };
+  const att = eh.attentionCounts(leads, ctx);
+  const refOver = leads.filter((l) => refOverdue(l, cal));
+  const refVisit = leads.filter((l) => refVisitDue(l, now));
+  const list = (f) => eh.homeFilterLeads(leads, f, ctx).map((l) => l.id).join();
+  if (list("followup-overdue") !== refOver.map((l) => l.id).join()) problems.push(`${label}: overdue follow-ups differ from the card badge`);
+  if (list("visits-today") !== refVisit.map((l) => l.id).join()) problems.push(`${label}: visits due today differ`);
+  if (list("reminders-today") !== leads.filter((l) => reminders.has(l.id)).map((l) => l.id).join()) problems.push(`${label}: reminders today differ`);
+  if (att["followup-overdue"] !== refOver.length || att["visits-today"] !== refVisit.length || att["reminders-today"] !== reminders.size) problems.push(`${label}: Home attention counts ${JSON.stringify(att)}`);
+  const next = eh.upNext(leads, ctx, 5);
+  if (new Set(next.map((x) => x.lead.id)).size !== next.length || next.length > 5) problems.push(`${label}: Up next repeats a lead or is too long`);
+  return { ...ref, overdue: refOver.length, visitsDue: refVisit.length, total: leads.length };
 }
 
 if (process.argv[2] === "--live") {
@@ -131,13 +192,15 @@ if (process.argv[2] === "--live") {
         const r = compare(`set ${set} cal ${ci} now ${iso(now)}`, leads, cal, now);
         totals.recycling += r.recyclingTomorrow;
         totals.newCount += r.newCount;
+        totals.overdue = (totals.overdue || 0) + r.overdue;
+        totals.visits = (totals.visits || 0) + r.visitsDue;
       }
     }
   }
   // One 5000-lead list in one go too.
   const all = Array.from({ length: 5000 }, () => makeLead(n++));
   const big = compare("one 5000-lead list", all, calendars[4], base);
-  console.log(`random: ${totals.leads} leads x ${calendars.length} calendars x 4 clocks; recycling hits ${totals.recycling}, New hits ${totals.newCount}; one list of 5000: ${JSON.stringify(big)}`);
+  console.log(`random: ${totals.leads} leads x ${calendars.length} calendars x 4 clocks; recycling hits ${totals.recycling}, New hits ${totals.newCount}, overdue hits ${totals.overdue}, visit-due hits ${totals.visits}; one list of 5000: ${JSON.stringify(big)}`);
 }
 
 if (problems.length) {

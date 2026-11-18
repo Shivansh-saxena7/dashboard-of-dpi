@@ -99,10 +99,13 @@ export interface MockState {
   workReport: Record<string, unknown> | null;
   // Delay (ms) before lead_engine_settings answers: a slow settings read must not hold the page.
   settingsDelayMs: number;
+  // lead_notes reminders the Home / ?filter=reminders-today read (Phase 2); remindersFail = answer 500.
+  reminders: { lead_id: string; reminder_at: string }[];
+  remindersFail: boolean;
 }
 
 export async function mockSupabase(context: BrowserContext): Promise<MockState> {
-  const state: MockState = { leads: makeLeads("LEAD", 60), data: makeLeads("DATA", 40), anomalies: [], updates: [], failUpdates: 0, landThenLose: 0, settings: { ...LEAD_ENGINE_SETTINGS }, workReport: null, settingsDelayMs: 0 };
+  const state: MockState = { leads: makeLeads("LEAD", 60), data: makeLeads("DATA", 40), anomalies: [], updates: [], failUpdates: 0, landThenLose: 0, settings: { ...LEAD_ENGINE_SETTINGS }, workReport: null, settingsDelayMs: 0, reminders: [], remindersFail: false };
   const employee = { id: EMP, auth_user_id: UID, name: "Test Employee", role: "employee", department: "sales", is_active: true, team_id: null };
 
   const json = (route: Route, body: unknown, status = 200, headers: Record<string, string> = {}) =>
@@ -133,6 +136,10 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
       if (type === "eq.LEAD") return json(route, state.leads);
       if (type === "eq.DATA") return json(route, state.data);
       return json(route, wantsObject ? {} : []);
+    }
+    if (p === "/rest/v1/lead_notes" && method === "GET" && (url.searchParams.get("select") || "").includes("reminder_at")) {
+      if (state.remindersFail) return json(route, { message: "fake failure" }, 500);
+      return json(route, state.reminders);
     }
     if (p === "/rest/v1/system_anomaly_log" && method === "POST") {
       try {

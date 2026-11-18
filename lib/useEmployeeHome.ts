@@ -1,16 +1,28 @@
 "use client";
-// Employee Home, Phase 1 (2026-11-18): the data behind the new Home. Read-only.
+// Employee Home (2026-11-18): the data behind the new Home. Read-only.
 //   * My leads: the same rows /leads loads (current owner, LEAD, the employee's active assignment), only the columns the
-//     counts need, through fetchAllRows (no 1000-row ceiling). Counted by lib/employeeHome.ts, the rules /leads uses.
+//     Home needs, through fetchAllRows (no 1000-row ceiling). Counted by lib/employeeHome.ts, the rules /leads uses.
 //   * Today: get_employee_work_report for today (IST), the same function /report shows.
-//   * Refresh: one realtime channel (leads + lead_history of this employee, as /leads listens) and a refetch when the
-//     app comes back to the foreground (at most once a minute). No interval polling.
+//   * Phase 2: reminders today (lib/todayReminders.ts, one bounded read), Needs attention counts and Up next, from the
+//     shared predicates /leads uses for ?filter=followup-overdue / reminders-today / visits-today.
+//   * Refresh: one realtime channel (leads + lead_history of this employee, as /leads listens; a saved result with a
+//     reminder writes lead_history too) and a refetch when the app comes back to the foreground (at most once a
+//     minute). No interval polling.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 import { istDateYmd } from "@/lib/ownerLeave";
 import { useWorkingCalendar } from "@/lib/useWorkingCalendar";
-import { myLeadCounts, type HomeLead, type MyLeadCounts } from "@/lib/employeeHome";
+import { fetchTodayReminders } from "@/lib/todayReminders";
+import {
+  attentionCounts,
+  myLeadCounts,
+  upNext,
+  type AttentionCounts,
+  type HomeLead,
+  type MyLeadCounts,
+  type UpNextItem
+} from "@/lib/employeeHome";
 
 export interface HomeToday {
   calls: number;
@@ -22,21 +34,28 @@ export interface HomeToday {
 
 export interface EmployeeHomeData {
   counts: MyLeadCounts | null;
+  attention: AttentionCounts | null;
+  upNext: UpNextItem[];
   today: HomeToday | null;
   leadsError: boolean;
   todayError: boolean;
+  remindersError: boolean;
   loading: boolean;
   reload: () => void;
 }
 
 const HOME_LEAD_COLUMNS = `
   id,
+  name,
+  mobile,
+  project,
   status,
   board_stage,
   sla_deadline,
   recycle_count,
   is_personal_lead,
   lead_history!inner (
+    id,
     call_count,
     outcome_at,
     assigned_at,
@@ -50,15 +69,18 @@ const HOME_LEAD_COLUMNS = `
 
 const FOCUS_REFRESH_MS = 60_000;
 const REALTIME_DEBOUNCE_MS = 1500;
+export const UP_NEXT_LIMIT = 5;
 
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 
 export function useEmployeeHome(employeeId: string | null | undefined): EmployeeHomeData {
   const calendar = useWorkingCalendar();
   const [leads, setLeads] = useState<HomeLead[] | null>(null);
+  const [reminders, setReminders] = useState<Map<string, number> | null>(null);
   const [today, setToday] = useState<HomeToday | null>(null);
   const [leadsError, setLeadsError] = useState(false);
   const [todayError, setTodayError] = useState(false);
+  const [remindersError, setRemindersError] = useState(false);
   const [loading, setLoading] = useState(true);
   const lastLoad = useRef(0);
   const alive = useRef(true);
@@ -66,7 +88,7 @@ export function useEmployeeHome(employeeId: string | null | undefined): Employee
   const load = useCallback(async () => {
     if (!employeeId) return;
     lastLoad.current = Date.now();
-    const [leadsRes, reportRes] = await Promise.all([
+    const [leadsRes, reportRes, remindersRes] = await Promise.all([
       fetchAllRows(() =>
         supabase
           .from("leads")
@@ -77,7 +99,8 @@ export function useEmployeeHome(employeeId: string | null | undefined): Employee
           .eq("lead_history.is_active", true)
           .order("id", { ascending: true })
       ),
-      supabase.rpc("get_employee_work_report", { p_employee_id: employeeId, p_date: istDateYmd() })
+      supabase.rpc("get_employee_work_report", { p_employee_id: employeeId, p_date: istDateYmd() }),
+      fetchTodayReminders(employeeId)
     ]);
     if (!alive.current) return;
     if (leadsRes.error) {
@@ -86,6 +109,8 @@ export function useEmployeeHome(employeeId: string | null | undefined): Employee
       setLeadsError(false);
       setLeads((leadsRes.data || []) as HomeLead[]);
     }
+    setRemindersError(remindersRes.error);
+    if (!remindersRes.error) setReminders(remindersRes.byLead);
     const report = reportRes.data as Record<string, unknown> | null;
     if (reportRes.error || !report || typeof report !== "object" || Array.isArray(report)) {
       setTodayError(true);
@@ -141,6 +166,10 @@ export function useEmployeeHome(employeeId: string | null | undefined): Employee
   }, [load]);
 
   const counts = useMemo(() => (leads ? myLeadCounts(leads, calendar) : null), [leads, calendar]);
+  // Reminders that failed to load count as none (the row says so) rather than hiding the other numbers.
+  const ctx = useMemo(() => ({ calendar, reminders: reminders ?? new Map<string, number>() }), [calendar, reminders]);
+  const attention = useMemo(() => (leads ? attentionCounts(leads, ctx) : null), [leads, ctx]);
+  const next = useMemo(() => (leads ? upNext(leads, ctx, UP_NEXT_LIMIT) : []), [leads, ctx]);
 
-  return { counts, today, leadsError, todayError, loading, reload: load };
+  return { counts, attention, upNext: next, today, leadsError, todayError, remindersError, loading, reload: load };
 }

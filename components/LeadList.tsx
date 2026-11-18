@@ -27,7 +27,8 @@ import { useWorkingCalendar } from "@/lib/useWorkingCalendar";
 import type { WorkingCalendar } from "@/lib/workingCalendar";
 import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 import { isUntouchedInCurrentAssignment } from "@/lib/newLeadFilter";
-import { recyclingTomorrowCutoffFor as sharedRecyclingTomorrowCutoffFor, stageCounts, tabFromParam } from "@/lib/employeeHome";
+import { recyclingTomorrowCutoffFor as sharedRecyclingTomorrowCutoffFor, stageCounts, tabFromParam, homeFilterFromParam, homeFilterLeads, HOME_FILTER_LABELS, type HomeFilter } from "@/lib/employeeHome";
+import { useTodayReminders } from "@/lib/todayReminders";
 import { useGivenLeadContext } from "@/lib/useGivenLeadContext";
 import { GIVEN_BY_ADMIN_FILTER, givenFilterCount, givenFilterLeads } from "@/lib/givenLeadContext";
 import { NEEDS_CALL_FILTER, needsCallFilterLeads, needsCallOptionText } from "@/lib/needsYourCall";
@@ -164,6 +165,10 @@ export default function LeadList({ employeeId }: LeadListProps) {
   // Recycling Tomorrow (2026-10-05): worth-saving leads whose recycle
   // cutoff is within 24h, any stage, soonest first. See lib/recyclingTomorrow.ts.
   const [recyclingTomorrowFilter, setRecyclingTomorrowFilter] = useState(false);
+  // Employee Home Needs attention (2026-11-18): ?filter=followup-overdue / reminders-today / visits-today, the same
+  // predicates as the Home numbers (lib/employeeHome.ts). Shown as a "From Home" chip; tap to clear.
+  const [homeFilter, setHomeFilter] = useState<HomeFilter | null>(null);
+  const todayReminders = useTodayReminders(employeeId, homeFilter === "reminders-today");
   const [originFilter, setOriginFilter] = useState<"" | LeadOrigin>("");
   const [priorityFilter, setPriorityFilter] = useState<"" | LeadPriority>("");
   const [addPersonalLeadOpen, setAddPersonalLeadOpen] = useState(false);
@@ -225,6 +230,10 @@ export default function LeadList({ employeeId }: LeadListProps) {
     // Employee Home tiles (2026-11-18): ?filter=new is the Status = New filter, ?tab= opens one board tab.
     if (filterParam === "new") {
       setStatusFilter("NEW");
+    }
+    const homeFilterParam = homeFilterFromParam(filterParam);
+    if (homeFilterParam) {
+      setHomeFilter(homeFilterParam);
     }
     const tabParam = tabFromParam(searchParams.get("tab"));
     if (tabParam) {
@@ -556,7 +565,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
     // same bypass for the identical reason. Plain tab-browsing with no
     // search/status/personal-only filter active is completely
     // unchanged.
-    const bypassTabFilter = Boolean(searchQuery.trim()) || Boolean(statusFilter) || personalOnlyFilter || recyclingTomorrowFilter;
+    const bypassTabFilter = Boolean(searchQuery.trim()) || Boolean(statusFilter) || personalOnlyFilter || recyclingTomorrowFilter || Boolean(homeFilter);
     let result = bypassTabFilter ? leads : leads.filter((lead) => (lead.board_stage || "LEADS") === activeTab);
 
     if (personalOnlyFilter) {
@@ -565,6 +574,10 @@ export default function LeadList({ employeeId }: LeadListProps) {
 
     if (recyclingTomorrowFilter) {
       result = result.filter((lead) => recyclingTomorrowCutoffFor(lead, workingCalendar) !== null);
+    }
+
+    if (homeFilter) {
+      result = homeFilterLeads(result, homeFilter, { calendar: workingCalendar, reminders: todayReminders.byLead });
     }
 
     if (originFilter) {
@@ -704,7 +717,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
 
     return result;
 
-  }, [leads, givenContext.byLeadId, needsCall, activeTab, searchQuery, projectFilter, sourceFilter, statusFilter, recyclingSoonFilter, dateRangeFilter, customStart, customEnd, sortBy, personalOnlyFilter, originFilter, priorityFilter, recyclingTomorrowFilter, workingCalendar, activeCall.activeLeadId]);
+  }, [leads, givenContext.byLeadId, needsCall, activeTab, searchQuery, projectFilter, sourceFilter, statusFilter, recyclingSoonFilter, dateRangeFilter, customStart, customEnd, sortBy, personalOnlyFilter, originFilter, priorityFilter, recyclingTomorrowFilter, workingCalendar, activeCall.activeLeadId, homeFilter, todayReminders.byLead]);
   visibleIdsRef.current = visibleLeads.map((lead: any) => lead.id);
 
   // Same fix as app/admin/leads/page.tsx's cardLeads (2026-09-18) — the
@@ -777,6 +790,21 @@ export default function LeadList({ employeeId }: LeadListProps) {
   return (
     <>
       <ResumeCallStrip employeeId={employeeId} currentList="LEAD" openLeadId={selectedLeadId} onResumeHere={(id) => setSelectedLeadId(id)} />
+      {homeFilter && (
+        <div className="mx-4 mt-3 flex">
+          <button
+            type="button"
+            data-testid="home-filter-chip"
+            onClick={() => setHomeFilter(null)}
+            aria-label={`Clear filter: ${HOME_FILTER_LABELS[homeFilter]}`}
+            className="flex min-h-11 items-center gap-2 rounded-full border border-amber-300 bg-amber-50 px-4 text-sm font-semibold text-amber-900"
+          >
+            From Home: {HOME_FILTER_LABELS[homeFilter]}
+            {homeFilter === "reminders-today" && !todayReminders.loaded ? " (loading)" : ` (${visibleLeads.length})`}
+            <span aria-hidden className="text-base leading-none">×</span>
+          </button>
+        </div>
+      )}
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}

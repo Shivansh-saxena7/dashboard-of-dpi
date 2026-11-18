@@ -61,6 +61,39 @@ const hook = read("lib/useEmployeeHome.ts");
 if ((hook.match(/\.channel\(/g) || []).length !== 1) problems.push("lib/useEmployeeHome.ts: exactly one realtime channel");
 if (!/fetchAllRows\(/.test(hook)) problems.push("lib/useEmployeeHome.ts: the leads read goes through fetchAllRows");
 
+// 4) Phase 2 (2026-11-18): Needs attention, reminders today, Up next.
+const T = Date.parse("2026-11-18T06:30:00Z"); // 12:00 IST
+eq("IST day bounds", eh.istDayBounds(T), { start: Date.parse("2026-11-17T18:30:00Z"), end: Date.parse("2026-11-18T18:30:00Z") });
+eq("IST day just after midnight IST", eh.istDayBounds(Date.parse("2026-11-18T18:31:00Z")).start, Date.parse("2026-11-18T18:30:00Z"));
+const visit = (until, reason = "VISIT_LOCK", stage = "VISIT") => ({ id: "v", status: "CONNECTED", board_stage: stage, lead_history: [{ paused_until: until, pause_reason: reason }] });
+eq("visit lock ends tonight 23:59 IST = due today", eh.isVisitDueToday(visit("2026-11-18T18:29:00Z"), T), true);
+eq("visit lock ended yesterday = due", eh.isVisitDueToday(visit("2026-11-17T10:00:00Z"), T), true);
+eq("visit lock ends tomorrow = not due", eh.isVisitDueToday(visit("2026-11-18T18:31:00Z"), T), false);
+eq("snooze is not a visit", eh.isVisitDueToday(visit("2026-11-18T10:00:00Z", "SNOOZE"), T), false);
+eq("visit lock outside Visit stage", eh.isVisitDueToday(visit("2026-11-18T10:00:00Z", "VISIT_LOCK", "FOLLOW_UP"), T), false);
+const byLead = eh.remindersByLead([{ lead_id: "a", reminder_at: "2026-11-18T09:00:00Z" }, { lead_id: "a", reminder_at: "2026-11-18T05:00:00Z" }, { lead_id: "b", reminder_at: "bad" }]);
+eq("earliest reminder per lead, bad dates dropped", [...byLead.entries()], [["a", Date.parse("2026-11-18T05:00:00Z")]]);
+eq("home filter params", [eh.homeFilterFromParam("followup-overdue"), eh.homeFilterFromParam("reminders-today"), eh.homeFilterFromParam("visits-today"), eh.homeFilterFromParam("new"), eh.homeFilterFromParam("toString")], ["followup-overdue", "reminders-today", "visits-today", null, null]);
+const fresh2 = (id, assigned) => ({ id, status: "NEW", board_stage: "LEADS", lead_history: [{ call_count: 0, assigned_at: assigned, last_activity_at: assigned }] });
+const snoozed = { id: "s", status: "NEW", board_stage: "LEADS", lead_history: [{ call_count: 0, assigned_at: at, last_activity_at: at, paused_until: "2026-11-20T00:00:00Z", pause_reason: "SNOOZE" }] };
+const order = eh.upNext([fresh2("n2", "2026-11-17T05:00:00Z"), fresh2("n1", "2026-11-16T05:00:00Z"), fresh2("r1", "2026-11-18T01:00:00Z"), snoozed, visit("2026-11-18T12:00:00Z")], { calendar: null, reminders: new Map([["r1", T]]), now: T }, 3);
+eq("Up next: reminder first, then visit due, then oldest New; snoozed left out; limit", order.map((x) => `${x.lead.id}:${x.reason}`), ["r1:REMINDER", "v:VISIT", "n1:NEW"]);
+
+const homeUi = read("components/EmployeeHomeP1.tsx");
+if (!/rememberCalledCard\(lead\.id\);\s*if \(historyId\) logCallClick\(historyId, lead\.id\);/.test(homeUi) || !/href=\{`tel:\$\{lead\.mobile\}`\}/.test(homeUi)) problems.push("Up next Call must be LeadCard's Call: tel: link + rememberCalledCard + logCallClick");
+if (!/registerActiveCallContext\(\{/.test(homeUi) || !/listType: "LEAD"/.test(homeUi)) problems.push("Up next must register the Home as the list on screen (call-return)");
+if (/rpc\("log_call_click_atomic"|activeCall:v1/.test(homeUi)) problems.push("Up next must not write call clicks or the active call itself");
+if (!/homeFilterLeads\(result, homeFilter,/.test(list) || !/useTodayReminders\(employeeId, homeFilter === "reminders-today"\)/.test(list)) problems.push("LeadList Home filters must use homeFilterLeads + useTodayReminders (same as the Home)");
+if (!/attentionCounts\(leads, ctx\)/.test(hook) || !/fetchTodayReminders\(employeeId\)/.test(hook)) problems.push("Home Needs attention must use attentionCounts + fetchTodayReminders");
+const rem = read("lib/todayReminders.ts");
+if (!/\.eq\("employee_id", employeeId\)/.test(rem) || !/\.limit\(TODAY_REMINDERS_LIMIT\)/.test(rem) || !/\.gte\("reminder_at"/.test(rem) || !/\.lt\("reminder_at"/.test(rem)) problems.push("lib/todayReminders.ts: employee + today's range + limit");
+if (/\.(update|insert|upsert|delete)\(/.test(rem + hook + homeUi)) problems.push("Home Phase 2 is read-only");
+for (const f of ["lib/todayReminders.ts"]) {
+  const s = read(f);
+  if (/setInterval\(/.test(s)) problems.push(`${f}: no interval polling`);
+  if (/purple|violet|fuchsia/i.test(s)) problems.push(`${f}: no purple / violet`);
+}
+
 if (problems.length) {
   console.error("check-employee-home FAILED:\n  " + problems.join("\n  "));
   process.exit(1);
