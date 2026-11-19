@@ -93,11 +93,30 @@ export interface MockState {
   // Network failure switches (result-save tests): abort the next N saves; or save, then lose the answer.
   failUpdates: number;
   landThenLose: number;
+  // Admin Home A1: the settings row and the logged-in employee (tests may change role), the staff list returned to
+  // list reads of employees, and the Admin Home tables. fail = tables that answer 500.
+  settings: Record<string, unknown>;
+  employee: Record<string, unknown>;
+  staff: Record<string, unknown>[] | null;
+  heartbeats: { function_name: string; max_silence_minutes: number; last_succeeded_at: string | null }[];
+  backups: { run_at: string; status: string }[];
+  anomalyRows: { source: string; severity: string }[];
+  transfers: { id: string }[];
+  empRequests: { id: string }[];
+  attendanceRows: { employee_id: string; date: string }[] | null;
+  joins: { employee_id: string; date_of_joining: string | null }[];
+  leave: { employee_id: string; start_date: string; end_date: string | null }[];
+  settingsDelayMs: number;
+  fail: Set<string>;
 }
 
 export async function mockSupabase(context: BrowserContext): Promise<MockState> {
-  const state: MockState = { leads: makeLeads("LEAD", 60), data: makeLeads("DATA", 40), anomalies: [], updates: [], failUpdates: 0, landThenLose: 0 };
-  const employee = { id: EMP, auth_user_id: UID, name: "Test Employee", role: "employee", department: "sales", is_active: true, team_id: null };
+  const employee: Record<string, unknown> = { id: EMP, auth_user_id: UID, name: "Test Employee", role: "employee", department: "sales", is_active: true, team_id: null };
+  const state: MockState = {
+    leads: makeLeads("LEAD", 60), data: makeLeads("DATA", 40), anomalies: [], updates: [], failUpdates: 0, landThenLose: 0,
+    settings: { ...LEAD_ENGINE_SETTINGS }, employee, staff: null, heartbeats: [], backups: [], anomalyRows: [], transfers: [], empRequests: [],
+    attendanceRows: null, joins: [], leave: [], settingsDelayMs: 0, fail: new Set()
+  };
 
   const json = (route: Route, body: unknown, status = 200, headers: Record<string, string> = {}) =>
     route.fulfill({ status, contentType: "application/json", headers: { "access-control-allow-origin": "*", "content-range": "0-0/0", ...headers }, body: JSON.stringify(body) });
@@ -115,8 +134,24 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
     if (p.startsWith("/auth/v1/logout")) return json(route, {});
     if (p.startsWith("/auth/v1")) return json(route, {});
 
-    if (p === "/rest/v1/employees") return json(route, wantsObject ? employee : [employee]);
-    if (p === "/rest/v1/lead_engine_settings") return json(route, wantsObject ? LEAD_ENGINE_SETTINGS : [LEAD_ENGINE_SETTINGS]);
+    const table = p.startsWith("/rest/v1/") ? p.slice("/rest/v1/".length) : "";
+    if (method === "GET" && state.fail.has(table)) return json(route, { message: "fake failure" }, 500);
+    if (p === "/rest/v1/employees") {
+      if (wantsObject || url.searchParams.get("auth_user_id") || !state.staff) return json(route, wantsObject ? state.employee : [state.employee]);
+      return json(route, state.staff);
+    }
+    if (p === "/rest/v1/lead_engine_settings") {
+      if (state.settingsDelayMs > 0) await new Promise((r) => setTimeout(r, state.settingsDelayMs));
+      return json(route, wantsObject ? state.settings : [state.settings]).catch(() => {});
+    }
+    if (method === "GET" && p === "/rest/v1/cron_heartbeats") return json(route, state.heartbeats);
+    if (method === "GET" && p === "/rest/v1/backup_run_log") return json(route, state.backups);
+    if (method === "GET" && p === "/rest/v1/system_anomaly_log") return json(route, state.anomalyRows);
+    if (method === "GET" && p === "/rest/v1/lead_transfer_requests") return json(route, state.transfers);
+    if (method === "GET" && p === "/rest/v1/employee_creation_requests") return json(route, state.empRequests);
+    if (method === "GET" && p === "/rest/v1/employee_payroll_details") return json(route, state.joins);
+    if (method === "GET" && p === "/rest/v1/employee_leave_periods" && !wantsObject) return json(route, state.leave);
+    if (method === "GET" && p === "/rest/v1/attendance" && state.attendanceRows && !wantsObject) return json(route, state.attendanceRows);
     if (p === "/rest/v1/hrms_settings") return json(route, wantsObject ? HRMS_SETTINGS : [HRMS_SETTINGS]);
     if (p === "/rest/v1/leads" && method === "GET") {
       const type = url.searchParams.get("lead_type");

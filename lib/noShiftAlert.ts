@@ -101,6 +101,32 @@ export function employeesWithoutShift(args: {
   return out;
 }
 
+// Admin Home A1 (2026-11-19): the same input mapping the job below does inline (joined = payroll date of joining, else
+// the IST day the employee row was created; shift days = days with a shift start), for the Home's no-shift row. The job
+// itself is unchanged; scripts/check-admin-home.js holds both to the same answers.
+export function buildNoShiftInputs(
+  empRows: { id: string; name: string | null; is_active: boolean; role: string | null; department: string | null; created_at: string | null }[],
+  joinRows: { employee_id: string; date_of_joining: string | null }[],
+  attRows: { employee_id: string; date: string }[]
+): { employees: EmployeeLike[]; shiftDays: Map<string, Set<string>> } {
+  const joinedById = new Map<string, string>();
+  for (const r of joinRows) if (r.date_of_joining) joinedById.set(r.employee_id, r.date_of_joining);
+  const employees: EmployeeLike[] = empRows.map((e) => ({
+    id: e.id,
+    name: e.name || "",
+    is_active: e.is_active,
+    role: e.role,
+    department: e.department,
+    joined: joinedById.get(e.id) ?? (e.created_at ? istYmd(Date.parse(e.created_at)) : null)
+  }));
+  const shiftDays = new Map<string, Set<string>>();
+  for (const r of attRows) {
+    if (!shiftDays.has(r.employee_id)) shiftDays.set(r.employee_id, new Set());
+    shiftDays.get(r.employee_id)!.add(r.date);
+  }
+  return { employees, shiftDays };
+}
+
 export function noShiftMessage(list: { name: string; lastShift: string | null }[], n: number = NO_SHIFT_WORKING_DAYS): string {
   const who = list.map((x) => `${x.name.split(" ")[0]} (${x.lastShift ? `last shift ${x.lastShift}` : "no shift on record"})`).join(", ");
   return `${list.length} employee${list.length === 1 ? "" : "s"} without a shift for ${n}+ working days and no leave on record: ${who}. Mark leave or check with them; their Data does not move on its own.`;
