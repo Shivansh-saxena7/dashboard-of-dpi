@@ -518,3 +518,23 @@ export function callQualityCardModel(summary: {
   if (showData) lines.push(line(data?.genuine_score, "Data cards"));
   return { lines, enforced: Boolean(summary.enforced), estimated: Boolean(summary.estimated) };
 }
+
+// E7: social posts summary for the collapsed card (pure; the read is lib/useSocialSummary.ts).
+export interface SocialSummary {
+  total: number;
+  pending: number;
+}
+
+// A post still to like = Instagram or Facebook not done yet (the card's "IG Like" / "FB Like" columns).
+export function socialSummary(rows: { ig_done?: boolean | null; fb_done?: boolean | null }[] | null | undefined): SocialSummary {
+  const list = rows ?? [];
+  return { total: list.length, pending: list.filter((r) => !(r.ig_done && r.fb_done)).length };
+}
+
+export function socialSummaryText(s: SocialSummary | null): string | null {
+  if (!s) return null;
+  if (s.total === 0) return "No posts today";
+  if (s.pending === 0) return "All posts done today";
+  return `${s.pending} post${s.pending === 1 ? "" : "s"} to like today`;
+}
+

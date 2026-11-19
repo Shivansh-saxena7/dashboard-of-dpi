@@ -223,12 +223,39 @@ export function useEmployeeHome(employeeId: string | null | undefined): Employee
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => load(), REALTIME_DEBOUNCE_MS);
     };
-    const channel = supabase
-      .channel(topic)
-      .on("postgres_changes", { event: "*", schema: "public", table: "leads", filter: `current_owner_id=eq.${employeeId}` }, later)
-      .on("postgres_changes", { event: "*", schema: "public", table: "lead_history", filter: `employee_id=eq.${employeeId}` }, later)
-      .subscribe();
+    // E7 (2026-11-19): the employee's own lead_notes (reminders) on the same channel. lead_notes has to be in the
+    // supabase_realtime publication for that binding to be accepted; if the server refuses the join (CHANNEL_ERROR /
+    // TIMED_OUT) the channel joins again once without it, so leads + lead_history keep updating as before and reminders
+    // fall back to the old refresh (after a save, or when the app comes back). Still one channel at a time.
+    let cancelled = false;
+    let withNotes = true;
+    const make = (): ReturnType<typeof supabase.channel> => {
+      let ch = supabase
+        .channel(topic)
+        .on("postgres_changes", { event: "*", schema: "public", table: "leads", filter: `current_owner_id=eq.${employeeId}` }, later)
+        .on("postgres_changes", { event: "*", schema: "public", table: "lead_history", filter: `employee_id=eq.${employeeId}` }, later);
+      const dropNotes = () => {
+        if (cancelled || !withNotes) return;
+        withNotes = false;
+        supabase.removeChannel(ch);
+        channel = make();
+      };
+      if (withNotes) {
+        ch = ch.on("postgres_changes", { event: "*", schema: "public", table: "lead_notes", filter: `employee_id=eq.${employeeId}` }, later);
+        // The server may accept the join and then report the postgres_changes subscription as failed in a system
+        // message (e.g. a table that is not published); that must not stop the leads / lead_history updates either.
+        ch = ch.on("system", {}, (payload: { extension?: string; status?: string }) => {
+          if (payload?.extension === "postgres_changes" && payload?.status === "error") dropNotes();
+        });
+      }
+      ch.subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") dropNotes();
+      });
+      return ch;
+    };
+    let channel = make();
     return () => {
+      cancelled = true;
       if (timer) clearTimeout(timer);
       supabase.removeChannel(channel);
     };

@@ -255,6 +255,19 @@ const ui6 = read("components/EmployeeHomeP1.tsx");
 if (!has(ui6, "<StatusNotes estimated={cq.estimated} enforced={cq.enforced} />")) problems.push("Call Quality card: the same Learning week / Estimated notes as My Call Quality");
 if (!/filterParam === "given"/.test(read("components/LeadList.tsx"))) problems.push("LeadList: ?filter=given opens the Given by admin filter");
 
+// 9) E7 (2026-11-19): reminders on the same channel with a fallback, social summary, read-only live parity export.
+const hook7 = read("lib/useEmployeeHome.ts");
+if ((hook7.match(/\.channel\(/g) || []).length !== 1) problems.push("Home: still exactly one realtime channel");
+if (!hook7.includes('table: "lead_notes", filter: `employee_id=eq.${employeeId}`')) problems.push("Home: lead_notes binding, own rows only");
+if (!hook7.includes('status === "CHANNEL_ERROR" || status === "TIMED_OUT"') || !hook7.includes('payload?.status === "error"') || !hook7.includes("withNotes = false;")) problems.push("Home: channel rejoins without lead_notes when the server refuses it");
+const soc = read("lib/useSocialSummary.ts").split("\n").filter((l) => !l.trim().startsWith("//")).join("\n"); // code only
+if (soc.includes("/api/data") || !soc.includes(".limit(SOCIAL_SUMMARY_LIMIT)") || !soc.includes('.eq("employee_id", employeeId)')) problems.push("Social summary: own rows, bounded, no /api/data");
+if (/setInterval\(|\.(update|insert|upsert|delete)\(/.test(soc)) problems.push("Social summary: read-only, no polling");
+const ss = eh;
+eq("social summary", [ss.socialSummaryText(ss.socialSummary([{ ig_done: true, fb_done: false }, { ig_done: true, fb_done: true }, {}])), ss.socialSummaryText(ss.socialSummary([])), ss.socialSummaryText(ss.socialSummary([{ ig_done: true, fb_done: true }])), ss.socialSummaryText(null)], ["2 posts to like today", "No posts today", "All posts done today", null]);
+const liveSql = read("scripts/home-parity-live.sql").replace(/--.*$/gm, "");
+if (/\b(insert|update|delete|alter|drop|create|grant|revoke|truncate)\b/i.test(liveSql)) problems.push("scripts/home-parity-live.sql must stay read-only (select only)");
+
 if (problems.length) {
   console.error("check-employee-home FAILED:\n  " + problems.join("\n  "));
   process.exit(1);

@@ -3,8 +3,8 @@
 // components/LeadList.tsx at main 3b3fb25, only `Date.now()` made a parameter so both sides use the same clock) against
 // lib/employeeHome.ts, which LeadList and the Home now share. Exits 1 on any difference.
 //   node scripts/parity-employee-home.js                 5000 random leads, many calendars and clocks (no DB)
-//   node scripts/parity-employee-home.js --live file.json  {"calendar": <get_working_calendar>, "now": iso,
-//                                                          "employees": {"<id8>": [leads as /leads loads them]}}
+//   node scripts/parity-employee-home.js --live <export>   the output of scripts/home-parity-live.sql (read-only),
+//                                                          see scripts/home-parity-live.md
 // Prints counts only, never names or numbers.
 const fs = require("fs");
 const path = require("path");
@@ -131,13 +131,40 @@ function compare(label, leads, cal, now) {
 }
 
 if (process.argv[2] === "--live") {
-  const input = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+  // Live parity for a pilot (read-only). Input: the output of scripts/home-parity-live.sql (the CLI's text is fine).
+  const raw = fs.readFileSync(process.argv[3], "utf8");
+  const at = raw.indexOf('"j"');
+  const from = at >= 0 ? raw.indexOf("{", at) : raw.indexOf("{");
+  let depth = 0, end = from;
+  for (; end < raw.length; end++) { if (raw[end] === "{") depth++; if (raw[end] === "}") { depth--; if (!depth) break; } }
+  const input = JSON.parse(raw.slice(from, end + 1));
   const cal = input.calendar ? parseWorkingCalendar(input.calendar) : null;
   const now = Date.parse(input.now);
-  for (const [id8, leads] of Object.entries(input.employees)) {
-    const r = compare(`live ${id8}`, leads, cal, now);
-    console.log(`${id8}: total ${r.total}, tabs ${JSON.stringify(r.stages)}, New ${r.newCount}, Recycling tomorrow ${r.recyclingTomorrow}`);
+  const today = new Date(now + 5.5 * 3600e3).toISOString().slice(0, 10);
+  const employees = Array.isArray(input.employees) ? input.employees : Object.entries(input.employees || {}).map(([id8, leads]) => ({ id8, leads }));
+  if (!employees.length) problems.push("no employees in the export (edit the id prefixes in scripts/home-parity-live.sql)");
+  for (const e of employees) {
+    const leads = e.leads || [];
+    const r = compare(`live ${e.id8}`, leads, cal, now); // My leads / New / Recycling vs main's LeadList (reference)
+    const split = eh.remindersByDay(e.reminders || [], now);
+    const ctx = { calendar: cal, reminders: split.today, missed: split.yesterday, given: new Set(), now };
+    const att = eh.attentionCounts(leads, ctx); // the Home's rows
+    const filters = Object.fromEntries(Object.keys(att).map((k) => [k, eh.homeFilterLeads(leads, k, ctx).length])); // /leads?filter=
+    for (const k of Object.keys(att)) if (att[k] !== filters[k]) problems.push(`live ${e.id8}: ${k} Home ${att[k]} vs /leads ${filters[k]}`);
+    const refOver = leads.filter((l) => refOverdue(l, cal)).length; // the card badge (reference)
+    if (refOver !== att["followup-overdue"]) problems.push(`live ${e.id8}: overdue Home ${att["followup-overdue"]} vs card badge ${refOver}`);
+    if (typeof e.data_count === "number" && typeof e.data_list === "number" && e.data_count !== e.data_list) problems.push(`live ${e.id8}: Data Home ${e.data_count} vs /data ${e.data_list}`);
+    const q = eh.queueSummary(eh.queueOrder(leads, ctx));
+    const leave = eh.leaveStatus(e.leave || [], (e.leave && e.leave[0] && e.leave[0].employee_id) || "", today, cal);
+    console.log(
+      `${e.id8}: My leads ${r.total} (Leads ${r.stages.LEADS}, Follow-up ${r.stages.FOLLOW_UP}, Visit ${r.stages.VISIT}, Booking ${r.stages.BOOKING}); ` +
+        `New ${r.newCount}; Recycle tomorrow ${r.recyclingTomorrow}; ` +
+        `Called no result ${att["pending-result"]}, Missed reminders ${att["reminders-missed"]}, Reminders today ${att["reminders-today"]}, ` +
+        `Overdue ${att["followup-overdue"]} (card badge ${refOver}), Visits due ${att["visits-today"]}, Snooze ends ${att["snooze-ends-today"]}; ` +
+        `Start: ${q.urgent} due now / ${q.total}; Data ${e.data_count ?? "-"} (/data ${e.data_list ?? "-"}); Leave: ${leave ? leave.kind : "none"}`
+    );
   }
+  console.log("Given to you is not in this check: get_given_lead_context answers for the logged-in caller only (the Home and /leads call the same RPC + filter).");
 } else {
   let seed = 20261118;
   const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);

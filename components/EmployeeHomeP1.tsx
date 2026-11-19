@@ -16,6 +16,7 @@ import PostsTrackingView from "@/components/PostsTrackingView";
 import { useEmployeeHome } from "@/lib/useEmployeeHome";
 import { useTeamToday } from "@/lib/useTeamToday";
 import { useHomeContext } from "@/lib/useHomeContext";
+import { socialSummaryText, useSocialSummary } from "@/lib/useSocialSummary";
 import { StatusNotes } from "@/components/CallQualityParts";
 import { bandClasses } from "@/lib/callQuality";
 import { istDateYmd } from "@/lib/ownerLeave";
@@ -190,6 +191,8 @@ export default function EmployeeHomeP1({
   const leaveText = leaveStatusText(leave);
   const cq = callQualityCardModel(homeContext.cqSummary);
   const [socialOpen, setSocialOpen] = useState(false);
+  // E7: one line on the collapsed card (own tracking rows, no /api/data); not read while the card is open.
+  const socialLine = socialSummaryText(useSocialSummary(employeeId, !socialOpen));
   const upNextRef = useRef(upNext);
   upNextRef.current = upNext;
 
@@ -565,7 +568,14 @@ export default function EmployeeHomeP1({
           data-testid="social-toggle"
           className={`flex min-h-12 w-full items-center justify-between px-4 text-left ${TITLE}`}
         >
-          <span>Social posts</span>
+          <span>
+            Social posts
+            {!socialOpen && socialLine && (
+              <span data-testid="social-summary" className={`block ${LABEL} text-slate-600`}>
+                {socialLine}
+              </span>
+            )}
+          </span>
           <span aria-hidden className={`text-slate-500 transition-transform motion-reduce:transition-none ${socialOpen ? "rotate-90" : ""}`}>›</span>
         </button>
         {socialOpen && (

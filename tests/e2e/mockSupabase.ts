@@ -109,11 +109,13 @@ export interface MockState {
   leave: { employee_id: string; start_date: string; end_date: string | null }[];
   given: Record<string, unknown> | null;
   cq: Record<string, unknown> | null;
+  // E7: own tracking rows (social posts summary).
+  tracking: { ig_done: boolean; fb_done: boolean }[];
 }
 
 export async function mockSupabase(context: BrowserContext): Promise<MockState> {
   const employee: Record<string, unknown> = { id: EMP, auth_user_id: UID, name: "Test Employee", role: "employee", department: "sales", is_active: true, team_id: null };
-  const state: MockState = { leads: makeLeads("LEAD", 60), data: makeLeads("DATA", 40), anomalies: [], updates: [], failUpdates: 0, landThenLose: 0, settings: { ...LEAD_ENGINE_SETTINGS }, workReport: null, settingsDelayMs: 0, reminders: [], remindersFail: false, employee, teamPending: [], leave: [], given: null, cq: null };
+  const state: MockState = { leads: makeLeads("LEAD", 60), data: makeLeads("DATA", 40), anomalies: [], updates: [], failUpdates: 0, landThenLose: 0, settings: { ...LEAD_ENGINE_SETTINGS }, workReport: null, settingsDelayMs: 0, reminders: [], remindersFail: false, employee, teamPending: [], leave: [], given: null, cq: null, tracking: [] };
 
   const json = (route: Route, body: unknown, status = 200, headers: Record<string, string> = {}) =>
     route.fulfill({ status, contentType: "application/json", headers: { "access-control-allow-origin": "*", "content-range": "0-0/0", ...headers }, body: JSON.stringify(body) });
@@ -202,6 +204,7 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
       return json(route, state.cq);
     }
     if (p === "/rest/v1/employee_leave_periods" && method === "GET") return json(route, state.leave);
+    if (p === "/rest/v1/tracking" && method === "GET") return json(route, state.tracking);
     if (p === "/rest/v1/leads" && method === "HEAD" && url.searchParams.get("lead_type") === "eq.DATA") {
       const n = state.data.length;
       return route.fulfill({ status: 200, headers: { "access-control-allow-origin": "*", "access-control-expose-headers": "content-range", "content-range": n ? `0-0/${n}` : "*/0" } });
