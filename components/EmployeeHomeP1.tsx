@@ -15,6 +15,11 @@ import { motion, useReducedMotion } from "framer-motion";
 import PostsTrackingView from "@/components/PostsTrackingView";
 import { useEmployeeHome } from "@/lib/useEmployeeHome";
 import { useTeamToday } from "@/lib/useTeamToday";
+import { useHomeContext } from "@/lib/useHomeContext";
+import { StatusNotes } from "@/components/CallQualityParts";
+import { bandClasses } from "@/lib/callQuality";
+import { istDateYmd } from "@/lib/ownerLeave";
+import { useWorkingCalendar } from "@/lib/useWorkingCalendar";
 import { logCallClick } from "@/lib/logCallClick";
 import { rememberCalledCard } from "@/lib/lastCalledLead";
 import { registerActiveCallContext } from "@/lib/activeCall";
@@ -24,14 +29,19 @@ import {
   HOME_FILTER_LABELS,
   HOME_LINKS,
   UP_NEXT_LABELS,
+  callQualityCardModel,
   fromHome,
+  leaveStatus,
+  leaveStatusText,
+  shortYmd,
   type HomeFilter,
   type HomeStage,
   type UpNextItem
 } from "@/lib/employeeHome";
 
 // E4: "Called, no result" first (the result form is one tap away), then yesterday's missed reminders.
-const ATTENTION_ROWS: HomeFilter[] = ["pending-result", "reminders-missed", "reminders-today", "followup-overdue", "visits-today"];
+// E6: snoozes ending today next to the visit locks ending today.
+const ATTENTION_ROWS: HomeFilter[] = ["pending-result", "reminders-missed", "reminders-today", "followup-overdue", "visits-today", "snooze-ends-today"];
 
 const CARD = "rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm";
 const TITLE = "text-base font-semibold text-slate-900";
@@ -167,12 +177,18 @@ export default function EmployeeHomeP1({
   role?: string | null;
   teamId?: string | null;
 }) {
-  const { counts, attention, upNext, queueLength, queueUrgent, pendingIds, data, dataQueueLength, today, leadsError, todayError, remindersError, loading, reload } = useEmployeeHome(employeeId);
+  const { counts, attention, upNext, queueLength, queueUrgent, pendingIds, given, dataTotal, data, dataQueueLength, today, leadsError, todayError, remindersError, loading, reload } = useEmployeeHome(employeeId);
   // Phase 3 variants: a data-only employee (no LEAD leads, some DATA leads) sees DATA numbers instead of the lead
   // sections; a team leader also gets "My team today" (their own team only, RLS).
   const isDataOnly = Boolean(data);
   const isTeamLeader = role === "team_leader" && Boolean(teamId);
   const teamToday = useTeamToday(teamId, isTeamLeader);
+  // E6: own leave (strip at the top) and own Call Quality (display-only card).
+  const calendar = useWorkingCalendar();
+  const homeContext = useHomeContext(employeeId);
+  const leave = homeContext.leaveRows ? leaveStatus(homeContext.leaveRows, employeeId, istDateYmd(), calendar) : null;
+  const leaveText = leaveStatusText(leave);
+  const cq = callQualityCardModel(homeContext.cqSummary);
   const [socialOpen, setSocialOpen] = useState(false);
   const upNextRef = useRef(upNext);
   upNextRef.current = upNext;
@@ -249,6 +265,19 @@ export default function EmployeeHomeP1({
       // Room for the sticky Start button (about 72px) and the phone's safe area, so the last card is never covered.
       style={{ paddingBottom: showStart ? "calc(env(safe-area-inset-bottom, 0px) + 112px)" : "calc(env(safe-area-inset-bottom, 0px) + 24px)" }}
     >
+      {leave && leaveText && (
+        <div
+          data-testid="leave-strip"
+          data-kind={leave.kind}
+          role="status"
+          className={`rounded-2xl border px-4 py-3 text-[15px] ${
+            leave.kind === "UPCOMING" ? "border-slate-200 bg-white text-slate-800" : "border-sky-200 bg-sky-50 text-sky-900"
+          }`}
+        >
+          {leaveText}
+        </div>
+      )}
+
       {!isDataOnly && (
         <section aria-labelledby="home-attention" data-testid="needs-attention" className={`${CARD} border-amber-200`}>
           <h2 id="home-attention" className={`mb-2 ${TITLE}`}>Needs attention</h2>
@@ -431,10 +460,63 @@ export default function EmployeeHomeP1({
                   </Link>
                 ))}
               </div>
+              {dataTotal !== null && dataTotal > 0 && (
+                <Link
+                  href={fromHome("/data")}
+                  data-testid="my-leads-data"
+                  aria-label={`${dataTotal} data leads, open`}
+                  className="mt-2 flex min-h-11 items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 text-[15px] text-slate-800"
+                >
+                  <span>
+                    <b className="tabular-nums text-slate-900">{dataTotal}</b> Data
+                  </span>
+                  <span aria-hidden className="text-slate-500">›</span>
+                </Link>
+              )}
             </FadeIn>
           ) : (
             leadsError && <RetryBox what="your lead counts" onRetry={reload} testId="retry-my-leads" />
           )}
+        </section>
+      )}
+
+      {!isDataOnly && given && given.count > 0 && (
+        <section aria-labelledby="home-given" data-testid="given-card" className={CARD}>
+          <div className="mb-1 flex items-center justify-between">
+            <h2 id="home-given" className={TITLE}>Given to you</h2>
+            <Link href={fromHome("/leads?filter=given")} className={LINK} data-testid="given-open">
+              Open ›
+            </Link>
+          </div>
+          <p className="text-[15px] text-slate-800">
+            <b data-testid="given-count" className="tabular-nums text-slate-900">{given.count}</b> lead{given.count === 1 ? "" : "s"} an admin gave you, not called yet
+            {given.protectedUntil && <span className={`block ${LABEL} text-slate-600`}>Protected until {shortYmd(given.protectedUntil.slice(0, 10))}</span>}
+          </p>
+        </section>
+      )}
+
+      {cq && (
+        <section aria-labelledby="home-cq" data-testid="cq-card" className={CARD}>
+          <div className="mb-2 flex items-center justify-between">
+            <h2 id="home-cq" className={TITLE}>Call Quality</h2>
+            <Link href="/report" className={LINK} data-testid="cq-open">
+              My report ›
+            </Link>
+          </div>
+          <ul className="mb-2 space-y-1">
+            {cq.lines.map((line) => {
+              const c = bandClasses(line.band);
+              return (
+                <li key={line.label ?? "only"} data-testid="cq-line" data-band={line.band ?? "none"} className="flex items-center gap-2 text-[15px]">
+                  <span aria-hidden className={`h-2.5 w-2.5 rounded-full ${c.dot}`} />
+                  {line.label && <span className="text-slate-700">{line.label}:</span>}
+                  <b className={c.text}>{line.bandText}</b>
+                  {line.score !== null && <span className="tabular-nums text-slate-600">({line.score})</span>}
+                </li>
+              );
+            })}
+          </ul>
+          <StatusNotes estimated={cq.estimated} enforced={cq.enforced} />
         </section>
       )}
 

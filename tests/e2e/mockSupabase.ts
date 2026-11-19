@@ -105,11 +105,15 @@ export interface MockState {
   // The logged-in employee row (tests may set role / team_id) and leads reserved for the team (Phase 3).
   employee: Record<string, unknown>;
   teamPending: { id: string }[];
+  // E6: own leave rows, get_given_lead_context answer, get_call_quality_summary answer (null = "not visible" error).
+  leave: { employee_id: string; start_date: string; end_date: string | null }[];
+  given: Record<string, unknown> | null;
+  cq: Record<string, unknown> | null;
 }
 
 export async function mockSupabase(context: BrowserContext): Promise<MockState> {
   const employee: Record<string, unknown> = { id: EMP, auth_user_id: UID, name: "Test Employee", role: "employee", department: "sales", is_active: true, team_id: null };
-  const state: MockState = { leads: makeLeads("LEAD", 60), data: makeLeads("DATA", 40), anomalies: [], updates: [], failUpdates: 0, landThenLose: 0, settings: { ...LEAD_ENGINE_SETTINGS }, workReport: null, settingsDelayMs: 0, reminders: [], remindersFail: false, employee, teamPending: [] };
+  const state: MockState = { leads: makeLeads("LEAD", 60), data: makeLeads("DATA", 40), anomalies: [], updates: [], failUpdates: 0, landThenLose: 0, settings: { ...LEAD_ENGINE_SETTINGS }, workReport: null, settingsDelayMs: 0, reminders: [], remindersFail: false, employee, teamPending: [], leave: [], given: null, cq: null };
 
   const json = (route: Route, body: unknown, status = 200, headers: Record<string, string> = {}) =>
     route.fulfill({ status, contentType: "application/json", headers: { "access-control-allow-origin": "*", "content-range": "0-0/0", ...headers }, body: JSON.stringify(body) });
@@ -192,6 +196,16 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
       return json(route, null);
     }
     if (p === "/rest/v1/rpc/get_employee_work_report" && state.workReport) return json(route, state.workReport);
+    if (p === "/rest/v1/rpc/get_given_lead_context") return json(route, state.given ?? { enabled: false, leads: [] });
+    if (p === "/rest/v1/rpc/get_call_quality_summary") {
+      if (!state.cq) return json(route, { code: "P0001", message: "get_call_quality_summary: Call Quality is not visible to employees", details: null, hint: null }, 400);
+      return json(route, state.cq);
+    }
+    if (p === "/rest/v1/employee_leave_periods" && method === "GET") return json(route, state.leave);
+    if (p === "/rest/v1/leads" && method === "HEAD" && url.searchParams.get("lead_type") === "eq.DATA") {
+      const n = state.data.length;
+      return route.fulfill({ status: 200, headers: { "access-control-allow-origin": "*", "access-control-expose-headers": "content-range", "content-range": n ? `0-0/${n}` : "*/0" } });
+    }
     if (p === "/rest/v1/rpc/get_working_calendar") return json(route, { timezone: "Asia/Kolkata", weekly_off_day: 2, ranges: [], timers_enabled: true });
     if (p.startsWith("/rest/v1/rpc/")) return json(route, wantsObject ? {} : []);
     if (p === "/rest/v1/lead_history" && method === "GET") {

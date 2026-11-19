@@ -191,6 +191,70 @@ for (const [name, src] of [["LeadList", read("components/LeadList.tsx")], ["Data
   if (!/data-testid="back-to-home"/.test(src) || !/searchParams\.get\("from"\) === "home"/.test(src)) problems.push(`${name}: Back to Home chip when coming from the Home`);
 }
 
+// 8) E6 (2026-11-19): leave strip, snooze ends today, Given step, mixed DATA count, Call Quality card.
+const tue = { weeklyOffDay: 2, ranges: [], timersEnabled: true };
+const tanuRows = [{ employee_id: "t", start_date: "2026-11-12", end_date: "2026-11-15" }];
+eq("leave: on leave", eh.leaveStatus(tanuRows, "t", "2026-11-13", tue), { kind: "ON_LEAVE", until: "2026-11-15" });
+eq("leave: grace Mon 16 until Wed 18 (Tue off)", eh.leaveStatus(tanuRows, "t", "2026-11-16", tue), { kind: "GRACE", until: "2026-11-18" });
+eq("leave: Tue 17 weekly off is not a grace day", eh.leaveStatus(tanuRows, "t", "2026-11-17", tue), null);
+eq("leave: grace Wed 18", eh.leaveStatus(tanuRows, "t", "2026-11-18", tue), { kind: "GRACE", until: "2026-11-18" });
+eq("leave: Thu 19 back to normal", eh.leaveStatus(tanuRows, "t", "2026-11-19", tue), null);
+eq("leave: coming up within 7 days", eh.leaveStatus(tanuRows, "t", "2026-11-08", tue), { kind: "UPCOMING", from: "2026-11-12", to: "2026-11-15" });
+eq("leave: not yet shown 8+ days ahead", eh.leaveStatus(tanuRows, "t", "2026-11-04", tue), null);
+const openRows = [{ employee_id: "o", start_date: "2026-11-20", end_date: null }];
+eq("leave: open-ended, on leave", eh.leaveStatus(openRows, "o", "2026-11-25", tue), { kind: "ON_LEAVE", until: null });
+eq("leave: someone else's leave ignored", eh.leaveStatus(tanuRows, "x", "2026-11-13", tue), null);
+eq("leave text", [eh.leaveStatusText({ kind: "GRACE", until: "2026-11-18" }), eh.leaveStatusText({ kind: "ON_LEAVE", until: null })], ["Back from leave. Until 18 Nov your lead timers stay paused and no recycled leads are given to you.", "On leave. Your lead timers are paused."]);
+const sn = (until, reason = "SNOOZE") => ({ id: "s", status: "CONNECTED", board_stage: "FOLLOW_UP", lead_history: [{ paused_until: until, pause_reason: reason }] });
+eq("snooze ends later today", eh.isSnoozeEndingToday(sn("2026-11-19T12:00:00Z"), N), true);
+eq("snooze ended earlier today", eh.isSnoozeEndingToday(sn("2026-11-18T19:00:00Z"), N), true);
+eq("snooze ends tomorrow", eh.isSnoozeEndingToday(sn("2026-11-19T18:31:00Z"), N), false);
+eq("visit lock is not a snooze", eh.isSnoozeEndingToday(sn("2026-11-19T12:00:00Z", "VISIT_LOCK"), N), false);
+const gq = eh.queueOrder([fresh2("n1", "2026-11-16T05:00:00Z"), fresh2("g1", "2026-11-17T05:00:00Z")], { calendar: null, reminders: new Map(), given: new Set(["g1"]), now: N });
+eq("queue: Given to you before plain New", gq.map((x) => `${x.lead.id}:${x.reason}`), ["g1:GIVEN", "n1:NEW"]);
+
+// Call Quality card = My Call Quality's top: reference copy of components/MyCallQuality.tsx lines 108-111 + ScoreLight's
+// "band ?? Not enough data yet" (main 3b3fb25), against callQualityCardModel.
+const { bandOf } = require(path.join(root, "lib/callQuality.ts"));
+const refCq = (summary) => {
+  const me = summary.employees[0];
+  const lead = me?.by_card_type.LEAD;
+  const data = me?.by_card_type.DATA;
+  const showData = (data?.dial_clicks ?? 0) > 0;
+  const showLead = (lead?.dial_clicks ?? 0) > 0 || !showData;
+  const out = [];
+  if (showLead) out.push([showData ? "Lead cards" : null, bandOf(lead?.genuine_score ?? null) ?? "Not enough data yet"]);
+  if (showData) out.push(["Data cards", bandOf(data?.genuine_score ?? null) ?? "Not enough data yet"]);
+  return out;
+};
+const cqCases = [
+  { LEAD: { dial_clicks: 40, genuine_score: 86 } },
+  { LEAD: { dial_clicks: 40, genuine_score: 70 }, DATA: { dial_clicks: 12, genuine_score: 55 } },
+  { DATA: { dial_clicks: 20, genuine_score: 80 } },
+  { LEAD: { dial_clicks: 3, genuine_score: null } },
+  {}
+];
+for (const [i, by] of cqCases.entries()) {
+  const summary = { enforced: false, estimated: i % 2 === 0, employees: [{ by_card_type: by }] };
+  const m = eh.callQualityCardModel(summary);
+  eq(`Call Quality card case ${i}`, m.lines.map((l) => [l.label, l.bandText]), refCq(summary));
+  eq(`Call Quality card case ${i} notes`, [m.enforced, m.estimated], [false, i % 2 === 0]);
+}
+eq("Call Quality card: bands", eh.callQualityCardModel({ enforced: true, estimated: false, employees: [{ by_card_type: { LEAD: { dial_clicks: 9, genuine_score: 59 } } }] }).lines[0].bandText, "Red");
+eq("Call Quality card: nothing to show without a summary", eh.callQualityCardModel(null), null);
+
+const ctxHook = read("lib/useHomeContext.ts");
+const has = (src, text) => src.includes(text);
+if (!has(ctxHook, '.eq("employee_id", employeeId)') || !has(ctxHook, ".limit(HOME_LEAVE_LIMIT)")) problems.push("useHomeContext: own leave rows, bounded");
+if (!has(ctxHook, 'rpc("get_call_quality_summary", { p_employee_id: employeeId,') || has(ctxHook, "get_call_quality_details")) problems.push("useHomeContext: the summary RPC for this employee only (no details)");
+if (/\.(update|insert|upsert|delete)\(|setInterval\(|\.channel\(/.test(ctxHook)) problems.push("useHomeContext: read-only, no polling, no channel");
+const hook6 = read("lib/useEmployeeHome.ts");
+if (!has(hook6, "useGivenLeadContext(employeeId)") || !has(hook6, "givenFilterLeads(leads, givenContext.byLeadId)")) problems.push("Given to you: same hook + filter as /leads Given by admin");
+if (!has(hook6, '{ count: "exact", head: true }') || !has(hook6, '.eq("lead_type", "DATA")')) problems.push("Mixed DATA count: one HEAD count with /data's filters");
+const ui6 = read("components/EmployeeHomeP1.tsx");
+if (!has(ui6, "<StatusNotes estimated={cq.estimated} enforced={cq.enforced} />")) problems.push("Call Quality card: the same Learning week / Estimated notes as My Call Quality");
+if (!/filterParam === "given"/.test(read("components/LeadList.tsx"))) problems.push("LeadList: ?filter=given opens the Given by admin filter");
+
 if (problems.length) {
   console.error("check-employee-home FAILED:\n  " + problems.join("\n  "));
   process.exit(1);

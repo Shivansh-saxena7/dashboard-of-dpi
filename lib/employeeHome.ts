@@ -7,6 +7,9 @@ import { isUntouchedInCurrentAssignment } from "./newLeadFilter.ts";
 import { recyclingTomorrowCutoff } from "./recyclingTomorrow.ts";
 import { calculateSLAStatus } from "./calculateSLAStatus.ts";
 import type { WorkingCalendar } from "./workingCalendar.ts";
+import { ownersOnLeave, type LeavePeriodRow } from "./ownerLeave.ts";
+import { employeesInReturnGrace, returnGraceDays } from "./ownerLeaveCalendar.ts";
+import { bandOf, type Band } from "./callQuality.ts";
 
 export type HomeStage = "LEADS" | "FOLLOW_UP" | "VISIT" | "BOOKING";
 export const HOME_STAGES: HomeStage[] = ["LEADS", "FOLLOW_UP", "VISIT", "BOOKING"];
@@ -178,14 +181,24 @@ export function remindersByLead(rows: ReminderRow[] | null | undefined): Map<str
   return map;
 }
 
-export type HomeFilter = "pending-result" | "reminders-missed" | "followup-overdue" | "reminders-today" | "visits-today";
+export type HomeFilter = "pending-result" | "reminders-missed" | "followup-overdue" | "reminders-today" | "visits-today" | "snooze-ends-today";
 export const HOME_FILTER_LABELS: Record<HomeFilter, string> = {
   "pending-result": "Called, no result",
   "reminders-missed": "Missed reminders (yesterday)",
   "followup-overdue": "Overdue follow-ups",
   "reminders-today": "Reminders today",
-  "visits-today": "Visits due today"
+  "visits-today": "Visits due today",
+  "snooze-ends-today": "Snooze ends today"
 };
+
+// E6: a Snooze that ends within today's IST day (earlier today or later today) - the lead comes back to work today.
+export function isSnoozeEndingToday(lead: HomeLead, now: number = Date.now()): boolean {
+  const h = lead.lead_history?.[0];
+  if (h?.pause_reason !== "SNOOZE" || !h?.paused_until) return false;
+  const until = Date.parse(h.paused_until);
+  const { start, end } = istDayBounds(now);
+  return Number.isFinite(until) && until >= start && until < end;
+}
 
 // E4 (2026-11-19): reminders read as one bounded range (yesterday + today, IST) and split by day.
 export function remindersByDay(rows: ReminderRow[] | null | undefined, now: number = Date.now()): { today: Map<string, number>; yesterday: Map<string, number> } {
@@ -215,11 +228,14 @@ export interface AttentionContext {
   reminders: Map<string, number>;
   // Yesterday's reminders (E4); missing = none.
   missed?: Map<string, number>;
+  // E6: leads an admin gave this employee (givenFilterLeads of get_given_lead_context, the /leads "Given by admin" set).
+  given?: Set<string>;
   now?: number;
 }
 
 // The one predicate behind a Needs-attention number and the /leads list it opens (all tabs, like Status = New).
 export function matchesHomeFilter(lead: HomeLead, filter: HomeFilter, ctx: AttentionContext): boolean {
+  if (filter === "snooze-ends-today") return isSnoozeEndingToday(lead, ctx.now ?? Date.now());
   if (filter === "pending-result") return isQueueable(lead, ctx.now ?? Date.now()) && isPendingResult(lead);
   if (filter === "reminders-missed") return isQueueable(lead, ctx.now ?? Date.now()) && isMissedReminder(lead, ctx.missed);
   if (filter === "followup-overdue") return isFollowUpOverdue(lead, ctx.calendar);
@@ -238,11 +254,12 @@ export function attentionCounts(leads: HomeLead[], ctx: AttentionContext): Atten
     "reminders-missed": homeFilterLeads(leads, "reminders-missed", ctx).length,
     "followup-overdue": homeFilterLeads(leads, "followup-overdue", ctx).length,
     "reminders-today": homeFilterLeads(leads, "reminders-today", ctx).length,
-    "visits-today": homeFilterLeads(leads, "visits-today", ctx).length
+    "visits-today": homeFilterLeads(leads, "visits-today", ctx).length,
+    "snooze-ends-today": homeFilterLeads(leads, "snooze-ends-today", ctx).length
   };
 }
 
-export type UpNextReason = "PENDING" | "MISSED" | "REMINDER" | "RECYCLING" | "OVERDUE" | "VISIT" | "NEW";
+export type UpNextReason = "PENDING" | "MISSED" | "REMINDER" | "RECYCLING" | "OVERDUE" | "VISIT" | "GIVEN" | "NEW";
 export const UP_NEXT_LABELS: Record<UpNextReason, string> = {
   PENDING: "Called, no result",
   MISSED: "Missed reminder (yesterday)",
@@ -250,6 +267,7 @@ export const UP_NEXT_LABELS: Record<UpNextReason, string> = {
   RECYCLING: "Recycles tomorrow",
   OVERDUE: "Follow-up overdue",
   VISIT: "Visit due today",
+  GIVEN: "Given to you",
   NEW: "New"
 };
 export interface UpNextItem {
@@ -307,6 +325,8 @@ export function queueOrder(leads: HomeLead[], ctx: AttentionContext): UpNextItem
   );
   add(open.filter((l) => isFollowUpOverdue(l, ctx.calendar)).sort((a, b) => time(h(a)?.last_activity_at) - time(h(b)?.last_activity_at)), "OVERDUE");
   add(open.filter((l) => isVisitDueToday(l, now)).sort((a, b) => time(h(a)?.paused_until) - time(h(b)?.paused_until)), "VISIT");
+  // E6 (plan step 5): given by an admin and not yet called, before plain New.
+  add(open.filter((l) => ctx.given?.has(l.id) ?? false).sort((a, b) => time(h(a)?.assigned_at) - time(h(b)?.assigned_at)), "GIVEN");
   add(
     open
       .filter((l) => isUntouchedInCurrentAssignment(h(l)))
@@ -392,7 +412,8 @@ export const HOME_ATTENTION_LINKS: Record<HomeFilter, string> = {
   "reminders-missed": "/leads?filter=reminders-missed&from=home",
   "followup-overdue": "/leads?filter=followup-overdue&from=home",
   "reminders-today": "/leads?filter=reminders-today&from=home",
-  "visits-today": "/leads?filter=visits-today&from=home"
+  "visits-today": "/leads?filter=visits-today&from=home",
+  "snooze-ends-today": "/leads?filter=snooze-ends-today&from=home"
 };
 
 // Data-only queue (/data?queue=1): 1 called, no result yet (oldest click first), 2 untouched (oldest assignment
@@ -419,4 +440,81 @@ export function dataQueueOrder(leads: DataLead[]): string[] {
       .sort((a, b) => dataAttemptsLeft(a) - dataAttemptsLeft(b) || time(h(a)?.last_activity_at) - time(h(b)?.last_activity_at))
   );
   return out;
+}
+
+// ---- E6 (2026-11-19): leave status, Given to you, Call Quality card. Pure, no DB. ----
+
+export type LeaveStatus =
+  | { kind: "ON_LEAVE"; until: string | null }
+  | { kind: "GRACE"; until: string }
+  | { kind: "UPCOMING"; from: string; to: string | null }
+  | null;
+
+const addDaysYmd = (ymd: string, n: number) => new Date(Date.parse(ymd + "T00:00:00Z") + n * DAY_MS).toISOString().slice(0, 10);
+
+// The employee's own leave, by the same rules the sweep uses (lib/ownerLeave.ts, lib/ownerLeaveCalendar.ts): on leave
+// today; else in return grace (the first 2 working days after a leave with an end date; weekly off and holidays do not
+// count, open-ended leave has none); else a leave starting within the next `horizonDays` days.
+export function leaveStatus(rows: LeavePeriodRow[] | null | undefined, employeeId: string, todayYmd: string, cal: WorkingCalendar | null, horizonDays = 7): LeaveStatus {
+  const mine = (rows ?? []).filter((r) => r.employee_id === employeeId);
+  if (ownersOnLeave(mine, todayYmd).has(employeeId)) {
+    const row = mine.find((r) => r.start_date <= todayYmd && (!r.end_date || r.end_date >= todayYmd));
+    return { kind: "ON_LEAVE", until: row?.end_date ?? null };
+  }
+  if (employeesInReturnGrace(mine, todayYmd, cal).has(employeeId)) {
+    for (const r of mine) {
+      const days = returnGraceDays([r], employeeId, cal);
+      if (days.includes(todayYmd)) return { kind: "GRACE", until: days[days.length - 1] };
+    }
+  }
+  const limit = addDaysYmd(todayYmd, horizonDays);
+  const next = mine.filter((r) => r.start_date > todayYmd && r.start_date <= limit).sort((a, b) => a.start_date.localeCompare(b.start_date))[0];
+  return next ? { kind: "UPCOMING", from: next.start_date, to: next.end_date } : null;
+}
+
+export function shortYmd(ymd: string): string {
+  const d = new Date(ymd + "T00:00:00Z");
+  return `${d.getUTCDate()} ${d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" })}`;
+}
+
+export function leaveStatusText(status: LeaveStatus): string | null {
+  if (!status) return null;
+  if (status.kind === "ON_LEAVE") return status.until ? `On leave until ${shortYmd(status.until)}. Your lead timers are paused.` : "On leave. Your lead timers are paused.";
+  if (status.kind === "GRACE") return `Back from leave. Until ${shortYmd(status.until)} your lead timers stay paused and no recycled leads are given to you.`;
+  return status.to ? `Leave coming up: ${shortYmd(status.from)} to ${shortYmd(status.to)}.` : `Leave coming up from ${shortYmd(status.from)}.`;
+}
+
+// Call Quality card: what My Call Quality shows at the top, for this employee only. Same choice of Lead / Data lines as
+// components/MyCallQuality.tsx (Data only when there were Data dials; Lead when there were Lead dials or no Data), the
+// same band rule (bandOf) and the same "Not enough data yet". Display only.
+export interface CallQualityCardLine {
+  label: string | null;
+  band: Band | null;
+  bandText: string;
+  score: number | null;
+}
+export interface CallQualityCardModel {
+  lines: CallQualityCardLine[];
+  enforced: boolean;
+  estimated: boolean;
+}
+export function callQualityCardModel(summary: {
+  enforced: boolean;
+  estimated: boolean;
+  employees: { by_card_type: Record<string, { dial_clicks?: number | null; genuine_score?: number | null } | undefined> }[];
+} | null | undefined): CallQualityCardModel | null {
+  if (!summary) return null;
+  const me = summary.employees?.[0];
+  const lead = me?.by_card_type?.LEAD;
+  const data = me?.by_card_type?.DATA;
+  const showData = (data?.dial_clicks ?? 0) > 0;
+  const showLead = (lead?.dial_clicks ?? 0) > 0 || !showData;
+  const line = (score: number | null | undefined, label: string | null): CallQualityCardLine => {
+    const band = bandOf(score ?? null);
+    return { label, band, bandText: band ?? "Not enough data yet", score: score ?? null };
+  };
+  const lines: CallQualityCardLine[] = [];
+  if (showLead) lines.push(line(lead?.genuine_score, showData ? "Lead cards" : null));
+  if (showData) lines.push(line(data?.genuine_score, "Data cards"));
+  return { lines, enforced: Boolean(summary.enforced), estimated: Boolean(summary.estimated) };
 }

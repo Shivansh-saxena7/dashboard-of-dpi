@@ -17,6 +17,8 @@ import { istDateYmd } from "@/lib/ownerLeave";
 import { useWorkingCalendar } from "@/lib/useWorkingCalendar";
 import { fetchTodayReminders } from "@/lib/todayReminders";
 import { reportClientError } from "@/lib/reportClientError";
+import { useGivenLeadContext } from "@/lib/useGivenLeadContext";
+import { givenFilterLeads } from "@/lib/givenLeadContext";
 import {
   attentionCounts,
   dataCounts,
@@ -49,6 +51,10 @@ export interface EmployeeHomeData {
   // E4: "5 due now · 60 total" on the Start button (queueSummary), and the "Called, no result" leads (row link).
   queueUrgent: number;
   pendingIds: string[];
+  // E6: leads an admin gave (the /leads "Given by admin" filter set), the earliest protection end, and the DATA count
+  // for an employee who has both LEAD and DATA leads (null when not known or data-only).
+  given: { count: number; protectedUntil: string | null } | null;
+  dataTotal: number | null;
   // Data-only employee (no LEAD leads, some DATA leads): their DATA counts; null otherwise.
   data: DataCounts | null;
   dataQueueLength: number;
@@ -109,6 +115,8 @@ export function useEmployeeHome(employeeId: string | null | undefined): Employee
   const calendar = useWorkingCalendar();
   const [leads, setLeads] = useState<HomeLead[] | null>(null);
   const [dataLeads, setDataLeads] = useState<DataLead[] | null>(null);
+  const [dataTotal, setDataTotal] = useState<number | null>(null);
+  const givenContext = useGivenLeadContext(employeeId);
   const [reminders, setReminders] = useState<Map<string, number> | null>(null);
   const [missed, setMissed] = useState<Map<string, number> | null>(null);
   const [today, setToday] = useState<HomeToday | null>(null);
@@ -162,6 +170,17 @@ export function useEmployeeHome(employeeId: string | null | undefined): Employee
         setDataLeads(dataRes.error ? null : ((dataRes.data || []) as DataLead[]));
       } else {
         setDataLeads(null);
+        // E6: someone with LEAD and DATA leads: just the DATA count (/data's own filters), one HEAD request.
+        const { count, error: countError } = await supabase
+          .from("leads")
+          .select("id, lead_history!inner(id)", { count: "exact", head: true })
+          .eq("current_owner_id", employeeId)
+          .eq("lead_type", "DATA")
+          .eq("lead_history.employee_id", employeeId)
+          .eq("lead_history.is_active", true)
+          .limit(1);
+        if (!alive.current) return;
+        setDataTotal(countError || typeof count !== "number" ? null : count);
       }
     }
     setRemindersError(remindersRes.error);
@@ -225,10 +244,27 @@ export function useEmployeeHome(employeeId: string | null | undefined): Employee
 
   const counts = useMemo(() => (leads ? myLeadCounts(leads, calendar) : null), [leads, calendar]);
   // Reminders that failed to load count as none (the row says so) rather than hiding the other numbers.
-  const ctx = useMemo(
-    () => ({ calendar, reminders: reminders ?? new Map<string, number>(), missed: missed ?? new Map<string, number>() }),
-    [calendar, reminders, missed]
+  const givenLeads = useMemo(
+    () => (leads && givenContext.enabled ? givenFilterLeads(leads, givenContext.byLeadId) : []),
+    [leads, givenContext.enabled, givenContext.byLeadId]
   );
+  const ctx = useMemo(
+    () => ({
+      calendar,
+      reminders: reminders ?? new Map<string, number>(),
+      missed: missed ?? new Map<string, number>(),
+      given: new Set(givenLeads.map((l) => l.id))
+    }),
+    [calendar, reminders, missed, givenLeads]
+  );
+  const given = useMemo(() => {
+    if (!givenContext.enabled || !leads) return null;
+    const until = givenLeads
+      .map((l) => givenContext.byLeadId.get(l.id)?.protected_until)
+      .filter((x): x is string => Boolean(x))
+      .sort()[0];
+    return { count: givenLeads.length, protectedUntil: until ?? null };
+  }, [givenContext.enabled, givenContext.byLeadId, givenLeads, leads]);
   const attention = useMemo(() => (leads ? attentionCounts(leads, ctx) : null), [leads, ctx]);
   const queue = useMemo(() => (leads ? queueOrder(leads, ctx) : []), [leads, ctx]);
   const next = useMemo(() => queue.slice(0, UP_NEXT_LIMIT), [queue]);
@@ -238,5 +274,5 @@ export function useEmployeeHome(employeeId: string | null | undefined): Employee
 
   const dataQueueLength = useMemo(() => (data && dataLeads ? dataQueueOrder(dataLeads).length : 0), [data, dataLeads]);
 
-  return { counts, attention, upNext: next, queueLength: queue.length, queueUrgent: summary.urgent, pendingIds, data, dataQueueLength, today, leadsError, todayError, remindersError, loading, reload: load };
+  return { counts, attention, upNext: next, queueLength: queue.length, queueUrgent: summary.urgent, pendingIds, given, dataTotal, data, dataQueueLength, today, leadsError, todayError, remindersError, loading, reload: load };
 }

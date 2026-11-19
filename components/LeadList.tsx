@@ -247,6 +247,10 @@ export default function LeadList({ employeeId }: LeadListProps) {
     if (filterParam === "new") {
       setStatusFilter("NEW");
     }
+    // Home "Given to you" (E6): the existing Given by admin filter.
+    if (filterParam === "given") {
+      setStatusFilter(GIVEN_BY_ADMIN_FILTER);
+    }
     const homeFilterParam = homeFilterFromParam(filterParam);
     if (homeFilterParam) {
       setHomeFilter(homeFilterParam);
