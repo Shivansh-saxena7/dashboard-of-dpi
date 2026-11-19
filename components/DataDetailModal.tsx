@@ -50,6 +50,8 @@ interface DataDetailModalProps {
   onLeadGone?: () => void;
   // Realtime saw this lead leave the employee while the card was open (2026-11-15, DataList).
   leadGone?: boolean;
+  // Home queue (E4): when given, a "Skip to next" button shows at the top of the sheet. Optional, display only.
+  onQueueSkip?: () => void;
 }
 
 // The Data-tab counterpart to LeadDetailModal. Previously had no
@@ -82,7 +84,7 @@ interface DataDetailModalProps {
 // reminder phases: 4/5/6-param versions all still exist), and always
 // matching the exact shape already proven in production avoids any
 // risk of PostgREST resolving to the wrong overload.
-export default function DataDetailModal({ lead, givenContext, previousPositive, onClose, onUpdated, onBoardStageChanged, onLeadGone, leadGone }: DataDetailModalProps) {
+export default function DataDetailModal({ lead, givenContext, previousPositive, onClose, onUpdated, onBoardStageChanged, onLeadGone, leadGone, onQueueSkip }: DataDetailModalProps) {
 
   const [notes, setNotes] = useState<LeadNote[]>([]);
   const [loadingNotes, setLoadingNotes] = useState(true);
@@ -380,6 +382,21 @@ export default function DataDetailModal({ lead, givenContext, previousPositive, 
           >
             <X size={16} />
           </button>
+
+          {/* Home queue (2026-11-19, E4): one-tap Skip, only when the list passes onQueueSkip. Nothing else here changes. */}
+          {onQueueSkip && (
+            <div className="mb-3 flex items-center justify-between gap-3 pr-10">
+              <span className="text-xs font-semibold text-slate-500">Next lead queue</span>
+              <button
+                type="button"
+                data-testid="sheet-queue-skip"
+                onClick={onQueueSkip}
+                className="min-h-11 rounded-full border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700"
+              >
+                Skip to next
+              </button>
+            </div>
+          )}
 
           <p className="text-[10px] font-semibold tracking-[0.2em] text-amber-600 uppercase mb-2">
             Data Detail

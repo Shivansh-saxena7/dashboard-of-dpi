@@ -15,6 +15,7 @@ import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
 import { consumeRecentlyCalledCardId, scrollToAndHighlightCard } from "@/lib/lastCalledLead";
 import { usePendingOutcomeSheet } from "@/lib/usePendingOutcomeSheet";
 import { useActiveCallRestore, keepActiveLeadInList } from "@/lib/useActiveCallRestore";
+import { readActiveCall } from "@/lib/activeCall";
 import ResumeCallStrip from "./ResumeCallStrip";
 import { normalizeMobile } from "@/lib/normalizeMobile";
 import { istDateStringToRangeStartUTC, istDateStringToRangeEndUTC } from "@/lib/istTime";
@@ -221,10 +222,20 @@ export default function DataList({ employeeId }: DataListProps) {
 
   const listQueue = useListQueue(
     employeeId,
+    "DATA",
     useMemo(() => leads.map((l: { id: string }) => l.id), [leads]),
     setSelectedLeadId
   );
   const queue = listQueue.queue;
+
+  // E4: after a cold restart during a queue call, the call-return flow opens that lead; today's stored queue run
+  // comes back at that lead (only when the open lead is the one the active call is about).
+  useEffect(() => {
+    if (!selectedLeadId || queue) return;
+    const entry = readActiveCall(employeeId);
+    if (entry && entry.listType === "DATA" && entry.leadId === selectedLeadId) listQueue.resumeFor(selectedLeadId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLeadId]);
 
   useEffect(() => {
     if (!queueRequested || loading) return;
@@ -604,6 +615,9 @@ export default function DataList({ employeeId }: DataListProps) {
 
       {selectedLead && (
         <DataDetailModal
+          // E4: a different lead (queue Next / Skip, Resume here) gets a fresh sheet, so nothing typed carries over.
+          key={selectedLead.id}
+          onQueueSkip={queue && queue.ids[queue.index] === selectedLead.id ? listQueue.skip : undefined}
           givenContext={givenContext.byLeadId.get(selectedLead.id) ?? null}
           previousPositive={previousPositive.get(selectedLead.id) ?? null}
           lead={{

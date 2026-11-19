@@ -70,9 +70,10 @@ test("queue: Start -> pending result first, a saved result opens the next lead, 
   state.settings.employee_home_mode = "on";
   await openHome(page);
   const start = page.getByTestId("start-next");
-  await expect(start).toContainText(/Start with next lead \(\d+\)/);
+  await expect(start).toContainText("Start with next lead");
+  await expect(page.getByTestId("start-next-count")).toContainText(/\d+ due now · \d+ total/);
   expect(await height(page, "start-next")).toBeGreaterThanOrEqual(44);
-  const n = Number(((await start.textContent()) || "").match(/\((\d+)\)/)?.[1]);
+  const n = Number(((await page.getByTestId("start-next-count").textContent()) || "").match(/(\d+) total/)?.[1]);
   // Up next shows the queue's head: pending result, then the reminder.
   await expect(page.getByTestId("up-next").locator("li").nth(0)).toHaveAttribute("data-testid", "up-next-lead-05");
   await expect(page.getByTestId("up-next").locator("li").nth(1)).toHaveAttribute("data-testid", "up-next-lead-31");
@@ -167,7 +168,7 @@ test("data-only: DATA numbers as /data's cards count them, lead sections hidden"
   await expect(page.getByTestId("tile-new")).toHaveCount(0);
   await page.screenshot({ path: `C:/work/reports/home_p3/home-p3-data-only-${info.project.name}.png`, fullPage: true });
   // Data queue: 38 untouched (oldest assignment first), then the 1-attempt-left one, then the 3-left one.
-  await expect(page.getByTestId("start-next")).toContainText("Start with next lead (40)");
+  await expect(page.getByTestId("start-next-count")).toHaveText("40 in the queue");
   await page.getByTestId("start-next").click();
   await expect(page).toHaveURL(/\/data$/);
   const sheet = page.locator("div.fixed.z-50");

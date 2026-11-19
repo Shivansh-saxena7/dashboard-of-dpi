@@ -173,12 +173,34 @@ export function remindersByLead(rows: ReminderRow[] | null | undefined): Map<str
   return map;
 }
 
-export type HomeFilter = "followup-overdue" | "reminders-today" | "visits-today";
+export type HomeFilter = "pending-result" | "reminders-missed" | "followup-overdue" | "reminders-today" | "visits-today";
 export const HOME_FILTER_LABELS: Record<HomeFilter, string> = {
+  "pending-result": "Called, no result",
+  "reminders-missed": "Missed reminders (yesterday)",
   "followup-overdue": "Overdue follow-ups",
   "reminders-today": "Reminders today",
   "visits-today": "Visits due today"
 };
+
+// E4 (2026-11-19): reminders read as one bounded range (yesterday + today, IST) and split by day.
+export function remindersByDay(rows: ReminderRow[] | null | undefined, now: number = Date.now()): { today: Map<string, number>; yesterday: Map<string, number> } {
+  const { start, end } = istDayBounds(now);
+  const yStart = start - DAY_MS;
+  const inRange = (lo: number, hi: number) =>
+    remindersByLead((rows || []).filter((r) => {
+      const at = Date.parse(r.reminder_at);
+      return Number.isFinite(at) && at >= lo && at < hi;
+    }));
+  return { today: inRange(start, end), yesterday: inRange(yStart, start) };
+}
+
+// A missed reminder: due yesterday (IST) and nothing was done on the lead since that reminder time.
+export function isMissedReminder(lead: HomeLead, missed: Map<string, number> | null | undefined): boolean {
+  const at = missed?.get(lead.id);
+  if (at === undefined) return false;
+  const last = lead.lead_history?.[0]?.last_activity_at ? Date.parse(lead.lead_history[0].last_activity_at as string) : NaN;
+  return !Number.isFinite(last) || last < at;
+}
 export function homeFilterFromParam(value: string | null | undefined): HomeFilter | null {
   return value && Object.prototype.hasOwnProperty.call(HOME_FILTER_LABELS, value) ? (value as HomeFilter) : null;
 }
@@ -186,11 +208,15 @@ export function homeFilterFromParam(value: string | null | undefined): HomeFilte
 export interface AttentionContext {
   calendar: WorkingCalendar | null;
   reminders: Map<string, number>;
+  // Yesterday's reminders (E4); missing = none.
+  missed?: Map<string, number>;
   now?: number;
 }
 
 // The one predicate behind a Needs-attention number and the /leads list it opens (all tabs, like Status = New).
 export function matchesHomeFilter(lead: HomeLead, filter: HomeFilter, ctx: AttentionContext): boolean {
+  if (filter === "pending-result") return isQueueable(lead, ctx.now ?? Date.now()) && isPendingResult(lead);
+  if (filter === "reminders-missed") return isQueueable(lead, ctx.now ?? Date.now()) && isMissedReminder(lead, ctx.missed);
   if (filter === "followup-overdue") return isFollowUpOverdue(lead, ctx.calendar);
   if (filter === "reminders-today") return ctx.reminders.has(lead.id);
   return isVisitDueToday(lead, ctx.now ?? Date.now());
@@ -203,15 +229,18 @@ export function homeFilterLeads<T extends HomeLead>(leads: T[], filter: HomeFilt
 export type AttentionCounts = Record<HomeFilter, number>;
 export function attentionCounts(leads: HomeLead[], ctx: AttentionContext): AttentionCounts {
   return {
+    "pending-result": homeFilterLeads(leads, "pending-result", ctx).length,
+    "reminders-missed": homeFilterLeads(leads, "reminders-missed", ctx).length,
     "followup-overdue": homeFilterLeads(leads, "followup-overdue", ctx).length,
     "reminders-today": homeFilterLeads(leads, "reminders-today", ctx).length,
     "visits-today": homeFilterLeads(leads, "visits-today", ctx).length
   };
 }
 
-export type UpNextReason = "PENDING" | "REMINDER" | "RECYCLING" | "OVERDUE" | "VISIT" | "NEW";
+export type UpNextReason = "PENDING" | "MISSED" | "REMINDER" | "RECYCLING" | "OVERDUE" | "VISIT" | "NEW";
 export const UP_NEXT_LABELS: Record<UpNextReason, string> = {
-  PENDING: "Called, no result yet",
+  PENDING: "Called, no result",
+  MISSED: "Missed reminder (yesterday)",
   REMINDER: "Reminder today",
   RECYCLING: "Recycles tomorrow",
   OVERDUE: "Follow-up overdue",
@@ -261,6 +290,7 @@ export function queueOrder(leads: HomeLead[], ctx: AttentionContext): UpNextItem
   };
   const open = leads.filter((lead) => isQueueable(lead, now));
   add(open.filter(isPendingResult).sort((a, b) => time(h(a)?.last_call_click_at) - time(h(b)?.last_call_click_at)), "PENDING");
+  add(open.filter((l) => isMissedReminder(l, ctx.missed)).sort((a, b) => (ctx.missed?.get(a.id) ?? 0) - (ctx.missed?.get(b.id) ?? 0)), "MISSED");
   add(open.filter((l) => ctx.reminders.has(l.id)).sort((a, b) => (ctx.reminders.get(a.id) ?? 0) - (ctx.reminders.get(b.id) ?? 0)), "REMINDER");
   add(
     open
@@ -323,7 +353,35 @@ export function dataCounts(leads: DataLead[]): DataCounts {
   };
 }
 
+// "Due now" on the Start button: everything in the queue except plain untouched New leads.
+export function queueSummary(items: UpNextItem[]): { urgent: number; total: number } {
+  return { urgent: items.filter((x) => x.reason !== "NEW").length, total: items.length };
+}
+
+// Queue resume after a cold restart (E4): today's queue run is kept in localStorage per employee and list, and is
+// dropped when the IST day changes.
+export function queueDay(now: number = Date.now()): string {
+  return new Date(istDayBounds(now).start + IST_OFFSET_MS).toISOString().slice(0, 10);
+}
+export function queueStoreKey(employeeId: string, listType: "LEAD" | "DATA"): string {
+  return `homeQueue:v1:${employeeId}:${listType}`;
+}
+export function parseStoredQueue(raw: string | null | undefined, now: number = Date.now()): { ids: string[]; index: number } | null {
+  if (!raw) return null;
+  try {
+    const q = JSON.parse(raw) as { day?: unknown; ids?: unknown; index?: unknown };
+    if (q.day !== queueDay(now) || !Array.isArray(q.ids) || typeof q.index !== "number") return null;
+    const ids = q.ids.filter((x): x is string => typeof x === "string");
+    if (q.index < 0 || q.index >= ids.length) return null;
+    return { ids, index: q.index };
+  } catch {
+    return null;
+  }
+}
+
 export const HOME_ATTENTION_LINKS: Record<HomeFilter, string> = {
+  "pending-result": "/leads?filter=pending-result",
+  "reminders-missed": "/leads?filter=reminders-missed",
   "followup-overdue": "/leads?filter=followup-overdue",
   "reminders-today": "/leads?filter=reminders-today",
   "visits-today": "/leads?filter=visits-today"

@@ -20,8 +20,10 @@ import {
   attentionCounts,
   dataCounts,
   dataQueueOrder,
+  homeFilterLeads,
   myLeadCounts,
   queueOrder,
+  queueSummary,
   type DataCounts,
   type DataLead,
   type AttentionCounts,
@@ -43,6 +45,9 @@ export interface EmployeeHomeData {
   attention: AttentionCounts | null;
   upNext: UpNextItem[];
   queueLength: number;
+  // E4: "5 due now · 60 total" on the Start button (queueSummary), and the "Called, no result" leads (row link).
+  queueUrgent: number;
+  pendingIds: string[];
   // Data-only employee (no LEAD leads, some DATA leads): their DATA counts; null otherwise.
   data: DataCounts | null;
   dataQueueLength: number;
@@ -104,6 +109,7 @@ export function useEmployeeHome(employeeId: string | null | undefined): Employee
   const [leads, setLeads] = useState<HomeLead[] | null>(null);
   const [dataLeads, setDataLeads] = useState<DataLead[] | null>(null);
   const [reminders, setReminders] = useState<Map<string, number> | null>(null);
+  const [missed, setMissed] = useState<Map<string, number> | null>(null);
   const [today, setToday] = useState<HomeToday | null>(null);
   const [leadsError, setLeadsError] = useState(false);
   const [todayError, setTodayError] = useState(false);
@@ -154,7 +160,10 @@ export function useEmployeeHome(employeeId: string | null | undefined): Employee
       }
     }
     setRemindersError(remindersRes.error);
-    if (!remindersRes.error) setReminders(remindersRes.byLead);
+    if (!remindersRes.error) {
+      setReminders(remindersRes.byLead);
+      setMissed(remindersRes.missed);
+    }
     const report = reportRes.data as Record<string, unknown> | null;
     if (reportRes.error || !report || typeof report !== "object" || Array.isArray(report)) {
       setTodayError(true);
@@ -211,13 +220,18 @@ export function useEmployeeHome(employeeId: string | null | undefined): Employee
 
   const counts = useMemo(() => (leads ? myLeadCounts(leads, calendar) : null), [leads, calendar]);
   // Reminders that failed to load count as none (the row says so) rather than hiding the other numbers.
-  const ctx = useMemo(() => ({ calendar, reminders: reminders ?? new Map<string, number>() }), [calendar, reminders]);
+  const ctx = useMemo(
+    () => ({ calendar, reminders: reminders ?? new Map<string, number>(), missed: missed ?? new Map<string, number>() }),
+    [calendar, reminders, missed]
+  );
   const attention = useMemo(() => (leads ? attentionCounts(leads, ctx) : null), [leads, ctx]);
   const queue = useMemo(() => (leads ? queueOrder(leads, ctx) : []), [leads, ctx]);
   const next = useMemo(() => queue.slice(0, UP_NEXT_LIMIT), [queue]);
+  const summary = useMemo(() => queueSummary(queue), [queue]);
+  const pendingIds = useMemo(() => (leads ? homeFilterLeads(leads, "pending-result", ctx).map((l) => l.id) : []), [leads, ctx]);
   const data = useMemo(() => (leads && leads.length === 0 && dataLeads && dataLeads.length > 0 ? dataCounts(dataLeads) : null), [leads, dataLeads]);
 
   const dataQueueLength = useMemo(() => (data && dataLeads ? dataQueueOrder(dataLeads).length : 0), [data, dataLeads]);
 
-  return { counts, attention, upNext: next, queueLength: queue.length, data, dataQueueLength, today, leadsError, todayError, remindersError, loading, reload: load };
+  return { counts, attention, upNext: next, queueLength: queue.length, queueUrgent: summary.urgent, pendingIds, data, dataQueueLength, today, leadsError, todayError, remindersError, loading, reload: load };
 }

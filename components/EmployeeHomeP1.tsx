@@ -24,7 +24,8 @@ import {
   type UpNextItem
 } from "@/lib/employeeHome";
 
-const ATTENTION_ROWS: HomeFilter[] = ["reminders-today", "followup-overdue", "visits-today"];
+// E4: "Called, no result" first (the result form is one tap away), then yesterday's missed reminders.
+const ATTENTION_ROWS: HomeFilter[] = ["pending-result", "reminders-missed", "reminders-today", "followup-overdue", "visits-today"];
 
 // Up next: the lead opens on /leads (same modal, same result form); Call is LeadCard's handleCallClick, unchanged.
 function UpNextRow({ item }: { item: UpNextItem }) {
@@ -133,7 +134,7 @@ export default function EmployeeHomeP1({
   role?: string | null;
   teamId?: string | null;
 }) {
-  const { counts, attention, upNext, queueLength, data, dataQueueLength, today, leadsError, todayError, remindersError, loading, reload } = useEmployeeHome(employeeId);
+  const { counts, attention, upNext, queueLength, queueUrgent, pendingIds, data, dataQueueLength, today, leadsError, todayError, remindersError, loading, reload } = useEmployeeHome(employeeId);
   // Phase 3 variants: a data-only employee (no LEAD leads, some DATA leads) sees DATA numbers instead of the lead
   // sections; a team leader also gets "My team today" (their own team only, RLS).
   const isDataOnly = Boolean(data);
@@ -191,7 +192,12 @@ export default function EmployeeHomeP1({
               {ATTENTION_ROWS.filter((key) => attention[key] > 0).map((key) => (
                 <li key={key}>
                   <Link
-                    href={HOME_ATTENTION_LINKS[key]}
+                    href={
+                      // One call without a result: straight to that lead's sheet (result form), as call-return does.
+                      key === "pending-result" && pendingIds.length === 1
+                        ? `/leads?openLead=${encodeURIComponent(pendingIds[0])}`
+                        : HOME_ATTENTION_LINKS[key]
+                    }
                     data-testid={`attention-${key}`}
                     aria-label={`${attention[key]} ${HOME_FILTER_LABELS[key]}, open`}
                     className="flex min-h-12 items-center justify-between gap-3 px-1 text-sm text-slate-800"
@@ -384,13 +390,17 @@ export default function EmployeeHomeP1({
           <div className="mx-auto max-w-xl">
             {isDataOnly ? (
               dataQueueLength > 0 ? (
-                <Link href="/data?queue=1" data-testid="start-next" className="flex min-h-14 items-center justify-center rounded-2xl bg-blue-600 text-base font-semibold text-white shadow-lg active:bg-blue-700">
-                  Start with next lead ({dataQueueLength})
+                <Link href="/data?queue=1" data-testid="start-next" className="flex min-h-14 flex-col items-center justify-center rounded-2xl bg-blue-600 px-4 py-2 text-white shadow-lg active:bg-blue-700">
+                  <span className="text-base font-semibold">Start with next lead</span>
+                  <span data-testid="start-next-count" className="text-xs font-medium text-blue-100">{dataQueueLength} in the queue</span>
                 </Link>
               ) : null
             ) : queueLength > 0 ? (
-              <Link href="/leads?queue=1" data-testid="start-next" className="flex min-h-14 items-center justify-center rounded-2xl bg-blue-600 text-base font-semibold text-white shadow-lg active:bg-blue-700">
-                Start with next lead ({queueLength})
+              <Link href="/leads?queue=1" data-testid="start-next" className="flex min-h-14 flex-col items-center justify-center rounded-2xl bg-blue-600 px-4 py-2 text-white shadow-lg active:bg-blue-700">
+                <span className="text-base font-semibold">Start with next lead</span>
+                <span data-testid="start-next-count" className="text-xs font-medium text-blue-100">
+                  {queueUrgent} due now · {queueLength} total
+                </span>
               </Link>
             ) : null}
           </div>

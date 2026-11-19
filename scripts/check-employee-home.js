@@ -47,7 +47,7 @@ if (!/sharedRecyclingTomorrowCutoffFor\(lead, workingCalendar\)/.test(list)) pro
 if (!list.replace(/\s+/g, " ").includes("if (openLeadId) { setSelectedLeadId(openLeadId); }")) problems.push("LeadList must still open ?openLead= (result-save, call-return, moved-away)");
 if (!/filterParam === "new"/.test(list) || !/tabFromParam\(searchParams\.get\("tab"\)\)/.test(list)) problems.push("LeadList must read ?filter=new and ?tab=");
 const page = read("app/page.tsx");
-if (!/newHome && employee\?\.id \? \(\s*<EmployeeHomeP1[\s\S]*?\) : \(\s*<PostsTrackingView/.test(page)) problems.push("app/page.tsx: flag off must render the old PostsTrackingView");
+if (!/showNewHome && employee\?\.id \? \(\s*<EmployeeHomeP1[\s\S]*?\) : \(\s*<PostsTrackingView/.test(page)) problems.push("app/page.tsx: flag off must render the old PostsTrackingView");
 if (!/useEmployeeHomeMode\(employee\?\.id\)/.test(page)) problems.push("app/page.tsx must decide the Home with useEmployeeHomeMode");
 if (/lead_engine_settings/.test(page)) problems.push("app/page.tsx: the login check must not wait for lead_engine_settings (old Home renders at once)");
 const mode = read("lib/useEmployeeHomeMode.ts");
@@ -83,7 +83,7 @@ const homeUi = read("components/EmployeeHomeP1.tsx");
 if (!/rememberCalledCard\(lead\.id\);\s*if \(historyId\) logCallClick\(historyId, lead\.id\);/.test(homeUi) || !/href=\{`tel:\$\{lead\.mobile\}`\}/.test(homeUi)) problems.push("Up next Call must be LeadCard's Call: tel: link + rememberCalledCard + logCallClick");
 if (!/registerActiveCallContext\(\{/.test(homeUi) || !/listType: "LEAD"/.test(homeUi)) problems.push("Up next must register the Home as the list on screen (call-return)");
 if (/rpc\("log_call_click_atomic"|activeCall:v1/.test(homeUi)) problems.push("Up next must not write call clicks or the active call itself");
-if (!/homeFilterLeads\(result, homeFilter,/.test(list) || !/useTodayReminders\(employeeId, homeFilter === "reminders-today"( \|\| queueRequested)?\)/.test(list)) problems.push("LeadList Home filters must use homeFilterLeads + useTodayReminders (same as the Home)");
+if (!/homeFilterLeads\(result, homeFilter,/.test(list) || !/useTodayReminders\(employeeId, homeFilter === "reminders-today"( \|\| homeFilter === "reminders-missed")?( \|\| queueRequested)?\)/.test(list)) problems.push("LeadList Home filters must use homeFilterLeads + useTodayReminders (same as the Home)");
 if (!/attentionCounts\(leads, ctx\)/.test(hook) || !/fetchTodayReminders\(employeeId\)/.test(hook)) problems.push("Home Needs attention must use attentionCounts + fetchTodayReminders");
 const rem = read("lib/todayReminders.ts");
 if (!/\.eq\("employee_id", employeeId\)/.test(rem) || !/\.limit\(TODAY_REMINDERS_LIMIT\)/.test(rem) || !/\.gte\("reminder_at"/.test(rem) || !/\.lt\("reminder_at"/.test(rem)) problems.push("lib/todayReminders.ts: employee + today's range + limit");
@@ -116,7 +116,7 @@ const D = (status, stage, calls) => ({ id: `${status}-${stage}-${calls}`, status
 eq("data counts as DataCard: attempts only while still at risk", eh.dataCounts([D("NEW", "LEADS", 0), D("NOT_CONNECTED", "LEADS", 3), D("SWITCHED_OFF", null, 5), D("CONNECTED", "LEADS", 1), D("NEW", "FOLLOW_UP", 0)]), { total: 5, untouched: 2, callsLeft: 5, lastAttempt: 2 });
 
 const leadList = read("components/LeadList.tsx");
-if (!/queueOrder\(leads, \{ calendar: workingCalendar, reminders: todayReminders\.byLead \}\)/.test(leadList)) problems.push("LeadList queue must use queueOrder with the same calendar + reminders as the Home");
+if (!/queueOrder\(leads, \{ calendar: workingCalendar, reminders: todayReminders\.byLead, missed: todayReminders\.missed \}\)/.test(leadList)) problems.push("LeadList queue must use queueOrder with the same calendar + reminders as the Home");
 const lq = read("lib/useListQueue.ts") + read("components/QueueBar.tsx");
 if (!/sessionStorage\.setItem\(queueSkipKey\(employeeId\)/.test(lq)) problems.push("Queue Skip must stay in sessionStorage");
 if (/supabase|\.rpc\(|fetch\(/.test(lq)) problems.push("Queue code must not call the database");
@@ -132,6 +132,45 @@ const team = read("lib/useTeamToday.ts");
 if (/\.rpc\(|service_role|\.(update|insert|upsert|delete)\(/.test(team)) problems.push("lib/useTeamToday.ts: read-only, client under RLS, no RPC");
 if (!/\.limit\(TEAM_WAITING_LIMIT\)/.test(team) || !/fetchAllRows\(/.test(team)) problems.push("lib/useTeamToday.ts: bounded reads");
 if (!/useEmployeeHome\.ts/.test("lib/useEmployeeHome.ts") || (hook.match(/\.channel\(/g) || []).length !== 1 || /\.channel\(/.test(team)) problems.push("Still exactly one realtime channel on the Home");
+
+// 6) E4 (2026-11-19): non-sales, Called no result, missed reminders, urgent count, queue resume, Skip in the sheet.
+const N = Date.parse("2026-11-19T06:30:00Z"); // Thu 12:00 IST
+const split = eh.remindersByDay([
+  { lead_id: "y", reminder_at: "2026-11-18T05:00:00Z" },
+  { lead_id: "t", reminder_at: "2026-11-19T04:00:00Z" },
+  { lead_id: "old", reminder_at: "2026-11-17T05:00:00Z" },
+  { lead_id: "late", reminder_at: "2026-11-19T18:30:00Z" }
+], N);
+eq("reminders split by IST day: yesterday / today, older and tomorrow left out", [[...split.yesterday.keys()], [...split.today.keys()]], [["y"], ["t"]]);
+const ml = (last) => ({ id: "y", status: "CONNECTED", board_stage: "FOLLOW_UP", lead_history: [{ last_activity_at: last }] });
+const yMap = new Map([["y", Date.parse("2026-11-18T05:00:00Z")]]);
+eq("missed reminder: nothing done since", eh.isMissedReminder(ml("2026-11-17T10:00:00Z"), yMap), true);
+eq("missed reminder: worked after the reminder = not missed", eh.isMissedReminder(ml("2026-11-18T06:00:00Z"), yMap), false);
+const pend = (status, stage, extra = {}) => ({ id: "p", status, board_stage: stage, lead_history: [{ call_count: 1, last_call_click_at: "2026-11-19T05:00:00Z", outcome_at: null, ...extra }] });
+const pctx = { calendar: null, reminders: new Map(), missed: new Map(), now: N };
+eq("Called, no result: open lead", eh.matchesHomeFilter(pend("NOT_CONNECTED", "LEADS"), "pending-result", pctx), true);
+eq("Called, no result: booked lead left out", eh.matchesHomeFilter(pend("CONVERTED", "BOOKING"), "pending-result", pctx), false);
+eq("Called, no result: result saved after the click = done", eh.matchesHomeFilter(pend("CONNECTED", "LEADS", { outcome_at: "2026-11-19T05:10:00Z" }), "pending-result", pctx), false);
+eq("urgent summary", eh.queueSummary([{ reason: "PENDING" }, { reason: "NEW" }, { reason: "OVERDUE" }, { reason: "NEW" }]), { urgent: 2, total: 4 });
+eq("stored queue: today kept", eh.parseStoredQueue(JSON.stringify({ day: "2026-11-19", ids: ["a", "b"], index: 1 }), N), { ids: ["a", "b"], index: 1 });
+eq("stored queue: other day dropped", eh.parseStoredQueue(JSON.stringify({ day: "2026-11-18", ids: ["a"], index: 0 }), N), null);
+eq("stored queue: finished dropped", eh.parseStoredQueue(JSON.stringify({ day: "2026-11-19", ids: ["a"], index: 1 }), N), null);
+eq("stored queue: junk dropped", eh.parseStoredQueue("{bad", N), null);
+
+const pageSrc = read("app/page.tsx");
+if (!/const showNewHome = newHome && !\(employee\?\.department && employee\.department !== "sales"\);/.test(pageSrc) || !/\{showNewHome && employee\?\.id \? \(/.test(pageSrc)) problems.push("app/page.tsx: the new Home only for Sales (non-sales keep the old Home)");
+for (const f of ["components/LeadDetailModal.tsx", "components/DataDetailModal.tsx"]) {
+  const s = read(f);
+  // Skip in the sheet is display only: the prop, the signature and the one button - nothing else uses it.
+  // prop, signature, the JSX comment, the condition, the onClick
+  if ((s.match(/onQueueSkip/g) || []).length !== 5) problems.push(`${f}: onQueueSkip must stay an optional prop + one button`);
+}
+for (const [name, src] of [["LeadList", read("components/LeadList.tsx")], ["DataList", read("components/DataList.tsx")]]) {
+  if (!/key=\{selectedLead\.id\}/.test(src)) problems.push(`${name}: the sheet is keyed by lead (nothing typed carries over to the next lead)`);
+  if (!/entry\.leadId === selectedLeadId\) listQueue\.resumeFor\(selectedLeadId\)/.test(src)) problems.push(`${name}: queue resumes only for the active call's lead`);
+}
+const lqSrc = read("lib/useListQueue.ts");
+if (!/localStorage\.setItem\(key/.test(lqSrc) || !/queueDay\(\)/.test(lqSrc)) problems.push("lib/useListQueue.ts: today's queue kept in localStorage");
 
 if (problems.length) {
   console.error("check-employee-home FAILED:\n  " + problems.join("\n  "));

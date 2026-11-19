@@ -25,6 +25,9 @@ const [authChecked,setAuthChecked]=useState(false);
 // Employee Home Phase 1 (2026-11-18): the old Home renders at once; the flag is read in the background
 // (lib/useEmployeeHomeMode.ts) and the new Home replaces the social posts card only when the flag is on.
 const newHome = useEmployeeHomeMode(employee?.id);
+// E4 (2026-11-19): the new Home is a lead-work screen, so only for Sales - the same isNonSales rule as Start Shift and
+// EmployeeTabBar (department set and not "sales"). Marketing, Accounts, HR, Other keep the old Home, flag or not.
+const showNewHome = newHome && !(employee?.department && employee.department !== "sales");
 
 
 // ✅ AUTH CHECK
@@ -152,7 +155,7 @@ to-blue-100
   <StartShiftCard employeeId={employee.id} />
 )}
 
-{newHome && employee?.id ? (
+{showNewHome && employee?.id ? (
   <EmployeeHomeP1 employeeId={employee.id} employeeName={employee?.name} role={employee?.role} teamId={employee?.team_id} />
 ) : (
   <PostsTrackingView employeeId={employee?.id} employeeName={employee?.name} />
@@ -160,7 +163,7 @@ to-blue-100
 
 <Footer />
 {/* Room for the new Home sticky "Start with next lead" button. */}
-{newHome && <div aria-hidden className="h-24" />}
+{showNewHome && <div aria-hidden className="h-24" />}
 </main>
 
 );

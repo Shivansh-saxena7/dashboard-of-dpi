@@ -17,6 +17,7 @@ import { normalizeMobile } from "@/lib/normalizeMobile";
 import { consumeRecentlyCalledCardId, scrollToAndHighlightCard, consumeQuickDialNumber } from "@/lib/lastCalledLead";
 import { usePendingOutcomeSheet } from "@/lib/usePendingOutcomeSheet";
 import { useActiveCallRestore, keepActiveLeadInList } from "@/lib/useActiveCallRestore";
+import { readActiveCall } from "@/lib/activeCall";
 import ResumeCallStrip from "./ResumeCallStrip";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
@@ -175,7 +176,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
   // saved result the next lead opens; with the modal closed a bar offers Skip / Open / Exit. Skip is kept in this tab's
   // sessionStorage only (nothing is written to the database).
   const [queueRequested, setQueueRequested] = useState(false);
-  const todayReminders = useTodayReminders(employeeId, homeFilter === "reminders-today" || queueRequested);
+  const todayReminders = useTodayReminders(employeeId, homeFilter === "reminders-today" || homeFilter === "reminders-missed" || queueRequested);
   const [originFilter, setOriginFilter] = useState<"" | LeadOrigin>("");
   const [priorityFilter, setPriorityFilter] = useState<"" | LeadPriority>("");
   const [addPersonalLeadOpen, setAddPersonalLeadOpen] = useState(false);
@@ -520,15 +521,25 @@ export default function LeadList({ employeeId }: LeadListProps) {
 
   const listQueue = useListQueue(
     employeeId,
+    "LEAD",
     useMemo(() => leads.map((l) => l.id), [leads]),
     setSelectedLeadId
   );
   const queue = listQueue.queue;
 
+  // E4: after a cold restart during a queue call, the call-return flow opens that lead; today's stored queue run
+  // comes back at that lead (only when the open lead is the one the active call is about).
+  useEffect(() => {
+    if (!selectedLeadId || queue) return;
+    const entry = readActiveCall(employeeId);
+    if (entry && entry.listType === "LEAD" && entry.leadId === selectedLeadId) listQueue.resumeFor(selectedLeadId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLeadId]);
+
   useEffect(() => {
     if (!queueRequested || loading || !todayReminders.loaded) return;
     setQueueRequested(false);
-    listQueue.start(queueOrder(leads, { calendar: workingCalendar, reminders: todayReminders.byLead }).map((item) => item.lead.id));
+    listQueue.start(queueOrder(leads, { calendar: workingCalendar, reminders: todayReminders.byLead, missed: todayReminders.missed }).map((item) => item.lead.id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queueRequested, loading, todayReminders.loaded]);
 
@@ -602,7 +613,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
     }
 
     if (homeFilter) {
-      result = homeFilterLeads(result, homeFilter, { calendar: workingCalendar, reminders: todayReminders.byLead });
+      result = homeFilterLeads(result, homeFilter, { calendar: workingCalendar, reminders: todayReminders.byLead, missed: todayReminders.missed });
     }
 
     if (originFilter) {
@@ -1089,6 +1100,9 @@ export default function LeadList({ employeeId }: LeadListProps) {
 
       {selectedLead && (
         <LeadDetailModal
+          // E4: a different lead (queue Next / Skip, Resume here) gets a fresh sheet, so nothing typed carries over.
+          key={selectedLead.id}
+          onQueueSkip={queue && queue.ids[queue.index] === selectedLead.id ? listQueue.skip : undefined}
           givenContext={givenContext.byLeadId.get(selectedLead.id) ?? null}
           lead={{
             id: selectedLead.id,

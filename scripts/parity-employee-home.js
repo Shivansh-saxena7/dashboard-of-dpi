@@ -204,16 +204,31 @@ if (process.argv[2] === "--live") {
   console.log(`random: ${totals.leads} leads x ${calendars.length} calendars x 4 clocks; recycling hits ${totals.recycling}, New hits ${totals.newCount}, overdue hits ${totals.overdue}, visit-due hits ${totals.visits}; one list of 5000: ${JSON.stringify(big)}`);
 
   // Phase 3: the queue holds every lead of its own rules once, in rule order, and Up next is its head.
-  const qctx = { calendar: calendars[1], reminders: new Map(all.filter((_, i) => i % 11 === 0).map((l, i) => [l.id, base + i * 60e3])), now: base };
+  const qctx = {
+    calendar: calendars[1],
+    reminders: new Map(all.filter((_, i) => i % 11 === 0).map((l, i) => [l.id, base + i * 60e3])),
+    // E4: yesterday's reminders (some leads worked since, some not)
+    missed: new Map(all.filter((_, i) => i % 13 === 0).map((l, i) => [l.id, base - 20 * 3600e3 + i * 60e3])),
+    now: base
+  };
   const q = eh.queueOrder(all, qctx);
   const ids = q.map((x) => x.lead.id);
   if (new Set(ids).size !== ids.length) problems.push("queue repeats a lead");
-  const rank = { PENDING: 0, REMINDER: 1, RECYCLING: 2, OVERDUE: 3, VISIT: 4, NEW: 5 };
+  const rank = { PENDING: 0, MISSED: 1, REMINDER: 2, RECYCLING: 3, OVERDUE: 4, VISIT: 5, NEW: 6 };
   if (q.some((x, i) => i > 0 && rank[x.reason] < rank[q[i - 1].reason])) problems.push("queue is not in rule order");
   if (q.some((x) => !eh.isQueueable(x.lead, base))) problems.push("queue holds a closed or paused lead");
-  const shouldHave = all.filter((l) => eh.isQueueable(l, base) && (eh.isPendingResult(l) || qctx.reminders.has(l.id) || eh.recyclingTomorrowCutoffFor(l, qctx.calendar, base) || eh.isFollowUpOverdue(l, qctx.calendar) || eh.isVisitDueToday(l, base) || isUntouchedInCurrentAssignment(l.lead_history[0])));
+  const shouldHave = all.filter((l) => eh.isQueueable(l, base) && (eh.isPendingResult(l) || eh.isMissedReminder(l, qctx.missed) || qctx.reminders.has(l.id) || eh.recyclingTomorrowCutoffFor(l, qctx.calendar, base) || eh.isFollowUpOverdue(l, qctx.calendar) || eh.isVisitDueToday(l, base) || isUntouchedInCurrentAssignment(l.lead_history[0])));
   if (shouldHave.length !== q.length) problems.push(`queue length ${q.length}, rules say ${shouldHave.length}`);
   if (JSON.stringify(eh.upNext(all, qctx, 5).map((x) => x.lead.id)) !== JSON.stringify(ids.slice(0, 5))) problems.push("Up next is not the head of the queue");
+  // E4: the Start button's "due now" is the queue minus plain New; the two new attention rows equal their /leads filters.
+  const sum = eh.queueSummary(q);
+  if (sum.total !== q.length || sum.urgent !== q.filter((x) => x.reason !== "NEW").length) problems.push(`Start button summary ${JSON.stringify(sum)}`);
+  const att = eh.attentionCounts(all, qctx);
+  const refPending = all.filter((l) => eh.isQueueable(l, base) && (() => { const h = l.lead_history[0]; const c = h.last_call_click_at ? Date.parse(h.last_call_click_at) : NaN; if (!Number.isFinite(c)) return false; const o = h.outcome_at ? Date.parse(h.outcome_at) : NaN; return !Number.isFinite(o) || o < c; })());
+  const refMissed = all.filter((l) => eh.isQueueable(l, base) && qctx.missed.has(l.id) && !(Date.parse(l.lead_history[0].last_activity_at) >= qctx.missed.get(l.id)));
+  if (att["pending-result"] !== refPending.length || eh.homeFilterLeads(all, "pending-result", qctx).length !== refPending.length) problems.push(`Called, no result: ${att["pending-result"]} vs ${refPending.length}`);
+  if (att["reminders-missed"] !== refMissed.length || eh.homeFilterLeads(all, "reminders-missed", qctx).length !== refMissed.length) problems.push(`Missed reminders: ${att["reminders-missed"]} vs ${refMissed.length}`);
+  console.log(`E4: due now ${sum.urgent} of ${sum.total}; called no result ${refPending.length}; missed reminders ${refMissed.length}`);
 
   // Phase 3: data-only counts against DataCard (reference: main 3b3fb25 components/DataCard.tsx lines 65-69, fed by
   // DataList's card fields: call_count = lead_history[0]?.call_count ?? 0).
