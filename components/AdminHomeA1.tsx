@@ -8,6 +8,8 @@ import { useState, type ReactNode } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import AdminSocialDashboard from "@/components/AdminSocialDashboard";
 import { useAdminHome } from "@/lib/useAdminHome";
+import { useAdminToday } from "@/lib/useAdminToday";
+import { TeamToday, TodaySoFar } from "@/components/AdminTodayCards";
 import { istHeaderDate, istTime, minutesText, needsActionRows, type Severity } from "@/lib/adminHome";
 
 const CARD = "rounded-2xl border border-slate-200 bg-white p-4 shadow-sm";
@@ -61,6 +63,12 @@ const SYSTEM_JOBS = ["recycle-stale-leads", "check-lead-reminders", "db-backup",
 
 export default function AdminHomeA1() {
   const home = useAdminHome();
+  // A2: Today so far + Team today (own reads; Refresh reloads both).
+  const today = useAdminToday();
+  const refreshAll = () => {
+    home.refresh();
+    today.refresh();
+  };
   const [socialOpen, setSocialOpen] = useState(false);
   const now = Date.now();
 
@@ -90,7 +98,7 @@ export default function AdminHomeA1() {
           <button
             type="button"
             data-testid="admin-refresh"
-            onClick={home.refresh}
+            onClick={refreshAll}
             className="min-h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 active:scale-[0.98] motion-reduce:transform-none"
           >
             Refresh
@@ -204,6 +212,10 @@ export default function AdminHomeA1() {
           </div>
         </section>
       </div>
+
+      <TodaySoFar today={today} teamTotal={today.team.data ? today.team.data.members.length : null} />
+
+      <TeamToday today={today} />
 
       <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
         <button

@@ -28,6 +28,21 @@ select json_build_object(
   'leave', (select coalesce(json_agg(json_build_object('employee_id', employee_id, 'start_date', start_date, 'end_date', end_date)), '[]') from employee_leave_periods),
   'attendance', (select coalesce(json_agg(json_build_object('employee_id', employee_id, 'date', date)), '[]') from attendance where date >= ((now() at time zone 'Asia/Kolkata')::date - 45) and shift_start_at is not null),
   'joins', (select coalesce(json_agg(json_build_object('employee_id', employee_id, 'date_of_joining', date_of_joining)), '[]') from employee_payroll_details),
+  -- A2 Team today: today's attendance, HR cutoffs, the first start window end, and HR attendance's on-time / late rule
+  -- written in SQL for the field employees (active, employee / team leader, no department or Sales, not "testing").
+  'attendance_today', (select coalesce(json_agg(json_build_object('employee_id', employee_id, 'shift_start_at', shift_start_at, 'shift_end_at', shift_end_at, 'attendance_type', attendance_type)), '[]')
+    from attendance where date = (now() at time zone 'Asia/Kolkata')::date),
+  'hrms', (select json_build_object('first_half_ontime_cutoff', first_half_ontime_cutoff, 'second_half_ontime_cutoff', second_half_ontime_cutoff) from hrms_settings where id = 1),
+  'window_end', (select first_half_start_window_end from lead_engine_settings where id = 1),
+  'sql_hr', (select json_build_object(
+      'started', count(*) filter (where a.shift_start_at is not null and a.shift_end_at is null),
+      'late', count(*) filter (where a.shift_start_at is not null and a.shift_end_at is null and a.attendance_type not in ('LEAVE', 'HALF_DAY_MANUAL')
+        and (a.shift_start_at at time zone 'Asia/Kolkata')::time > (case when a.attendance_type = 'HALF_DAY_SECOND' then h.second_half_ontime_cutoff else h.first_half_ontime_cutoff end)))
+    from employees e
+    join attendance a on a.employee_id = e.id and a.date = (now() at time zone 'Asia/Kolkata')::date
+    cross join hrms_settings h
+    where h.id = 1 and e.is_active and e.role in ('employee', 'team_leader') and (e.department is null or e.department = 'sales')
+      and lower(trim(e.name)) <> 'testing' and e.id <> 'd970af89-063d-48b4-98aa-b89260fb3d87'),
   -- The daily job's own answer today (System Health warning no_shift_alert), if it ran.
   'job_no_shift', (select json_build_object('ran', count(*) > 0, 'flagged', max(jsonb_array_length(coalesce(context->'employees', '[]'::jsonb))))
     from system_anomaly_log, t0 where source = 'no_shift_alert' and last_seen_at >= t0.day_start)

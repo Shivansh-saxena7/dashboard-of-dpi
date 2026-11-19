@@ -40,12 +40,22 @@ const flagged = ns.employeesWithoutShift({ employees: inputs.employees, leaveRow
 if (J.job_no_shift && J.job_no_shift.ran && J.job_no_shift.flagged !== flagged.length) {
   problems.push(`no-shift: Home ${flagged.length} vs today's job ${J.job_no_shift.flagged}`);
 }
+// A2 Team today vs HR attendance's rule (SQL) and the no-shift job.
+let teamLine = "Team today: (no A2 data in this export)";
+if (J.attendance_today && J.hrms && J.sql_hr) {
+  const members = ah.teamStatus({ employees: J.employees, attendance: J.attendance_today, leaveRows: J.leave, cutoffs: J.hrms, firstWindowEnd: J.window_end || "11:30:00", todayYmd: today, nowMs: now, cal });
+  const c = ah.teamCounts(members);
+  if (c.onShift !== J.sql_hr.started || c.late !== J.sql_hr.late) problems.push(`team: Home on shift ${c.onShift} / late ${c.late} vs HR rule ${J.sql_hr.started} / ${J.sql_hr.late}`);
+  const notStarted = members.filter((m) => m.state === "NOT_STARTED").map((m) => m.id.slice(0, 8));
+  teamLine = `Team today: ${c.total} field, on shift ${c.onShift} (late ${c.late}), not started ${c.notStarted} [${notStarted.join(", ")}], on leave ${c.onLeave}, in grace ${c.inGrace}; HR rule: started ${J.sql_hr.started}, late ${J.sql_hr.late}`;
+}
 const rows = ah.needsActionRows({ heartbeats: hb, backup, errors: errs, noShift: flagged.length, transfers: J.transfers, employeeRequests: J.employee_requests });
 
 console.log(`Jobs: ${hb.map((h) => `${h.label} ${h.severity}`).join(", ")}`);
 console.log(`Backup: ${backup.severity} (${backup.status ?? "none"})`);
 console.log(`Problems today: Home ${errs.errors} errors / ${errs.warnings} warnings; System Health rule ${J.sh_problems.errors} / ${J.sh_problems.warnings}`);
 console.log(`No shift for 3+ working days: Home ${flagged.length}; today's job ${J.job_no_shift && J.job_no_shift.ran ? J.job_no_shift.flagged : "(not run yet today)"}`);
+console.log(teamLine);
 console.log(`Approvals: ${J.transfers} lead transfers, ${J.employee_requests} employee requests`);
 console.log(`Needs action: ${rows.length ? rows.map((r) => `${r.key}:${r.severity}`).join(", ") : "All clear"}`);
 if (problems.length) {

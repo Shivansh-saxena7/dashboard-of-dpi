@@ -1,6 +1,14 @@
 // Admin Home A1 (2026-11-19): pure rules for the new Admin Home (admin and super_admin, one Home). No DB access;
 // known-answer tested in scripts/check-admin-home.js. Severity follows C:/work/reports/admin_home_design/design.md.
 import { isActivityRow } from "./anomalyGroups.ts";
+import { calculateDailyHrmsStatus } from "./calculateHrmsAttendanceStatus.ts";
+import { calculateSLAStatus } from "./calculateSLAStatus.ts";
+import { isUntouchedInCurrentAssignment } from "./newLeadFilter.ts";
+import { ownersOnLeave, type LeavePeriodRow } from "./ownerLeave.ts";
+import { employeesInReturnGrace } from "./ownerLeaveCalendar.ts";
+import type { WorkingCalendar } from "./workingCalendar.ts";
+import { bandOf, type Band } from "./callQuality.ts";
+import { isExcludedFromNoShift, isFieldEmployee, isWorkingDayYmd } from "./noShiftAlert.ts";
 
 export type Severity = "critical" | "warning" | "info" | "ok";
 const RANK: Record<Severity, number> = { critical: 0, warning: 1, info: 2, ok: 3 };
@@ -190,4 +198,175 @@ export function istDayStartIso(nowMs: number): string {
   const IST = 5.5 * 3600e3;
   const start = Math.floor((nowMs + IST) / 86400e3) * 86400e3 - IST;
   return new Date(start).toISOString();
+}
+
+// ---- A2 (2026-11-19): Today so far + Team today. Pure. ----
+
+// Two windows for "vs yesterday at this time": [today 00:00 IST, now) and [yesterday 00:00 IST, now - 24 h).
+export function todayWindows(nowMs: number): { today: { from: string; to: string }; yesterday: { from: string; to: string } } {
+  const start = Date.parse(istDayStartIso(nowMs));
+  const DAY = 86400e3;
+  return {
+    today: { from: new Date(start).toISOString(), to: new Date(nowMs).toISOString() },
+    yesterday: { from: new Date(start - DAY).toISOString(), to: new Date(nowMs - DAY).toISOString() }
+  };
+}
+
+export interface Delta {
+  text: string;
+  dir: "up" | "down" | "same";
+}
+export function deltaText(today: number, yesterday: number, noun = ""): Delta {
+  const d = today - yesterday;
+  if (d === 0) return { text: "same as yesterday", dir: "same" };
+  return { text: `${d > 0 ? "▲" : "▼"} ${Math.abs(d)} ${d > 0 ? "more" : "fewer"}${noun ? " " + noun : ""}`, dir: d > 0 ? "up" : "down" };
+}
+
+export type TeamState = "NOT_STARTED" | "NOT_STARTED_YET" | "LATE" | "ON_SHIFT" | "SHIFT_ENDED" | "ON_LEAVE" | "IN_GRACE" | "DAY_OFF";
+export const TEAM_STATE_VIEW: Record<TeamState, { word: string; severity: Severity | "mute"; icon: string }> = {
+  NOT_STARTED: { word: "Not started", severity: "warning", icon: "▲" },
+  LATE: { word: "Late", severity: "info", icon: "◆" },
+  NOT_STARTED_YET: { word: "Not started yet", severity: "mute", icon: "–" },
+  IN_GRACE: { word: "In grace", severity: "info", icon: "◆" },
+  ON_SHIFT: { word: "On shift", severity: "ok", icon: "✓" },
+  SHIFT_ENDED: { word: "Shift ended", severity: "mute", icon: "✓" },
+  ON_LEAVE: { word: "On leave", severity: "mute", icon: "–" },
+  DAY_OFF: { word: "Day off", severity: "mute", icon: "–" }
+};
+// Who needs a look first: not started, late, grace, on shift, then the rest.
+const STATE_ORDER: TeamState[] = ["NOT_STARTED", "LATE", "IN_GRACE", "NOT_STARTED_YET", "ON_SHIFT", "SHIFT_ENDED", "ON_LEAVE", "DAY_OFF"];
+
+export interface TeamEmployee {
+  id: string;
+  name: string | null;
+  is_active: boolean;
+  role: string | null;
+  department: string | null;
+}
+export interface TeamAttendance {
+  employee_id: string;
+  shift_start_at: string | null;
+  shift_end_at: string | null;
+  attendance_type: string | null;
+}
+export interface TeamMember {
+  id: string;
+  name: string;
+  state: TeamState;
+  startedAt: string | null;
+  inGrace: boolean;
+  band: Band | null;
+}
+
+// The Start Shift people (lib/noShiftAlert.ts: active, employee / team leader, no department or Sales), test accounts out.
+export function teamMembers(employees: TeamEmployee[]): TeamEmployee[] {
+  return employees.filter(
+    (e) => isFieldEmployee({ ...e, name: e.name || "", joined: null }) && !isExcludedFromNoShift({ id: e.id, name: e.name || "" })
+  );
+}
+
+// Today's state per person. Started: HR attendance's own rule (calculateDailyHrmsStatus with the on-time cutoffs) =
+// On shift or Late; ended = Shift ended. Not started: on leave / day off / in grace / "not started yet" before the first
+// start window closes, else Not started.
+export function teamStatus(args: {
+  employees: TeamEmployee[];
+  attendance: TeamAttendance[];
+  leaveRows: LeavePeriodRow[];
+  cutoffs: { first_half_ontime_cutoff: string; second_half_ontime_cutoff: string };
+  firstWindowEnd: string; // lead_engine_settings.first_half_start_window_end, "11:30:00"
+  todayYmd: string;
+  nowMs: number;
+  cal: WorkingCalendar | null;
+  bands?: Map<string, Band | null>;
+}): TeamMember[] {
+  const onLeave = ownersOnLeave(args.leaveRows, args.todayYmd);
+  const grace = employeesInReturnGrace(args.leaveRows, args.todayYmd, args.cal);
+  const byId = new Map(args.attendance.map((a) => [a.employee_id, a]));
+  const working = !args.cal || isWorkingDayYmd(args.todayYmd, { weeklyOffDay: args.cal.weeklyOffDay, ranges: args.cal.ranges });
+  const istMin = Math.floor(((args.nowMs + 5.5 * 3600e3) % 86400e3) / 60000);
+  const [wh, wm] = args.firstWindowEnd.split(":").map(Number);
+  const windowClosed = istMin >= wh * 60 + wm;
+  const list = teamMembers(args.employees).map((e) => {
+    const a = byId.get(e.id);
+    let state: TeamState;
+    if (a?.shift_start_at) {
+      if (a.shift_end_at) state = "SHIFT_ENDED";
+      else {
+        const hr = calculateDailyHrmsStatus({ attendance_type: (a.attendance_type as any) ?? null, shift_start_at: a.shift_start_at }, args.cutoffs);
+        state = hr === "LATE_COMING" ? "LATE" : "ON_SHIFT";
+      }
+    } else if (onLeave.has(e.id)) state = "ON_LEAVE";
+    else if (!working) state = "DAY_OFF";
+    else if (grace.has(e.id)) state = "IN_GRACE";
+    else state = windowClosed ? "NOT_STARTED" : "NOT_STARTED_YET";
+    return { id: e.id, name: e.name || "", state, startedAt: a?.shift_start_at ?? null, inGrace: grace.has(e.id), band: args.bands?.get(e.id) ?? null };
+  });
+  const bandRank = (b: Band | null) => (b === "Red" ? 0 : b === "Amber" ? 1 : 2);
+  return list.sort((x, y) => STATE_ORDER.indexOf(x.state) - STATE_ORDER.indexOf(y.state) || bandRank(x.band) - bandRank(y.band) || x.name.localeCompare(y.name));
+}
+
+export function teamCounts(members: TeamMember[]): Record<"onShift" | "late" | "notStarted" | "onLeave" | "inGrace" | "total", number> {
+  const n = (s: TeamState) => members.filter((m) => m.state === s).length;
+  return { onShift: n("ON_SHIFT") + n("LATE"), late: n("LATE"), notStarted: n("NOT_STARTED") + n("NOT_STARTED_YET"), onLeave: n("ON_LEAVE"), inGrace: n("IN_GRACE"), total: members.length };
+}
+
+// Call Quality per person from the admin summary (get_call_quality_summary with p_employee_id null, 7 days): the Lead
+// score when there were Lead dials, else the Data score, else none ("Not enough data") - the employee card's choice.
+export function bandsFromSummary(summary: { employees?: { employee_id: string; by_card_type: Record<string, { dial_clicks?: number | null; genuine_score?: number | null } | undefined> }[] } | null | undefined): Map<string, Band | null> {
+  const out = new Map<string, Band | null>();
+  for (const e of summary?.employees ?? []) {
+    const lead = e.by_card_type?.LEAD;
+    const data = e.by_card_type?.DATA;
+    const showData = (data?.dial_clicks ?? 0) > 0;
+    const showLead = (lead?.dial_clicks ?? 0) > 0 || !showData;
+    out.set(e.employee_id, bandOf(showLead ? lead?.genuine_score ?? null : data?.genuine_score ?? null));
+  }
+  return out;
+}
+
+// ---- Workload (loaded only when asked) ----
+export interface WorkloadLead {
+  current_owner_id: string;
+  status: string;
+  board_stage: string | null;
+  sla_deadline: string | null;
+  recycle_count: number | null;
+  is_personal_lead: boolean | null;
+  lead_history: { employee_id: string; is_active: boolean; call_count: number | null; outcome_at: string | null; assigned_at: string | null; first_call_at: string | null; first_whatsapp_at: string | null; last_activity_at: string | null; paused_until: string | null; pause_reason: string | null }[];
+}
+// Overdue = the lead card's "Needs follow-up" / "Going stale": calculateSLAStatus with exactly LeadCard's inputs
+// (LeadList's card fields, not-interested count 0, not on leave, the company calendar).
+export function isOverdueOnCard(lead: WorkloadLead, h: WorkloadLead["lead_history"][number], cal: WorkingCalendar | null): boolean {
+  const s = calculateSLAStatus(
+    {
+      status: lead.status,
+      sla_deadline: lead.sla_deadline,
+      recycle_count: lead.recycle_count,
+      board_stage: lead.board_stage,
+      paused_until: h.paused_until ?? null,
+      last_activity_at: h.last_activity_at ?? null,
+      pause_reason: h.pause_reason ?? null,
+      assigned_at: h.assigned_at ?? null
+    } as any,
+    h.outcome_at ?? null,
+    0,
+    false,
+    (lead.is_personal_lead ?? false) as boolean,
+    cal
+  );
+  return s === "FOLLOWUP_INACTIVITY_WARNING" || s === "FOLLOWUP_INACTIVITY_RECYCLE_READY";
+}
+export function workloadByOwner(leads: WorkloadLead[], cal: WorkingCalendar | null): Map<string, { leads: number; overdue: number; untouched: number }> {
+  const out = new Map<string, { leads: number; overdue: number; untouched: number }>();
+  for (const l of leads) {
+    // The owner's own active assignment (the /leads list of that employee).
+    const h = (l.lead_history || []).find((x) => x.is_active && x.employee_id === l.current_owner_id);
+    if (!h) continue;
+    const w = out.get(l.current_owner_id) ?? { leads: 0, overdue: 0, untouched: 0 };
+    w.leads += 1;
+    if (isOverdueOnCard(l, h, cal)) w.overdue += 1;
+    if (isUntouchedInCurrentAssignment(h)) w.untouched += 1;
+    out.set(l.current_owner_id, w);
+  }
+  return out;
 }

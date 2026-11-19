@@ -110,6 +110,73 @@ const limits = (hook.match(/\.limit\(/g) || []).length;
 if (fromCalls !== limits) problems.push(`useAdminHome: every read bounded (${fromCalls} reads, ${limits} limits)`);
 if (!has(mode, "ADMIN_MODE_TIMEOUT_MS = 2000") || !has(mode, "sessionStorage") || !has(mode, 'role === "admin" || role === "super_admin"')) problems.push("useAdminHomeMode: 2 s timeout, remembered per tab, admins only");
 
+// 6) A2 (2026-11-19): Today so far windows, team status (HR attendance's rule), call quality bands, workload.
+eq("today windows", ah.todayWindows(Date.parse("2026-11-19T06:30:00Z")), {
+  today: { from: "2026-11-18T18:30:00.000Z", to: "2026-11-19T06:30:00.000Z" },
+  yesterday: { from: "2026-11-17T18:30:00.000Z", to: "2026-11-18T06:30:00.000Z" }
+});
+eq("delta", [ah.deltaText(212, 194), ah.deltaText(171, 180), ah.deltaText(0, 0)], [
+  { text: "▲ 18 more", dir: "up" }, { text: "▼ 9 fewer", dir: "down" }, { text: "same as yesterday", dir: "same" }
+]);
+const E = (id, name, role = "employee", department = "sales") => ({ id, name, is_active: true, role, department });
+const employees = [E("on", "On"), E("late", "Late"), E("half", "Half"), E("ended", "Ended"), E("leave", "Leave"), E("grace", "Grace"), E("none", "None"), E("t", "Testing"), E("adm", "Admin", "admin", null), E("mkt", "Mkt", "employee", "marketing")];
+const IST = (hhmm) => `2026-11-16T${hhmm}:00+05:30`;
+const attendance = [
+  { employee_id: "on", shift_start_at: IST("10:32"), shift_end_at: null, attendance_type: "FULL_DAY" },
+  { employee_id: "late", shift_start_at: IST("10:53"), shift_end_at: null, attendance_type: "FULL_DAY" },
+  { employee_id: "half", shift_start_at: IST("13:20"), shift_end_at: null, attendance_type: "HALF_DAY_SECOND" },
+  { employee_id: "ended", shift_start_at: IST("10:31"), shift_end_at: IST("18:31"), attendance_type: "FULL_DAY" }
+];
+const leaveRows = [{ employee_id: "leave", start_date: "2026-11-15", end_date: "2026-11-18" }, { employee_id: "grace", start_date: "2026-11-12", end_date: "2026-11-15" }];
+const cutoffs = { first_half_ontime_cutoff: "10:35:00", second_half_ontime_cutoff: "13:30:00" };
+const calTue = { weeklyOffDay: 2, ranges: [], timersEnabled: true };
+const at = (hhmm, ymd = "2026-11-16") => Date.parse(`${ymd}T${hhmm}:00+05:30`);
+const team = (nowMs, ymd = "2026-11-16") => ah.teamStatus({ employees, attendance, leaveRows, cutoffs, firstWindowEnd: "11:30:00", todayYmd: ymd, nowMs, cal: calTue });
+eq("team states Mon 14:00 (order: needs a look first)", team(at("14:00")).map((m) => `${m.id}:${m.state}`), ["none:NOT_STARTED", "late:LATE", "grace:IN_GRACE", "half:ON_SHIFT", "on:ON_SHIFT", "ended:SHIFT_ENDED", "leave:ON_LEAVE"]);
+eq("before 11:30 not started is not yet a problem", team(at("10:45")).find((m) => m.id === "none").state, "NOT_STARTED_YET");
+eq("Tuesday = day off", ah.teamStatus({ employees, attendance: [], leaveRows: [], cutoffs, firstWindowEnd: "11:30:00", todayYmd: "2026-11-17", nowMs: at("14:00", "2026-11-17"), cal: calTue }).every((m) => m.state === "DAY_OFF"), true);
+// HR attendance parity: on shift / late = calculateDailyHrmsStatus over today's attendance rows (the HR page's rule).
+const { calculateDailyHrmsStatus } = require(path.join(root, "lib/calculateHrmsAttendanceStatus.ts"));
+const hrLate = attendance.filter((a) => !a.shift_end_at && calculateDailyHrmsStatus(a, cutoffs) === "LATE_COMING").length;
+const counts = ah.teamCounts(team(at("14:00")));
+eq("team counts = HR rule", [counts.late, counts.onShift], [hrLate, attendance.filter((a) => !a.shift_end_at).length]);
+eq("call quality bands (Lead when Lead dials, else Data)", [...ah.bandsFromSummary({ employees: [
+  { employee_id: "a", by_card_type: { LEAD: { dial_clicks: 40, genuine_score: 86 }, DATA: { dial_clicks: 5, genuine_score: 40 } } },
+  { employee_id: "b", by_card_type: { LEAD: { dial_clicks: 0, genuine_score: null }, DATA: { dial_clicks: 9, genuine_score: 61 } } },
+  { employee_id: "c", by_card_type: { LEAD: { dial_clicks: 2, genuine_score: null } } }
+] }).entries()], [["a", "Green"], ["b", "Amber"], ["c", null]]);
+// Workload overdue = LeadCard's badge: reference copy of components/LeadCard.tsx (lines 137-156) on LeadList's card fields.
+const { calculateSLAStatus } = require(path.join(root, "lib/calculateSLAStatus.ts"));
+const refOverdue = (l, h) => {
+  const card = { status: l.status, board_stage: l.board_stage, sla_deadline: l.sla_deadline, recycle_count: l.recycle_count, outcome_at: h.outcome_at ?? null, assigned_at: h.assigned_at ?? null, last_activity_at: h.last_activity_at ?? null, paused_until: h.paused_until ?? null, pause_reason: h.pause_reason ?? null, is_personal_lead: l.is_personal_lead ?? false };
+  const s = calculateSLAStatus({ status: card.status, sla_deadline: card.sla_deadline, recycle_count: card.recycle_count, board_stage: card.board_stage, paused_until: card.paused_until, last_activity_at: card.last_activity_at, pause_reason: card.pause_reason, assigned_at: card.assigned_at }, card.outcome_at, 0, false, card.is_personal_lead, calTue);
+  return s === "FOLLOWUP_INACTIVITY_WARNING" || s === "FOLLOWUP_INACTIVITY_RECYCLE_READY";
+};
+const dayAgo = (d) => new Date(Date.now() - d * 86400e3).toISOString();
+const wl = [];
+for (const [i, [stage, status, days, pause]] of [["FOLLOW_UP", "CONNECTED", 4, null], ["FOLLOW_UP", "CONNECTED", 1, null], ["FOLLOW_UP", "CONNECTED", 8, null], ["LEADS", "NEW", 0, null], ["FOLLOW_UP", "CONNECTED", 9, "SNOOZE"], ["VISIT", "CONNECTED", 10, null]].entries()) {
+  wl.push({ current_owner_id: "o1", status, board_stage: stage, sla_deadline: null, recycle_count: 0, is_personal_lead: false, lead_history: [
+    { employee_id: "x", is_active: false, call_count: 1, outcome_at: dayAgo(30), assigned_at: dayAgo(40), first_call_at: dayAgo(30), first_whatsapp_at: null, last_activity_at: dayAgo(30), paused_until: null, pause_reason: null },
+    { employee_id: "o1", is_active: true, call_count: status === "NEW" ? 0 : 1, outcome_at: status === "NEW" ? null : dayAgo(days), assigned_at: dayAgo(days + 1), first_call_at: status === "NEW" ? null : dayAgo(days), first_whatsapp_at: null, last_activity_at: status === "NEW" ? dayAgo(days + 1) : dayAgo(days), paused_until: pause ? new Date(Date.now() + 86400e3).toISOString() : null, pause_reason: pause }
+  ] });
+}
+const refCount = wl.filter((l) => refOverdue(l, l.lead_history[1])).length;
+const got = ah.workloadByOwner(wl, calTue).get("o1");
+eq("workload: overdue = LeadCard badge, own active assignment only", [got.overdue, got.leads, got.untouched], [refCount, 6, 1]);
+
+const todayHook = read("lib/useAdminToday.ts");
+const rpcs = todayHook.match(/\.rpc\("([a-z_]+)"/g) || [];
+if (rpcs.length !== 1 || !todayHook.includes('rpc("get_call_quality_summary", { p_employee_id: null,')) problems.push("useAdminToday: the only RPC is get_call_quality_summary (all employees, display only)");
+if (/setInterval\(|\.channel\(|\.(insert|update|upsert|delete)\(/.test(todayHook)) problems.push("useAdminToday: read-only, no polling, no channel");
+const fromTodayCalls = (todayHook.match(/\.from\(/g) || []).length;
+const boundedToday = (todayHook.match(/\.limit\(/g) || []).length + (todayHook.match(/fetchAllRows\(/g) || []).length;
+if (boundedToday < fromTodayCalls) problems.push(`useAdminToday: every read bounded (${fromTodayCalls} reads, ${boundedToday} bounds)`);
+const loadAllBody = todayHook.slice(todayHook.indexOf("const loadAll = useCallback"), todayHook.indexOf("}, [loadTiles, loadTeam]);"));
+if (loadAllBody.includes("loadWorkload")) problems.push("useAdminToday: workload never loads on the first load or on Refresh, only when asked");
+const cards = read("components/AdminTodayCards.tsx");
+if (!cards.includes("onClick={today.loadWorkload}")) problems.push("Team today: workload behind the Show workload button");
+if (/purple|violet|fuchsia|opacity-80/i.test(cards)) problems.push("AdminTodayCards: no purple, no faded labels");
+
 if (problems.length) {
   console.error("check-admin-home FAILED:\n  " + problems.join("\n  "));
   process.exit(1);

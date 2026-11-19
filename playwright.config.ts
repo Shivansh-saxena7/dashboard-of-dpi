@@ -15,8 +15,8 @@ export default defineConfig({
   projects: [
     { name: "android-chrome", use: { ...devices["Pixel 7"] } },
     { name: "iphone-safari", use: { ...devices["iPhone 14"] } },
-    // Admin Home A1 (2026-11-19): admins also use a desktop browser; only the Admin Home spec runs here.
-    { name: "desktop-chromium", use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 900 } }, testMatch: /admin-home-a1\.spec\.ts$/ }
+    // Admin Home (2026-11-19): admins also use a desktop browser; only the Admin Home specs run here.
+    { name: "desktop-chromium", use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 900 } }, testMatch: /admin-home-a\d+\.spec\.ts$/ }
   ],
   webServer: {
     command: `npx next dev -p ${PORT}`,

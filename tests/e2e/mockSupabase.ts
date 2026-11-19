@@ -108,6 +108,14 @@ export interface MockState {
   leave: { employee_id: string; start_date: string; end_date: string | null }[];
   settingsDelayMs: number;
   fail: Set<string>;
+  // Admin Home A2: rows behind the count-only reads, today's attendance by date, the all-employee Call Quality summary
+  // and the workload rows (leads of the team with their assignments).
+  clicks: { clicked_at: string; click_type: string }[];
+  activities: { created_at: string; activity_type: string }[];
+  bookings: { board_stage_changed_at: string }[];
+  attendanceByDate: { employee_id: string; date: string; shift_start_at: string | null; shift_end_at: string | null; attendance_type: string | null }[] | null;
+  cqAll: Record<string, unknown> | null;
+  workloadLeads: Record<string, unknown>[];
 }
 
 export async function mockSupabase(context: BrowserContext): Promise<MockState> {
@@ -115,7 +123,8 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
   const state: MockState = {
     leads: makeLeads("LEAD", 60), data: makeLeads("DATA", 40), anomalies: [], updates: [], failUpdates: 0, landThenLose: 0,
     settings: { ...LEAD_ENGINE_SETTINGS }, employee, staff: null, heartbeats: [], backups: [], anomalyRows: [], transfers: [], empRequests: [],
-    attendanceRows: null, joins: [], leave: [], settingsDelayMs: 0, fail: new Set()
+    attendanceRows: null, joins: [], leave: [], settingsDelayMs: 0, fail: new Set(),
+    clicks: [], activities: [], bookings: [], attendanceByDate: null, cqAll: null, workloadLeads: []
   };
 
   const json = (route: Route, body: unknown, status = 200, headers: Record<string, string> = {}) =>
@@ -135,7 +144,37 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
     if (p.startsWith("/auth/v1")) return json(route, {});
 
     const table = p.startsWith("/rest/v1/") ? p.slice("/rest/v1/".length) : "";
-    if (method === "GET" && state.fail.has(table)) return json(route, { message: "fake failure" }, 500);
+    if ((method === "GET" || method === "HEAD") && state.fail.has(table)) return json(route, { message: "fake failure" }, 500);
+    // A2 count-only reads: count the rows whose time column is in [gte, lt).
+    const between = (col: string) => {
+      const vals = url.searchParams.getAll(col);
+      const gte = vals.find((v) => v.startsWith("gte."))?.slice(4);
+      const lt = vals.find((v) => v.startsWith("lt."))?.slice(3);
+      return (t: string) => (!gte || Date.parse(t) >= Date.parse(gte)) && (!lt || Date.parse(t) < Date.parse(lt));
+    };
+    const headCount = (n: number) =>
+      route.fulfill({ status: 200, headers: { "access-control-allow-origin": "*", "access-control-expose-headers": "content-range", "content-range": n ? `0-0/${n}` : "*/0" } });
+    if (method === "HEAD" && p === "/rest/v1/contact_click_log") {
+      const inWin = between("clicked_at");
+      return headCount(state.clicks.filter((c) => c.click_type === "CALL" && inWin(c.clicked_at)).length);
+    }
+    if (method === "HEAD" && p === "/rest/v1/lead_activity_log") {
+      const inWin = between("created_at");
+      return headCount(state.activities.filter((a) => a.activity_type === "STATUS_UPDATE" && inWin(a.created_at)).length);
+    }
+    if (method === "HEAD" && p === "/rest/v1/leads" && url.searchParams.get("board_stage") === "eq.BOOKING") {
+      const inWin = between("board_stage_changed_at");
+      return headCount(state.bookings.filter((b) => inWin(b.board_stage_changed_at)).length);
+    }
+    if (method === "GET" && p === "/rest/v1/attendance" && state.attendanceByDate && !wantsObject) {
+      const d = url.searchParams.get("date") || "";
+      const dates = d.startsWith("in.(") ? d.slice(4, -1).split(",") : d.startsWith("eq.") ? [d.slice(3)] : null;
+      let rows = state.attendanceByDate.filter((r) => !dates || dates.includes(r.date));
+      if (url.searchParams.get("shift_start_at") === "not.is.null") rows = rows.filter((r) => r.shift_start_at);
+      return json(route, rows);
+    }
+    if (p === "/rest/v1/rpc/get_call_quality_summary" && state.cqAll) return json(route, state.cqAll);
+    if (method === "GET" && p === "/rest/v1/leads" && (url.searchParams.get("current_owner_id") || "").startsWith("in.")) return json(route, state.workloadLeads);
     if (p === "/rest/v1/employees") {
       if (wantsObject || url.searchParams.get("auth_user_id") || !state.staff) return json(route, wantsObject ? state.employee : [state.employee]);
       return json(route, state.staff);
