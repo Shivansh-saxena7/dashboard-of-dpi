@@ -49,6 +49,18 @@ if (J.attendance_today && J.hrms && J.sql_hr) {
   const notStarted = members.filter((m) => m.state === "NOT_STARTED").map((m) => m.id.slice(0, 8));
   teamLine = `Team today: ${c.total} field, on shift ${c.onShift} (late ${c.late}), not started ${c.notStarted} [${notStarted.join(", ")}], on leave ${c.onLeave}, in grace ${c.inGrace}; HR rule: started ${J.sql_hr.started}, late ${J.sql_hr.late}`;
 }
+// A3 Lead engine vs the same numbers counted in SQL.
+let engineLine = "Lead engine: (no A3 data in this export)";
+if (J.sql_engine) {
+  const groups = ah.groupGuardEvents(J.engine_guard_today, J.engine_guard_yesterday);
+  const refused = groups.find((g) => g.key === ah.POSITIVE_JUNK_REFUSED);
+  const prot = ah.openProtections(J.engine_restore, now);
+  const q = J.sql_engine;
+  if ((refused?.today ?? 0) !== q.refused_today) problems.push(`junk refused today: Home ${refused?.today ?? 0} vs SQL ${q.refused_today}`);
+  if (groups.length !== q.guard_groups_today) problems.push(`guard groups today: Home ${groups.length} vs SQL ${q.guard_groups_today}`);
+  if (prot.count !== q.protections_open) problems.push(`open protections: Home ${prot.count} vs SQL ${q.protections_open}`);
+  engineLine = `Lead engine: recycled ${q.recycled_today} (yesterday at this time ${q.recycled_yesterday}); junk refused ${refused?.today ?? 0} (SQL ${q.refused_today}); guard groups ${groups.length} (SQL ${q.guard_groups_today}): ${groups.map((g) => `${g.key} ${g.today}`).join(", ")}; open protections ${prot.count} (SQL ${q.protections_open})`;
+}
 const rows = ah.needsActionRows({ heartbeats: hb, backup, errors: errs, noShift: flagged.length, transfers: J.transfers, employeeRequests: J.employee_requests });
 
 console.log(`Jobs: ${hb.map((h) => `${h.label} ${h.severity}`).join(", ")}`);
@@ -56,6 +68,8 @@ console.log(`Backup: ${backup.severity} (${backup.status ?? "none"})`);
 console.log(`Problems today: Home ${errs.errors} errors / ${errs.warnings} warnings; System Health rule ${J.sh_problems.errors} / ${J.sh_problems.warnings}`);
 console.log(`No shift for 3+ working days: Home ${flagged.length}; today's job ${J.job_no_shift && J.job_no_shift.ran ? J.job_no_shift.flagged : "(not run yet today)"}`);
 console.log(teamLine);
+console.log(engineLine);
+console.log("Positive-history junk: not in this check (get_positive_junk_leads is admin-only and answers the logged-in caller; the Home and the page call it the same way).");
 console.log(`Approvals: ${J.transfers} lead transfers, ${J.employee_requests} employee requests`);
 console.log(`Needs action: ${rows.length ? rows.map((r) => `${r.key}:${r.severity}`).join(", ") : "All clear"}`);
 if (problems.length) {

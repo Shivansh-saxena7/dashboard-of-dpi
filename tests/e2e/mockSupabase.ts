@@ -116,6 +116,12 @@ export interface MockState {
   attendanceByDate: { employee_id: string; date: string; shift_start_at: string | null; shift_end_at: string | null; attendance_type: string | null }[] | null;
   cqAll: Record<string, unknown> | null;
   workloadLeads: Record<string, unknown>[];
+  // Admin Home A3: system recycles (assigned_at), guard events, restore log rows, the positive-junk RPC answer.
+  recycles: string[];
+  guardEvents: { created_at: string; source: string; action: string }[];
+  restoreRows: { protected_until: string; restored_at: string | null; undone_at: string | null }[];
+  positiveJunk: { rows: unknown[] } | null;
+  positiveJunkCalls: number;
 }
 
 export async function mockSupabase(context: BrowserContext): Promise<MockState> {
@@ -124,7 +130,8 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
     leads: makeLeads("LEAD", 60), data: makeLeads("DATA", 40), anomalies: [], updates: [], failUpdates: 0, landThenLose: 0,
     settings: { ...LEAD_ENGINE_SETTINGS }, employee, staff: null, heartbeats: [], backups: [], anomalyRows: [], transfers: [], empRequests: [],
     attendanceRows: null, joins: [], leave: [], settingsDelayMs: 0, fail: new Set(),
-    clicks: [], activities: [], bookings: [], attendanceByDate: null, cqAll: null, workloadLeads: []
+    clicks: [], activities: [], bookings: [], attendanceByDate: null, cqAll: null, workloadLeads: [],
+    recycles: [], guardEvents: [], restoreRows: [], positiveJunk: null, positiveJunkCalls: 0
   };
 
   const json = (route: Route, body: unknown, status = 200, headers: Record<string, string> = {}) =>
@@ -154,6 +161,20 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
     };
     const headCount = (n: number) =>
       route.fulfill({ status: 200, headers: { "access-control-allow-origin": "*", "access-control-expose-headers": "content-range", "content-range": n ? `0-0/${n}` : "*/0" } });
+    if (method === "HEAD" && p === "/rest/v1/lead_history" && url.searchParams.get("assigned_by_type") === "eq.SYSTEM") {
+      const inWin = between("assigned_at");
+      return headCount(state.recycles.filter((t) => inWin(t)).length);
+    }
+    if (method === "GET" && p === "/rest/v1/lead_guard_events") {
+      const inWin = between("created_at");
+      return json(route, state.guardEvents.filter((g) => inWin(g.created_at)).map((g) => ({ source: g.source, action: g.action })));
+    }
+    if (method === "GET" && p === "/rest/v1/lead_restore_log") return json(route, state.restoreRows);
+    if (p === "/rest/v1/rpc/get_positive_junk_leads") {
+      state.positiveJunkCalls += 1;
+      if (state.fail.has("rpc/get_positive_junk_leads")) return json(route, { message: "fake failure" }, 500);
+      return json(route, state.positiveJunk ?? { rows: [], employees: [], max_batch: 25, protection_days: 14 });
+    }
     if (method === "HEAD" && p === "/rest/v1/contact_click_log") {
       const inWin = between("clicked_at");
       return headCount(state.clicks.filter((c) => c.click_type === "CALL" && inWin(c.clicked_at)).length);

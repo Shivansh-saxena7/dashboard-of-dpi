@@ -124,6 +124,8 @@ export interface NeedsActionInput {
   noShift?: number | null;
   transfers?: number | null;
   employeeRequests?: number | null;
+  // A3: positive-history leads in Junk, once checked (the page's count); null = not checked yet.
+  positiveJunk?: number | null;
 }
 
 // Worst first; a row with nothing to say is left out. Empty = "All clear".
@@ -165,6 +167,15 @@ export function needsActionRows(i: NeedsActionInput): ActionRow[] {
       title: `${i.noShift} employee${i.noShift === 1 ? " has" : "s have"} not started a shift for 3+ working days`,
       detail: "no leave on record · HR attendance",
       href: "/hr/attendance"
+    });
+  }
+  if (i.positiveJunk && i.positiveJunk > 0) {
+    out.push({
+      key: "positive-junk",
+      severity: "warning",
+      title: `${i.positiveJunk} lead${i.positiveJunk === 1 ? "" : "s"} with a positive history ${i.positiveJunk === 1 ? "is" : "are"} in Junk`,
+      detail: "can be given back · Positive-history Junk",
+      href: "/admin/positive-junk"
     });
   }
   const approvals = (i.transfers ?? 0) + (i.employeeRequests ?? 0);
@@ -369,4 +380,69 @@ export function workloadByOwner(leads: WorkloadLead[], cal: WorkingCalendar | nu
     out.set(l.current_owner_id, w);
   }
   return out;
+}
+
+// ---- A3 (2026-11-19): Lead engine today + positive-history junk. Pure. ----
+
+export interface GuardEventLite {
+  source: string;
+  action: string;
+}
+// Plain English for the guard / hold events the sweep and the database write (lead_guard_events).
+export const GUARD_LABELS: Record<string, string> = {
+  "db_positive_junk_guard/JUNK_REFUSED": "Junk refused (positive history)",
+  "db_sibling_guard/RECYCLE_REFUSED": "Recycle refused (number with a positive lead)",
+  "recycle_sibling_guard/HOLD:HOLDER_ON_LEAVE": "Sibling hold (holder on leave, shadow)",
+  "recycle_sibling_guard/KEEP": "Sibling keep (shadow)",
+  "reminder_hold/REMINDER_HOLD": "Reminder hold",
+  "restore_hold/RESTORE_HOLD": "Restore hold (protected lead)",
+  "owner_leave/OWNER_ON_LEAVE": "Owner on leave (timers paused)",
+  "admin_reassign/ADMIN_REASSIGN": "Admin reassign",
+  "admin_restore/ADMIN_RESTORE_ONE": "Admin give-back",
+  "admin_restore/ADMIN_RESTORE_HELD": "Admin give-back held (sibling)"
+};
+export const POSITIVE_JUNK_REFUSED = "db_positive_junk_guard/JUNK_REFUSED";
+
+export interface GuardGroup {
+  key: string;
+  label: string;
+  today: number;
+  yesterday: number;
+}
+// Today's events grouped by source/action, with yesterday-at-this-time beside each; most frequent first.
+export function groupGuardEvents(today: GuardEventLite[] | null | undefined, yesterday: GuardEventLite[] | null | undefined): GuardGroup[] {
+  const map = new Map<string, GuardGroup>();
+  const add = (rows: GuardEventLite[] | null | undefined, field: "today" | "yesterday") => {
+    for (const r of rows ?? []) {
+      const key = `${r.source}/${r.action}`;
+      const g = map.get(key) ?? { key, label: GUARD_LABELS[key] ?? key.replace(/_/g, " ").toLowerCase(), today: 0, yesterday: 0 };
+      g[field] += 1;
+      map.set(key, g);
+    }
+  };
+  add(today, "today");
+  add(yesterday, "yesterday");
+  return [...map.values()].filter((g) => g.today > 0).sort((a, b) => b.today - a.today || a.key.localeCompare(b.key));
+}
+
+export interface RestoreRow {
+  protected_until: string;
+  restored_at?: string | null;
+  undone_at?: string | null;
+}
+// Open restore protections at a moment: restored by then, not undone by then, protection still running.
+export function openProtections(rows: RestoreRow[] | null | undefined, atMs: number): { count: number; earliestEnd: string | null } {
+  const open = (rows ?? []).filter(
+    (r) =>
+      Date.parse(r.protected_until) > atMs &&
+      (!r.restored_at || Date.parse(r.restored_at) <= atMs) &&
+      (!r.undone_at || Date.parse(r.undone_at) > atMs)
+  );
+  const earliest = open.map((r) => r.protected_until).sort()[0] ?? null;
+  return { count: open.length, earliestEnd: earliest };
+}
+
+// The Positive-history Junk page shows data.rows.length as "All": the Home uses the same number from the same RPC.
+export function positiveJunkCount(data: { rows?: unknown[] } | null | undefined): number {
+  return Array.isArray(data?.rows) ? data!.rows!.length : 0;
 }

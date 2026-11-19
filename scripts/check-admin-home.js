@@ -177,6 +177,44 @@ const cards = read("components/AdminTodayCards.tsx");
 if (!cards.includes("onClick={today.loadWorkload}")) problems.push("Team today: workload behind the Show workload button");
 if (/purple|violet|fuchsia|opacity-80/i.test(cards)) problems.push("AdminTodayCards: no purple, no faded labels");
 
+// 7) A3 (2026-11-19): Lead engine today + positive-history junk.
+eq("guard groups (today, with yesterday), most frequent first", ah.groupGuardEvents(
+  [{ source: "db_positive_junk_guard", action: "JUNK_REFUSED" }, { source: "db_positive_junk_guard", action: "JUNK_REFUSED" }, { source: "reminder_hold", action: "REMINDER_HOLD" }, { source: "new_thing", action: "SOME_ACTION" }],
+  [{ source: "db_positive_junk_guard", action: "JUNK_REFUSED" }, { source: "admin_reassign", action: "ADMIN_REASSIGN" }]
+), [
+  { key: "db_positive_junk_guard/JUNK_REFUSED", label: "Junk refused (positive history)", today: 2, yesterday: 1 },
+  { key: "new_thing/SOME_ACTION", label: "new thing/some action", today: 1, yesterday: 0 },
+  { key: "reminder_hold/REMINDER_HOLD", label: "Reminder hold", today: 1, yesterday: 0 }
+]);
+const P = (until, restored, undone = null) => ({ protected_until: until, restored_at: restored, undone_at: undone });
+const NOWP = Date.parse("2026-11-19T10:00:00Z");
+const prot = [P("2026-12-02T08:47:00Z", "2026-11-18T08:47:00Z"), P("2026-11-25T00:00:00Z", "2026-11-19T09:00:00Z"), P("2026-11-30T00:00:00Z", "2026-11-10T00:00:00Z", "2026-11-19T08:00:00Z"), P("2026-11-19T05:00:00Z", "2026-11-05T00:00:00Z")];
+eq("protections open now", ah.openProtections(prot, NOWP), { count: 2, earliestEnd: "2026-11-25T00:00:00Z" });
+eq("protections open 24 h ago", ah.openProtections(prot, NOWP - 86400e3).count, 3);
+// Positive-history junk = the page's "All" (app/admin/positive-junk: data.rows.length), from the same RPC.
+const pjData = { rows: [{ lead_id: "a" }, { lead_id: "b" }, { lead_id: "c" }], employees: [] };
+eq("positive junk count = page's All", ah.positiveJunkCount(pjData), pjData.rows.length);
+eq("positive junk: nothing / bad answer = 0", [ah.positiveJunkCount(null), ah.positiveJunkCount({})], [0, 0]);
+eq("positive junk row: amber, hidden at 0 and before the check", [
+  ah.needsActionRows({ positiveJunk: 3 }).map((r) => `${r.key}:${r.severity}:${r.href}`),
+  ah.needsActionRows({ positiveJunk: 0 }).length,
+  ah.needsActionRows({ positiveJunk: null }).length
+], [["positive-junk:warning:/admin/positive-junk"], 0, 0]);
+
+const eng = read("lib/useAdminEngine.ts");
+const engRpcs = eng.match(/\.rpc\("([a-z_]+)"/g) || [];
+if (engRpcs.length !== 1 || !eng.includes('rpc("get_positive_junk_leads")')) problems.push("useAdminEngine: the only RPC is get_positive_junk_leads");
+const loadEngineBody = eng.slice(eng.indexOf("const loadEngine = useCallback"), eng.indexOf("const checkPositiveJunk = useCallback"));
+const refreshBody = eng.slice(eng.indexOf("const refresh = useCallback"), eng.indexOf("return { engine, pj"));
+if (loadEngineBody.includes(".rpc(") || refreshBody.includes("checkPositiveJunk")) problems.push("useAdminEngine: positive junk only on Check, never on load / Refresh");
+if (/setInterval\(|\.channel\(|\.(insert|update|upsert|delete)\(/.test(eng)) problems.push("useAdminEngine: read-only, no polling, no channel");
+const engFrom = (eng.match(/\.from\(/g) || []).length;
+const engLimit = (eng.match(/\.limit\(/g) || []).length;
+if (engLimit < engFrom) problems.push(`useAdminEngine: every read bounded (${engFrom} reads, ${engLimit} limits)`);
+const engCard = read("components/AdminEngineCard.tsx");
+if (!engCard.includes("onClick={engine.checkPositiveJunk}")) problems.push("Lead engine card: positive junk behind Check");
+if (/purple|violet|fuchsia|opacity-80/i.test(engCard)) problems.push("AdminEngineCard: no purple, no faded labels");
+
 if (problems.length) {
   console.error("check-admin-home FAILED:\n  " + problems.join("\n  "));
   process.exit(1);

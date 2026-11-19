@@ -43,6 +43,16 @@ select json_build_object(
     cross join hrms_settings h
     where h.id = 1 and e.is_active and e.role in ('employee', 'team_leader') and (e.department is null or e.department = 'sales')
       and lower(trim(e.name)) <> 'testing' and e.id <> 'd970af89-063d-48b4-98aa-b89260fb3d87'),
+  -- A3 Lead engine: the rows the Home reads for both windows, and the same numbers counted in SQL.
+  'engine_guard_today', (select coalesce(json_agg(json_build_object('source', source, 'action', action)), '[]') from lead_guard_events, t0 where created_at >= t0.day_start and created_at < now()),
+  'engine_guard_yesterday', (select coalesce(json_agg(json_build_object('source', source, 'action', action)), '[]') from lead_guard_events, t0 where created_at >= t0.day_start - interval '1 day' and created_at < now() - interval '1 day'),
+  'engine_restore', (select coalesce(json_agg(json_build_object('protected_until', protected_until, 'restored_at', restored_at, 'undone_at', undone_at)), '[]') from lead_restore_log where protected_until > now() - interval '1 day'),
+  'sql_engine', (select json_build_object(
+      'recycled_today', (select count(*) from lead_history, t0 where assigned_by_type = 'SYSTEM' and recycle_reason is not null and assigned_at >= t0.day_start and assigned_at < now()),
+      'recycled_yesterday', (select count(*) from lead_history, t0 where assigned_by_type = 'SYSTEM' and recycle_reason is not null and assigned_at >= t0.day_start - interval '1 day' and assigned_at < now() - interval '1 day'),
+      'refused_today', (select count(*) from lead_guard_events, t0 where source = 'db_positive_junk_guard' and action = 'JUNK_REFUSED' and created_at >= t0.day_start and created_at < now()),
+      'guard_groups_today', (select count(distinct source || '/' || action) from lead_guard_events, t0 where created_at >= t0.day_start and created_at < now()),
+      'protections_open', (select count(*) from lead_restore_log where undone_at is null and protected_until > now()))),
   -- The daily job's own answer today (System Health warning no_shift_alert), if it ran.
   'job_no_shift', (select json_build_object('ran', count(*) > 0, 'flagged', max(jsonb_array_length(coalesce(context->'employees', '[]'::jsonb))))
     from system_anomaly_log, t0 where source = 'no_shift_alert' and last_seen_at >= t0.day_start)

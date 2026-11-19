@@ -10,6 +10,8 @@ import AdminSocialDashboard from "@/components/AdminSocialDashboard";
 import { useAdminHome } from "@/lib/useAdminHome";
 import { useAdminToday } from "@/lib/useAdminToday";
 import { TeamToday, TodaySoFar } from "@/components/AdminTodayCards";
+import { useAdminEngine } from "@/lib/useAdminEngine";
+import { AdminEngineCard } from "@/components/AdminEngineCard";
 import { istHeaderDate, istTime, minutesText, needsActionRows, type Severity } from "@/lib/adminHome";
 
 const CARD = "rounded-2xl border border-slate-200 bg-white p-4 shadow-sm";
@@ -65,9 +67,12 @@ export default function AdminHomeA1() {
   const home = useAdminHome();
   // A2: Today so far + Team today (own reads; Refresh reloads both).
   const today = useAdminToday();
+  // A3: Lead engine today (+ positive-history junk, counted only on Check).
+  const engine = useAdminEngine();
   const refreshAll = () => {
     home.refresh();
     today.refresh();
+    engine.refresh();
   };
   const [socialOpen, setSocialOpen] = useState(false);
   const now = Date.now();
@@ -80,7 +85,8 @@ export default function AdminHomeA1() {
     errors: home.errors.data,
     noShift: home.noShift.data,
     transfers: home.approvals.data?.transfers,
-    employeeRequests: home.approvals.data?.employeeRequests
+    employeeRequests: home.approvals.data?.employeeRequests,
+    positiveJunk: engine.pj.count
   });
   const worst = rows[0]?.severity;
   const hb = home.system.data?.heartbeats ?? [];
@@ -215,7 +221,14 @@ export default function AdminHomeA1() {
 
       <TodaySoFar today={today} teamTotal={today.team.data ? today.team.data.members.length : null} />
 
-      <TeamToday today={today} />
+      <div className="grid gap-4 lg:grid-cols-12">
+        <div className="lg:col-span-8">
+          <TeamToday today={today} />
+        </div>
+        <div className="lg:col-span-4">
+          <AdminEngineCard engine={engine} />
+        </div>
+      </div>
 
       <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
         <button
