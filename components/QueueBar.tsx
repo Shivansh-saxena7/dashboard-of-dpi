@@ -25,7 +25,7 @@ export default function QueueBar({
     >
       {current ? (
         <>
-          <p className="mb-2 text-sm text-slate-700">
+          <p className="mb-2 text-sm text-slate-700" aria-live="polite">
             Next lead <b className="tabular-nums text-slate-900">{queue.index + 1}</b> of{" "}
             <b className="tabular-nums text-slate-900">{queue.ids.length}</b>
             {": "}
@@ -33,7 +33,7 @@ export default function QueueBar({
           </p>
           <div className="grid grid-cols-3 gap-2">
             <button type="button" data-testid="queue-skip" onClick={onSkip} className="min-h-12 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700">
-              Skip
+              Skip lead
             </button>
             <button type="button" data-testid="queue-open" onClick={onOpen} className="min-h-12 rounded-xl bg-blue-600 text-sm font-semibold text-white">
               Open
@@ -45,7 +45,7 @@ export default function QueueBar({
         </>
       ) : (
         <div className="flex items-center justify-between gap-3">
-          <p data-testid="queue-done" className="text-sm font-semibold text-slate-900">
+          <p data-testid="queue-done" className="text-sm font-semibold text-slate-900" aria-live="polite">
             All done. No more leads in the queue.
           </p>
           <div className="flex gap-2">

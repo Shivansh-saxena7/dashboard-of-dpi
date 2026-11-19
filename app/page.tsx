@@ -152,7 +152,7 @@ to-blue-100
     Start Shift exactly as before, and it's hidden for every non-Sales
     department (Marketing, Other, Accounts, HR) consistently. */}
 {employee?.id && !(employee?.department && employee.department !== "sales") && (
-  <StartShiftCard employeeId={employee.id} />
+  <StartShiftCard employeeId={employee.id} compactWhenIdle={showNewHome} />
 )}
 
 {showNewHome && employee?.id ? (

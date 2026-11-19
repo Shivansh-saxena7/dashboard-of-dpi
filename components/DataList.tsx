@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { motion } from "framer-motion";
 import { Search, ChevronDown } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -94,6 +95,9 @@ export default function DataList({ employeeId }: DataListProps) {
   // Data-only "Start with next lead" (2026-11-18, Home Phase 3): ?queue=1 walks lib/employeeHome.ts dataQueueOrder
   // through this list's own modal (normal Call and result-save); Skip is local only (lib/useListQueue.ts).
   const [queueRequested, setQueueRequested] = useState(false);
+  // E5: came from the new Home (links carry from=home): a "Back to Home" chip.
+  const [fromHomeLink, setFromHomeLink] = useState(false);
+
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -150,13 +154,17 @@ export default function DataList({ employeeId }: DataListProps) {
     if (loading) return;
     const openLeadId = searchParams.get("openLead");
     const queueParam = searchParams.get("queue") === "1";
+    const fromParam = searchParams.get("from") === "home";
+    if (fromParam) {
+      setFromHomeLink(true);
+    }
     if (queueParam) {
       setQueueRequested(true);
     }
     if (openLeadId) {
       setSelectedLeadId(openLeadId);
     }
-    if (openLeadId || queueParam) {
+    if (openLeadId || queueParam || fromParam) {
       router.replace("/data");
     }
   }, [loading, searchParams, router]);
@@ -475,6 +483,17 @@ export default function DataList({ employeeId }: DataListProps) {
   return (
     <>
       <ResumeCallStrip employeeId={employeeId} currentList="DATA" openLeadId={selectedLeadId} onResumeHere={(id) => setSelectedLeadId(id)} />
+      {fromHomeLink && (
+        <div className="mx-4 mt-3 flex">
+          <Link
+            href="/"
+            data-testid="back-to-home"
+            className="flex min-h-11 items-center gap-1 rounded-full border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm"
+          >
+            <span aria-hidden>‹</span> Back to Home
+          </Link>
+        </div>
+      )}
       {queue && !selectedLeadId && (
         <QueueBar
           queue={queue}

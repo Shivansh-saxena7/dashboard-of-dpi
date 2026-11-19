@@ -14,6 +14,11 @@ const KEY = "employee-home-mode:v1:";
 export const HOME_MODE_REMEMBER_MS = 30 * 60 * 1000;
 export const HOME_MODE_TIMEOUT_MS = 2000;
 
+// E5: other screens (ResumeCallStrip) read only this remembered answer - never a database read of their own.
+export function rememberedHomeMode(employeeId: string | null | undefined): boolean {
+  return employeeId ? readRemembered(employeeId) === true : false;
+}
+
 function readRemembered(employeeId: string): boolean | null {
   try {
     const raw = sessionStorage.getItem(KEY + employeeId);

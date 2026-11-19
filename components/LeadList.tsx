@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 import { Search, ChevronDown } from "lucide-react";
@@ -176,6 +177,9 @@ export default function LeadList({ employeeId }: LeadListProps) {
   // saved result the next lead opens; with the modal closed a bar offers Skip / Open / Exit. Skip is kept in this tab's
   // sessionStorage only (nothing is written to the database).
   const [queueRequested, setQueueRequested] = useState(false);
+  // E5: came from the new Home (links carry from=home): a "Back to Home" chip.
+  const [fromHomeLink, setFromHomeLink] = useState(false);
+
   const todayReminders = useTodayReminders(employeeId, homeFilter === "reminders-today" || homeFilter === "reminders-missed" || queueRequested);
   const [originFilter, setOriginFilter] = useState<"" | LeadOrigin>("");
   const [priorityFilter, setPriorityFilter] = useState<"" | LeadPriority>("");
@@ -232,6 +236,10 @@ export default function LeadList({ employeeId }: LeadListProps) {
     // ?filter=recycling-tomorrow — the focus-reminder toast's "Open
     // Recycling Tomorrow" button (2026-10-05).
     const filterParam = searchParams.get("filter");
+    const fromParam = searchParams.get("from") === "home";
+    if (fromParam) {
+      setFromHomeLink(true);
+    }
     if (filterParam === "recycling-tomorrow") {
       setRecyclingTomorrowFilter(true);
     }
@@ -254,7 +262,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
     if (openLeadId) {
       setSelectedLeadId(openLeadId);
     }
-    if (openLeadId || filterParam || tabParam || queueParam) {
+    if (openLeadId || filterParam || tabParam || queueParam || fromParam) {
       router.replace("/leads");
     }
   }, [loading, searchParams, router]);
@@ -826,6 +834,17 @@ export default function LeadList({ employeeId }: LeadListProps) {
   return (
     <>
       <ResumeCallStrip employeeId={employeeId} currentList="LEAD" openLeadId={selectedLeadId} onResumeHere={(id) => setSelectedLeadId(id)} />
+      {fromHomeLink && (
+        <div className="mx-4 mt-3 flex">
+          <Link
+            href="/"
+            data-testid="back-to-home"
+            className="flex min-h-11 items-center gap-1 rounded-full border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm"
+          >
+            <span aria-hidden>‹</span> Back to Home
+          </Link>
+        </div>
+      )}
       {queue && !selectedLeadId && (
         <QueueBar
           queue={queue}

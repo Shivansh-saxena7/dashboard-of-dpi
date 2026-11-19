@@ -14,6 +14,7 @@ import { supabase } from "@/lib/supabase";
 import { fetchAllRows } from "@/lib/fetchAllRows";
 import { istDateYmd } from "@/lib/ownerLeave";
 import { useWorkingCalendar } from "@/lib/useWorkingCalendar";
+import { reportClientError } from "@/lib/reportClientError";
 import { isFollowUpOverdue, type HomeLead } from "@/lib/employeeHome";
 
 export interface TeamToday {
@@ -37,6 +38,7 @@ export function useTeamToday(teamId: string | null | undefined, enabled: boolean
     lastLoad.current = Date.now();
     const { data: memberRows, error: memberError } = await supabase.from("employees").select("id").eq("team_id", teamId);
     if (memberError) {
+      reportClientError("home:team", memberError.message, "warning");
       setError(true);
       return;
     }
@@ -68,6 +70,7 @@ export function useTeamToday(teamId: string | null | undefined, enabled: boolean
       )
     ]);
     if (shiftRes.error || waitingRes.error || followRes.error) {
+      reportClientError("home:team", (shiftRes.error || waitingRes.error || followRes.error)?.message ?? "team read failed", "warning");
       setError(true);
       return;
     }

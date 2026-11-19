@@ -16,6 +16,7 @@ import { fetchAllRows } from "@/lib/fetchAllRows";
 import { istDateYmd } from "@/lib/ownerLeave";
 import { useWorkingCalendar } from "@/lib/useWorkingCalendar";
 import { fetchTodayReminders } from "@/lib/todayReminders";
+import { reportClientError } from "@/lib/reportClientError";
 import {
   attentionCounts,
   dataCounts,
@@ -136,6 +137,10 @@ export function useEmployeeHome(employeeId: string | null | undefined): Employee
       fetchTodayReminders(employeeId)
     ]);
     if (!alive.current) return;
+    // E5: a card that cannot load says so in its own words, and the failure is reported (throttled, never throws).
+    if (leadsRes.error) reportClientError("home:leads", leadsRes.error?.message ?? leadsRes.error, "warning");
+    if (reportRes.error) reportClientError("home:today", reportRes.error?.message ?? reportRes.error, "warning");
+    if (remindersRes.error) reportClientError("home:reminders", "reminders could not be read", "warning");
     if (leadsRes.error) {
       setLeadsError(true);
     } else {

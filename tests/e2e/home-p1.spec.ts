@@ -101,7 +101,8 @@ const homeTopic = `realtime:employee-home-${EMP}`;
 
 async function openHome(page: Page) {
   await page.goto("/");
-  await expect(page.getByText("Today's Shift").first()).toBeVisible();
+  // E5: after the start window closes the new Home shows the one-line shift strip instead of the full card.
+  await expect(page.getByText("Today's Shift").or(page.getByTestId("shift-compact")).first()).toBeVisible();
 }
 
 test("flag off (column missing): the old Home, social posts open, no tiles", async ({ page }, info) => {
@@ -223,7 +224,8 @@ test("flag on, settings 1 s late: old Home first, then the new Home in place (no
   await expect(page.getByTestId("employee-home-p1")).toBeVisible();
   await expect(value(page, "tile-new")).toHaveText(String(EXPECTED.newCount));
   expect(await page.evaluate(() => (window as unknown as { __samePage?: number }).__samePage)).toBe(1);
-  await expect(page.getByText("Today's Shift").first()).toBeVisible();
+  // E5: after the start window closes the new Home shows the one-line shift strip instead of the full card.
+  await expect(page.getByText("Today's Shift").or(page.getByTestId("shift-compact")).first()).toBeVisible();
 });
 
 test("flag on, settings 5 s late: stays on the old Home (2 s timeout), nothing remembered, next visit asks again", async ({ page }) => {
@@ -233,7 +235,8 @@ test("flag on, settings 5 s late: stays on the old Home (2 s timeout), nothing r
   await expect.poll(() => apiData.length).toBeGreaterThan(0);
   await page.waitForTimeout(6000);
   await expect(page.getByTestId("employee-home-p1")).toHaveCount(0);
-  await expect(page.getByText("Today's Shift").first()).toBeVisible();
+  // E5: after the start window closes the new Home shows the one-line shift strip instead of the full card.
+  await expect(page.getByText("Today's Shift").or(page.getByTestId("shift-compact")).first()).toBeVisible();
   state.settingsDelayMs = 0;
   await page.reload();
   await expect(page.getByTestId("employee-home-p1")).toBeVisible();

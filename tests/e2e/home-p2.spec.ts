@@ -51,7 +51,8 @@ test.beforeEach(async ({ context }) => {
 
 async function openHome(page: Page) {
   await page.goto("/");
-  await expect(page.getByText("Today's Shift").first()).toBeVisible();
+  // E5: after the start window closes the new Home shows the one-line shift strip instead of the full card.
+  await expect(page.getByText("Today's Shift").or(page.getByTestId("shift-compact")).first()).toBeVisible();
 }
 const count = async (page: Page, testId: string) => Number((await page.getByTestId(testId).locator("b").first().textContent()) || "NaN");
 
@@ -163,7 +164,7 @@ test("reminders fail to load: said so, the other numbers still show", async ({ p
   state.settings.employee_home_mode = "on";
   state.remindersFail = true;
   await openHome(page);
-  await expect(page.getByText("Reminders couldn't load; they are not counted here.")).toBeVisible();
+  await expect(page.getByTestId("reminders-error")).toHaveText("Reminders couldn't load, so they are not counted here.");
   await expect(page.getByTestId("attention-reminders-today")).toHaveCount(0);
   await expect(page.getByTestId("attention-visits-today")).toContainText(/^1\s*Visits due today/);
   await expect(page.getByTestId("tile-new")).toBeVisible();

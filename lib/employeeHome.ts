@@ -99,10 +99,15 @@ export function myLeadCounts(leads: HomeLead[], calendar: WorkingCalendar | null
 }
 
 // Deep links into /leads. ?filter=new and ?tab= are new (Phase 1); ?filter=recycling-tomorrow already existed.
+// E5: every list link from the Home carries from=home, so /leads and /data show a "Back to Home" chip.
+export function fromHome(href: string): string {
+  return href + (href.includes("?") ? "&" : "?") + "from=home";
+}
+
 export const HOME_LINKS = {
-  newLeads: "/leads?filter=new",
-  recyclingTomorrow: "/leads?filter=recycling-tomorrow",
-  stage: (stage: HomeStage) => `/leads?tab=${stage}`,
+  newLeads: "/leads?filter=new&from=home",
+  recyclingTomorrow: "/leads?filter=recycling-tomorrow&from=home",
+  stage: (stage: HomeStage) => `/leads?tab=${stage}&from=home`,
   report: "/report"
 };
 
@@ -342,6 +347,8 @@ export interface DataCounts {
   untouched: number;
   callsLeft: number;
   lastAttempt: number;
+  // E5: still being called (DataCard's "still at risk": Leads stage, New / Not connected / Switched off).
+  atRisk: number;
 }
 export function dataCounts(leads: DataLead[]): DataCounts {
   const atRisk = leads.filter(dataStillAtRisk);
@@ -349,7 +356,8 @@ export function dataCounts(leads: DataLead[]): DataCounts {
     total: leads.length,
     untouched: leads.filter((l) => isUntouchedInCurrentAssignment(l.lead_history?.[0])).length,
     callsLeft: atRisk.reduce((sum, l) => sum + dataAttemptsLeft(l), 0),
-    lastAttempt: atRisk.filter((l) => dataAttemptsLeft(l) <= 1).length
+    lastAttempt: atRisk.filter((l) => dataAttemptsLeft(l) <= 1).length,
+    atRisk: atRisk.length
   };
 }
 
@@ -380,11 +388,11 @@ export function parseStoredQueue(raw: string | null | undefined, now: number = D
 }
 
 export const HOME_ATTENTION_LINKS: Record<HomeFilter, string> = {
-  "pending-result": "/leads?filter=pending-result",
-  "reminders-missed": "/leads?filter=reminders-missed",
-  "followup-overdue": "/leads?filter=followup-overdue",
-  "reminders-today": "/leads?filter=reminders-today",
-  "visits-today": "/leads?filter=visits-today"
+  "pending-result": "/leads?filter=pending-result&from=home",
+  "reminders-missed": "/leads?filter=reminders-missed&from=home",
+  "followup-overdue": "/leads?filter=followup-overdue&from=home",
+  "reminders-today": "/leads?filter=reminders-today&from=home",
+  "visits-today": "/leads?filter=visits-today&from=home"
 };
 
 // Data-only queue (/data?queue=1): 1 called, no result yet (oldest click first), 2 untouched (oldest assignment

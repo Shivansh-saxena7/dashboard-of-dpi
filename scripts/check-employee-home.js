@@ -38,7 +38,7 @@ eq("stages (null stage = Leads)", c.stages, { LEADS: 3, FOLLOW_UP: 2, VISIT: 1, 
 eq("New counts every tab, like Status = New", c.newCount, 3);
 eq("empty list", eh.myLeadCounts([], null), { total: 0, stages: { LEADS: 0, FOLLOW_UP: 0, VISIT: 0, BOOKING: 0 }, newCount: 0, recyclingTomorrow: 0 });
 eq("tab param", [eh.tabFromParam("VISIT"), eh.tabFromParam("HISTORY"), eh.tabFromParam(null)], ["VISIT", null, null]);
-eq("links", [eh.HOME_LINKS.newLeads, eh.HOME_LINKS.recyclingTomorrow, eh.HOME_LINKS.stage("FOLLOW_UP")], ["/leads?filter=new", "/leads?filter=recycling-tomorrow", "/leads?tab=FOLLOW_UP"]);
+eq("links", [eh.HOME_LINKS.newLeads, eh.HOME_LINKS.recyclingTomorrow, eh.HOME_LINKS.stage("FOLLOW_UP")], ["/leads?filter=new&from=home", "/leads?filter=recycling-tomorrow&from=home", "/leads?tab=FOLLOW_UP&from=home"]);
 
 // 3) Guards: same rules on both screens, old Home kept for flag off, no polling, no purple.
 const list = read("components/LeadList.tsx");
@@ -113,7 +113,7 @@ eq("queue: pending (oldest click first), reminder, New (SLA first); closed, snoo
 eq("Up next = the queue's first rows", eh.upNext(qLeads, { calendar: null, reminders: new Map([["rem", T]]), now: T }, 2).map((x) => x.lead.id), ["pending-1", "pending-2"]);
 eq("skip key is per employee and IST day", eh.queueSkipKey("e1", Date.parse("2026-11-18T18:31:00Z")), "homeQueueSkip:v1:e1:2026-11-19");
 const D = (status, stage, calls) => ({ id: `${status}-${stage}-${calls}`, status, board_stage: stage, lead_history: [{ call_count: calls, assigned_at: at, last_activity_at: calls ? "2026-11-18T06:00:00Z" : at, first_call_at: calls ? at : null }] });
-eq("data counts as DataCard: attempts only while still at risk", eh.dataCounts([D("NEW", "LEADS", 0), D("NOT_CONNECTED", "LEADS", 3), D("SWITCHED_OFF", null, 5), D("CONNECTED", "LEADS", 1), D("NEW", "FOLLOW_UP", 0)]), { total: 5, untouched: 2, callsLeft: 5, lastAttempt: 2 });
+eq("data counts as DataCard: attempts only while still at risk", eh.dataCounts([D("NEW", "LEADS", 0), D("NOT_CONNECTED", "LEADS", 3), D("SWITCHED_OFF", null, 5), D("CONNECTED", "LEADS", 1), D("NEW", "FOLLOW_UP", 0)]), { total: 5, untouched: 2, callsLeft: 5, lastAttempt: 2, atRisk: 3 });
 
 const leadList = read("components/LeadList.tsx");
 if (!/queueOrder\(leads, \{ calendar: workingCalendar, reminders: todayReminders\.byLead, missed: todayReminders\.missed \}\)/.test(leadList)) problems.push("LeadList queue must use queueOrder with the same calendar + reminders as the Home");
@@ -171,6 +171,25 @@ for (const [name, src] of [["LeadList", read("components/LeadList.tsx")], ["Data
 }
 const lqSrc = read("lib/useListQueue.ts");
 if (!/localStorage\.setItem\(key/.test(lqSrc) || !/queueDay\(\)/.test(lqSrc)) problems.push("lib/useListQueue.ts: today's queue kept in localStorage");
+
+// 7) E5 (2026-11-19) polish: everything behind the flag; shared components keep their old look when it is off.
+eq("fromHome adds the marker", [eh.fromHome("/data"), eh.fromHome("/leads?queue=1")], ["/data?from=home", "/leads?queue=1&from=home"]);
+const ssc = read("components/StartShiftCard.tsx");
+if (!/compactWhenIdle = false/.test(ssc) || !/!started && !ended && !idleCompact && \(/.test(ssc)) problems.push("StartShiftCard: compactWhenIdle off by default; the idle strip has no Start button");
+if (!/<StartShiftCard employeeId=\{employee\.id\} compactWhenIdle=\{showNewHome\} \/>/.test(pageSrc)) problems.push("app/page.tsx: compact Start Shift only with the new Home");
+const rcs = read("components/ResumeCallStrip.tsx");
+if (/supabase|\.from\(|\.rpc\(/.test(rcs) || !/rememberedHomeMode\(employeeId\)/.test(rcs) || !/\{newHome \? "Drop call" : "Skip"\}/.test(rcs)) problems.push("ResumeCallStrip: 'Drop call' only when the Home remembered the flag on; no read of its own");
+const qb = read("components/QueueBar.tsx");
+if (!/aria-live="polite"/.test(qb) || !/Skip lead/.test(qb)) problems.push("QueueBar: aria-live + 'Skip lead'");
+const ui5 = read("components/EmployeeHomeP1.tsx");
+if (/opacity-80/.test(ui5)) problems.push("Home: no opacity on labels (contrast)");
+if (/up-next-call[\s\S]{0,200}bg-blue-600/.test(ui5)) problems.push("Home: Call buttons are outline, only Start is solid");
+if (!/Waiting to assign/.test(ui5) || /"To assign"/.test(ui5)) problems.push("Home: 'Waiting to assign'");
+if (!/useReducedMotion/.test(ui5)) problems.push("Home: fade respects reduced motion");
+if (!/reportClientError\("home:leads"/.test(read("lib/useEmployeeHome.ts")) || !/reportClientError\("home:team"/.test(team.length ? read("lib/useTeamToday.ts") : "")) problems.push("Home cards report their load failures");
+for (const [name, src] of [["LeadList", read("components/LeadList.tsx")], ["DataList", read("components/DataList.tsx")]]) {
+  if (!/data-testid="back-to-home"/.test(src) || !/searchParams\.get\("from"\) === "home"/.test(src)) problems.push(`${name}: Back to Home chip when coming from the Home`);
+}
 
 if (problems.length) {
   console.error("check-employee-home FAILED:\n  " + problems.join("\n  "));

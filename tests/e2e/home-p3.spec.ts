@@ -49,7 +49,8 @@ test.beforeEach(async ({ context }) => {
 
 async function openHome(page: Page) {
   await page.goto("/");
-  await expect(page.getByText("Today's Shift").first()).toBeVisible();
+  // E5: after the start window closes the new Home shows the one-line shift strip instead of the full card.
+  await expect(page.getByText("Today's Shift").or(page.getByTestId("shift-compact")).first()).toBeVisible();
 }
 const modalName = (page: Page, name: string) => expect.poll(() => page.getByText(name, { exact: true }).count()).toBeGreaterThanOrEqual(1);
 // The detail sheet closes with its X button (lucide X icon, no text).

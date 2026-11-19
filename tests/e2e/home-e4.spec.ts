@@ -63,7 +63,8 @@ const closeModal = (page: Page) => page.locator("button:has(svg.lucide-x)").firs
 const height = async (page: Page, testId: string) => (await page.getByTestId(testId).boundingBox())?.height ?? 0;
 async function openHome(page: Page) {
   await page.goto("/");
-  await expect(page.getByText("Today's Shift").first()).toBeVisible();
+  // E5: after the start window closes the new Home shows the one-line shift strip instead of the full card.
+  await expect(page.getByText("Today's Shift").or(page.getByTestId("shift-compact")).first()).toBeVisible();
 }
 
 test("flag off: none of E4 shows", async ({ page }) => {
