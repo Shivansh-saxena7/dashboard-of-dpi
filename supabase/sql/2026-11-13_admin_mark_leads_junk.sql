@@ -1,3 +1,4 @@
+-- APPLIED (live; exact date not recorded, between 2026-11-13 and 2026-11-20); recorded 2026-11-20; live checked against the function / column definitions. The "NOT APPLIED" wording below is from before the apply; the SQL is unchanged.
 -- NOT APPLIED. 2026-11-13. Apply only on the owner's "haan", from an LF copy (git show), BEFORE the frontend merge.
 -- Admin bulk "Mark as junk" for leads that are still active (Admin Leads page). Admin only (is_admin()), reason
 -- required, at most 50 leads a call, one savepoint per lead so one bad lead never stops the others. Each lead goes

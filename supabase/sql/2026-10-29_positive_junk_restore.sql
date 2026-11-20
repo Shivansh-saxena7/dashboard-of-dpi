@@ -1,3 +1,4 @@
+-- APPLIED 2026-10-29 (live; auto_junk_window_check later changed by newer files); recorded 2026-11-20; live checked against the function / column definitions. The "NOT APPLIED" wording below is from before the apply; the SQL is unchanged.
 -- 2026-10-29 — Positive-history junk: admin list + "Restore and assign". NOT APPLIED — apply only after the owner's "haan".
 -- Rollback (schema): 2026-10-29_positive_junk_restore_rollback.sql
 -- Undo of individual restores: 2026-10-29_positive_junk_restore_undo.sql

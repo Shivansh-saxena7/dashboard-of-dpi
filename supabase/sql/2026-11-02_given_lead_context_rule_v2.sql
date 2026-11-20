@@ -1,3 +1,4 @@
+-- APPLIED 2026-11-02 17:43 IST (live); recorded 2026-11-20; live checked against the function / column definitions. The "NOT APPLIED" wording below is from before the apply; the SQL is unchanged.
 -- 2026-11-02 — "Given by admin" filter rule v2. NOT APPLIED — apply only after the owner's "haan" (LF copy).
 -- Needs 2026-11-02_given_lead_context.sql (applied 17:19 IST). Rollback: 2026-11-02_given_lead_context_rule_v2_rollback.sql
 -- A lead leaves the filter only on the caller's first call or first result on this assignment, not on a note, reminder,

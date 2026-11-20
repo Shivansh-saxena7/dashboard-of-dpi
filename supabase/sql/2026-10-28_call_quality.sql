@@ -1,3 +1,4 @@
+-- APPLIED 2026-10-31 11:14 IST (live; call_quality_live_since = 2026-10-31); recorded 2026-11-20; live checked against the function / column definitions. The "NOT APPLIED" wording below is from before the apply; the SQL is unchanged.
 -- 2026-10-28 (rules revised 2026-10-29) — Call Quality (Phase 1, software only). NOT APPLIED — apply only after the owner's "haan".
 -- Rollback: 2026-10-28_call_quality_rollback.sql   Tests (dry-run only): 2026-10-28_call_quality_tests.sql
 --

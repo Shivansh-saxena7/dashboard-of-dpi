@@ -1,3 +1,4 @@
+-- APPLIED about 2026-10-18 (live; exact time not recorded; merge_cross_owner_core later patched by 2026-11-02_given_lead_context.sql); recorded 2026-11-20; live checked against the function / column definitions. The "NOT APPLIED" wording below is from before the apply; the SQL is unchanged.
 -- 2026-10-17 — G1 / G3 / G4: positive leads stay with the person working them. NOT APPLIED.
 -- Apply only after an explicit "haan". Rollback: 2026-10-17_g1_g3_g4_positive_leads_rollback.sql
 --

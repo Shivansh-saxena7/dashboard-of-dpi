@@ -1,3 +1,4 @@
+-- APPLIED 2026-11-04 10:48 IST (live); recorded 2026-11-20; live checked against the function / column definitions. The "NOT APPLIED" wording below is from before the apply; the SQL is unchanged.
 -- 2026-11-03 - Admin list of the leads the positive-history junk guard is holding back. NOT APPLIED: apply only after the
 -- owner's "haan", from an LF copy (git show <commit>:<this file>). Rollback: 2026-11-03_guard_held_leads_rollback.sql
 -- Read-only, additive: one function, no table, no setting, no existing function changed.

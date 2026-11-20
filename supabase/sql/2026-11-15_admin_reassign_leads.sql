@@ -1,3 +1,4 @@
+-- APPLIED (live; exact date not recorded, between 2026-11-15 and 2026-11-20); recorded 2026-11-20; live checked against the function / column definitions. The "NOT APPLIED" wording below is from before the apply; the SQL is unchanged.
 -- NOT APPLIED. 2026-11-15. Apply only on the owner's "haan", from an LF copy (git show), BEFORE the frontend merge.
 -- Admin bulk Reassign with a server-side limit (Admin Leads page). Until now the 500-lead limit and the confirm step
 -- lived only in the UI; bulk_reassign_leads_atomic accepts any number of ids. admin_reassign_leads is the new,

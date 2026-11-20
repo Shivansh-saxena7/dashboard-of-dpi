@@ -1,3 +1,4 @@
+-- APPLIED (live; exact date not recorded, between 2026-11-15 and 2026-11-20); recorded 2026-11-20; live checked against the function / column definitions. The "NOT APPLIED" wording below is from before the apply; the SQL is unchanged.
 -- NOT APPLIED. 2026-11-15. Apply only on the owner's "haan", from an LF copy (git cat-file -p), rolled-back dry run first,
 -- between sweeps, BEFORE the frontend merge.
 -- Admin bulk Reassign with a stage mode. Additive: a new 4-parameter overload of admin_reassign_leads; the 3-parameter

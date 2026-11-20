@@ -1,3 +1,4 @@
+-- APPLIED 2026-11-13 about 14:20 IST (data change; both leads are no longer personal). DO NOT RE-RUN; recorded 2026-11-20; live checked against the function / column definitions. The "NOT APPLIED" wording below is from before the apply; the SQL is unchanged.
 -- NOT APPLIED. 2026-11-13. Apply only on the owner's "haan", from an LF copy (git show), AFTER Admin has reassigned
 -- these 2 leads from Muskan (inactive) to an active employee. Makes them ordinary leads (is_personal_lead = false) so
 -- the normal timers and recycling apply to the new owner; personal leads never recycle. Only these 2 ids, only while

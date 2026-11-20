@@ -1,3 +1,4 @@
+-- APPLIED 2026-11-04 (live); recorded 2026-11-20; live checked against the function / column definitions. The "NOT APPLIED" wording below is from before the apply; the SQL is unchanged.
 -- 2026-11-04 - "Previously connected" for the employee Data page. NOT APPLIED: apply only after the owner's "haan", from an LF
 -- copy (git show <commit>:<this file>). Rollback: 2026-11-04_data_previous_positive_rollback.sql
 -- Read-only, additive: one function, nothing else changes. Works for the caller's own active DATA leads only.

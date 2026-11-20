@@ -1,3 +1,4 @@
+-- APPLIED 2026-10-17 (live; some functions changed later by newer files); recorded 2026-11-20; live checked against the function / column definitions. The "NOT APPLIED" wording below is from before the apply; the SQL is unchanged.
 -- 2026-10-16 — P4 safety layers. NOT APPLIED. Apply only after an explicit "haan".
 -- Rollback: 2026-10-16_p4_safety_layers_rollback.sql
 --
