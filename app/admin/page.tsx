@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import TopPerformers from "@/components/TopPerformers";
 import LowPerformer from "@/components/LowPerformer";
 import Charts from "@/components/Charts";
@@ -35,18 +35,27 @@ setSelectedDate(today);
 
 
 
-// ✅ LOAD DATA
+// ✅ LOAD DATA (A0, 2026-11-20): no 5-second polling. Loads once (when the date is first set), again when the date
+// changes, when the app comes back to the foreground after at least a minute, and on Refresh.
+const lastLoad=useRef(0);
+const inFlight=useRef(false);
+const [refreshing,setRefreshing]=useState(false);
+
 useEffect(()=>{
 
-loadTracking();
+if(selectedDate) loadTracking();
 
-const interval=setInterval(()=>{
+},[selectedDate]);
 
-loadTracking();
+useEffect(()=>{
 
-},5000);
+const onVisible=()=>{
+  if(document.visibilityState==="visible" && Date.now()-lastLoad.current>=60_000) loadTracking();
+};
 
-return ()=>clearInterval(interval);
+document.addEventListener("visibilitychange",onVisible);
+
+return ()=>document.removeEventListener("visibilitychange",onVisible);
 
 },[]);
 
@@ -54,6 +63,11 @@ return ()=>clearInterval(interval);
 
 
 async function loadTracking(){
+
+if(inFlight.current) return;
+inFlight.current=true;
+lastLoad.current=Date.now();
+setRefreshing(true);
 
 try{
 
@@ -83,6 +97,11 @@ setAllData(records);
 
 console.log(err);
 reportClientError("load dashboard data", err);
+
+}finally{
+
+inFlight.current=false;
+setRefreshing(false);
 
 }
 
@@ -222,6 +241,16 @@ return(
       className="px-4 h-10 rounded-xl bg-white text-slate-800 text-sm font-medium"
     >
       Today
+    </button>
+    <button
+      type="button"
+      data-testid="admin-dashboard-refresh"
+      onClick={()=>loadTracking()}
+      disabled={refreshing}
+      aria-busy={refreshing}
+      className="px-4 h-10 rounded-xl bg-white text-slate-800 text-sm font-medium disabled:opacity-70"
+    >
+      {refreshing ? "Refreshing…" : "Refresh"}
     </button>
   </div>
   <div className="mt-5 bg-white/10 backdrop-blur-sm rounded-full overflow-hidden h-3">
