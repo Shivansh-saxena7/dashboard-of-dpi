@@ -48,9 +48,9 @@ async function setup(context: BrowserContext, page: Page, role: "admin" | "super
     )
   ];
   state.attendanceRows = [
-    { employee_id: "e-on", date: "2026-11-20", shift_start_at: IST("2026-11-20T10:31:00") },
-    { employee_id: "e-late", date: "2026-11-20", shift_start_at: IST("2026-11-20T10:52:00") },
-    ...["2026-11-19", "2026-11-18", "2026-11-16"].flatMap((d) => ["e-on", "e-late"].map((id) => ({ employee_id: id, date: d, shift_start_at: IST(`${d}T10:30:00`) })))
+    { employee_id: "e-on", date: "2026-11-20" },
+    { employee_id: "e-late", date: "2026-11-20" },
+    ...["2026-11-19", "2026-11-18", "2026-11-16"].flatMap((d) => ["e-on", "e-late"].map((id) => ({ employee_id: id, date: d })))
   ];
   state.leave = [{ employee_id: "e-leave", start_date: "2026-11-18", end_date: "2026-11-24" }];
   state.cqAll = { estimated: false, employees: [{ employee_id: "e-on", by_card_type: { LEAD: { dial_clicks: 40, genuine_score: 86 }, DATA: { dial_clicks: 0, genuine_score: null } } }] };
