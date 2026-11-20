@@ -122,6 +122,9 @@ export interface MockState {
   restoreRows: { protected_until: string; restored_at: string | null; undone_at: string | null }[];
   positiveJunk: { rows: unknown[] } | null;
   positiveJunkCalls: number;
+  // Admin Home A4: site visit events and LEAD_JUNKED notifications (per recipient) behind the count-only reads.
+  visits: { created_at: string; event_type: string }[];
+  junkNotes: { created_at: string; employee_id: string }[];
 }
 
 export async function mockSupabase(context: BrowserContext): Promise<MockState> {
@@ -131,7 +134,8 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
     settings: { ...LEAD_ENGINE_SETTINGS }, employee, staff: null, heartbeats: [], backups: [], anomalyRows: [], transfers: [], empRequests: [],
     attendanceRows: null, joins: [], leave: [], settingsDelayMs: 0, fail: new Set(),
     clicks: [], activities: [], bookings: [], attendanceByDate: null, cqAll: null, workloadLeads: [],
-    recycles: [], guardEvents: [], restoreRows: [], positiveJunk: null, positiveJunkCalls: 0
+    recycles: [], guardEvents: [], restoreRows: [], positiveJunk: null, positiveJunkCalls: 0,
+    visits: [], junkNotes: []
   };
 
   const json = (route: Route, body: unknown, status = 200, headers: Record<string, string> = {}) =>
@@ -164,6 +168,21 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
     if (method === "HEAD" && p === "/rest/v1/lead_history" && url.searchParams.get("assigned_by_type") === "eq.SYSTEM") {
       const inWin = between("assigned_at");
       return headCount(state.recycles.filter((t) => inWin(t)).length);
+    }
+    if (method === "HEAD" && p === "/rest/v1/site_visits") {
+      const inWin = between("created_at");
+      const type = (url.searchParams.get("event_type") || "").replace(/^eq./, "");
+      return headCount(state.visits.filter((v) => v.event_type === type && inWin(v.created_at)).length);
+    }
+    if (method === "HEAD" && p === "/rest/v1/notification" && url.searchParams.get("type") === "eq.LEAD_JUNKED") {
+      const inWin = between("created_at");
+      const me = (url.searchParams.get("employee_id") || "").replace(/^eq./, "");
+      return headCount(state.junkNotes.filter((n) => n.employee_id === me && inWin(n.created_at)).length);
+    }
+    if (method === "HEAD" && p === "/rest/v1/lead_guard_events") {
+      const inWin = between("created_at");
+      const src = (url.searchParams.get("source") || "").replace(/^eq./, "");
+      return headCount(state.guardEvents.filter((g) => g.source === src && inWin(g.created_at)).length);
     }
     if (method === "GET" && p === "/rest/v1/lead_guard_events") {
       const inWin = between("created_at");

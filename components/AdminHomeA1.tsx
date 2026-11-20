@@ -12,6 +12,8 @@ import { useAdminToday } from "@/lib/useAdminToday";
 import { TeamToday, TodaySoFar } from "@/components/AdminTodayCards";
 import { useAdminEngine } from "@/lib/useAdminEngine";
 import { AdminEngineCard } from "@/components/AdminEngineCard";
+import { useAdminSales } from "@/lib/useAdminSales";
+import { SystemControls, VisitsBookings } from "@/components/AdminSalesCards";
 import { istHeaderDate, istTime, minutesText, needsActionRows, type Severity } from "@/lib/adminHome";
 
 const CARD = "rounded-2xl border border-slate-200 bg-white p-4 shadow-sm";
@@ -63,16 +65,19 @@ function Pill({ severity, text, testId }: { severity: Severity; text: string; te
 
 const SYSTEM_JOBS = ["recycle-stale-leads", "check-lead-reminders", "db-backup", "backup-to-google-sheets"];
 
-export default function AdminHomeA1() {
+export default function AdminHomeA1({ employeeId = null }: { employeeId?: string | null } = {}) {
   const home = useAdminHome();
   // A2: Today so far + Team today (own reads; Refresh reloads both).
   const today = useAdminToday();
   // A3: Lead engine today (+ positive-history junk, counted only on Check).
-  const engine = useAdminEngine();
+  const engine = useAdminEngine(employeeId);
+  // A4: Visits and bookings + System controls (display only).
+  const sales = useAdminSales();
   const refreshAll = () => {
     home.refresh();
     today.refresh();
     engine.refresh();
+    sales.refresh();
   };
   const [socialOpen, setSocialOpen] = useState(false);
   const now = Date.now();
@@ -227,6 +232,14 @@ export default function AdminHomeA1() {
         </div>
         <div className="lg:col-span-4">
           <AdminEngineCard engine={engine} />
+        </div>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-12">
+        <div className="lg:col-span-6">
+          <VisitsBookings sales={sales} />
+        </div>
+        <div className="lg:col-span-6">
+          <SystemControls sales={sales} />
         </div>
       </div>
 

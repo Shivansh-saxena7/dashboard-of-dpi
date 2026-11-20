@@ -63,7 +63,8 @@ for (const role of ["admin", "super_admin"] as const) {
     await expect(page.getByTestId("admin-guard-reminder_hold/REMINDER_HOLD")).toContainText("Reminder hold");
     await expect(page.getByTestId("admin-guard-reminder_hold/REMINDER_HOLD")).toContainText("2");
     await expect(page.getByTestId("admin-guard-db_sibling_guard/RECYCLE_REFUSED")).toContainText("Recycle refused");
-    await expect(page.getByTestId("admin-engine")).toContainText("Junk today is not shown yet");
+    // A4 (2026-11-20): junk today is now counted from the admin's LEAD_JUNKED notifications.
+    await expect(page.getByTestId("admin-engine-junk-note")).toContainText("Junk today is counted from your Lead marked JUNK notifications");
     await expect(page.getByTestId("admin-check-positive-junk")).toBeVisible();
     await expect(page.getByTestId("admin-row-positive-junk")).toHaveCount(0);
     expect(state.positiveJunkCalls).toBe(0);

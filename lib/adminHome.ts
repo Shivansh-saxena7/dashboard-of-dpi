@@ -398,6 +398,7 @@ export const GUARD_LABELS: Record<string, string> = {
   "restore_hold/RESTORE_HOLD": "Restore hold (protected lead)",
   "owner_leave/OWNER_ON_LEAVE": "Owner on leave (timers paused)",
   "admin_reassign/ADMIN_REASSIGN": "Admin reassign",
+  "admin_junk/ADMIN_JUNK": "Admin junk",
   "admin_restore/ADMIN_RESTORE_ONE": "Admin give-back",
   "admin_restore/ADMIN_RESTORE_HELD": "Admin give-back held (sibling)"
 };
@@ -445,4 +446,74 @@ export function openProtections(rows: RestoreRow[] | null | undefined, atMs: num
 // The Positive-history Junk page shows data.rows.length as "All": the Home uses the same number from the same RPC.
 export function positiveJunkCount(data: { rows?: unknown[] } | null | undefined): number {
   return Array.isArray(data?.rows) ? data!.rows!.length : 0;
+}
+
+// ---- A4 (2026-11-20): Visits and bookings + System controls + junk today. Pure. ----
+
+// Start of the IST month that contains nowMs, as an ISO instant.
+export function istMonthStartIso(nowMs: number): string {
+  const ymd = new Date(nowMs + 5.5 * 3600e3).toISOString().slice(0, 7);
+  return new Date(Date.parse(`${ymd}-01T00:00:00+05:30`)).toISOString();
+}
+// This month so far, and the same month as it stood 24 h ago (empty on the 1st before this time).
+export function monthWindows(nowMs: number): { now: { from: string; to: string }; yesterday: { from: string; to: string } } {
+  const from = istMonthStartIso(nowMs);
+  const y = new Date(nowMs - 86400e3).toISOString();
+  return { now: { from, to: new Date(nowMs).toISOString() }, yesterday: { from, to: y < from ? from : y } };
+}
+
+// Junk today without a junk timestamp: mark_lead_junk_atomic sends every active admin one LEAD_JUNKED notification per
+// junked lead (sweep and admin junk both go through it); admin junk also writes lead_guard_events admin_junk.
+// So: all = the viewer's own LEAD_JUNKED notifications, admin = admin_junk events, sweep = the difference.
+export function junkToday(notifications: number, adminJunk: number): { sweep: number; admin: number } {
+  const n = Math.max(0, notifications || 0);
+  const a = Math.max(0, adminJunk || 0);
+  return { sweep: Math.max(0, n - a), admin: a };
+}
+
+export type ControlState = "ON" | "OFF" | "SHADOW" | "ENFORCE" | "PILOT" | "NOT_SET" | "UNKNOWN";
+export const CONTROL_VIEW: Record<ControlState, { icon: string; word: string; severity: Severity | "ok" | "info" | "mute" }> = {
+  ON: { icon: "✓", word: "On", severity: "ok" },
+  ENFORCE: { icon: "✓", word: "Enforce", severity: "ok" },
+  SHADOW: { icon: "◐", word: "Shadow", severity: "info" },
+  PILOT: { icon: "◐", word: "Pilot", severity: "info" },
+  OFF: { icon: "–", word: "Off", severity: "mute" },
+  NOT_SET: { icon: "–", word: "Not set up", severity: "mute" },
+  UNKNOWN: { icon: "▲", word: "Unknown", severity: "warning" }
+};
+export const CONTROLS: { key: string; label: string; kind: "bool" | "mode"; pilotKey?: string }[] = [
+  { key: "auto_recycle_enabled", label: "Auto-recycle", kind: "bool" },
+  { key: "auto_junk_enabled", label: "Auto-junk", kind: "bool" },
+  { key: "positive_junk_guard_mode", label: "Positive-junk guard", kind: "mode" },
+  { key: "restore_hold_mode", label: "Restore hold", kind: "mode" },
+  { key: "reminder_hold_mode", label: "Reminder hold", kind: "mode" },
+  { key: "recycle_sibling_guard_mode", label: "Sibling guard", kind: "mode" },
+  { key: "given_lead_context_mode", label: "Given-lead context", kind: "mode", pilotKey: "given_lead_context_pilot_ids" },
+  { key: "call_quality_enforced", label: "Call quality enforced", kind: "bool" },
+  { key: "employee_home_mode", label: "Employee Home", kind: "mode", pilotKey: "employee_home_pilot_ids" },
+  { key: "admin_home_mode", label: "Admin Home", kind: "mode", pilotKey: "admin_home_pilot_ids" }
+];
+export interface ControlRow {
+  key: string;
+  label: string;
+  state: ControlState;
+  pilots: number | null;
+}
+// One lead_engine_settings row -> what each switch is set to. Missing column = not set up (the flag SQL not applied).
+export function controlStates(settings: Record<string, unknown> | null | undefined): ControlRow[] {
+  const s = settings ?? {};
+  return CONTROLS.map((c) => {
+    const has = Object.prototype.hasOwnProperty.call(s, c.key);
+    const v = s[c.key];
+    let state: ControlState;
+    if (!has || v === null || v === undefined) state = "NOT_SET";
+    else if (c.kind === "bool") state = v === true ? "ON" : v === false ? "OFF" : "UNKNOWN";
+    else {
+      const m = String(v).toLowerCase();
+      state = m === "on" ? "ON" : m === "off" ? "OFF" : m === "shadow" ? "SHADOW" : m === "enforce" ? "ENFORCE" : m === "pilot" || m === "admin_pilot" ? "PILOT" : "UNKNOWN";
+    }
+    const p = c.pilotKey ? s[c.pilotKey] : undefined;
+    const pilots = Array.isArray(p) ? p.length : null;
+    return { key: c.key, label: c.label, state, pilots };
+  });
 }

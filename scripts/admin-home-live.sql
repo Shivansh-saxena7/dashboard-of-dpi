@@ -28,6 +28,7 @@ select json_build_object(
   'leave', (select coalesce(json_agg(json_build_object('employee_id', employee_id, 'start_date', start_date, 'end_date', end_date)), '[]') from employee_leave_periods),
   'attendance', (select coalesce(json_agg(json_build_object('employee_id', employee_id, 'date', date)), '[]') from attendance where date >= ((now() at time zone 'Asia/Kolkata')::date - 45) and shift_start_at is not null),
   'joins', (select coalesce(json_agg(json_build_object('employee_id', employee_id, 'date_of_joining', date_of_joining)), '[]') from employee_payroll_details),
+  -- (HR compares whole minutes: 10:35:24 is on time for a 10:35 cutoff, lib/calculateHrmsAttendanceStatus.ts.)
   -- A2 Team today: today's attendance, HR cutoffs, the first start window end, and HR attendance's on-time / late rule
   -- written in SQL for the field employees (active, employee / team leader, no department or Sales, not "testing").
   'attendance_today', (select coalesce(json_agg(json_build_object('employee_id', employee_id, 'shift_start_at', shift_start_at, 'shift_end_at', shift_end_at, 'attendance_type', attendance_type)), '[]')
@@ -37,7 +38,7 @@ select json_build_object(
   'sql_hr', (select json_build_object(
       'started', count(*) filter (where a.shift_start_at is not null and a.shift_end_at is null),
       'late', count(*) filter (where a.shift_start_at is not null and a.shift_end_at is null and a.attendance_type not in ('LEAVE', 'HALF_DAY_MANUAL')
-        and (a.shift_start_at at time zone 'Asia/Kolkata')::time > (case when a.attendance_type = 'HALF_DAY_SECOND' then h.second_half_ontime_cutoff else h.first_half_ontime_cutoff end)))
+        and date_trunc('minute', a.shift_start_at at time zone 'Asia/Kolkata')::time > (case when a.attendance_type = 'HALF_DAY_SECOND' then h.second_half_ontime_cutoff else h.first_half_ontime_cutoff end)))
     from employees e
     join attendance a on a.employee_id = e.id and a.date = (now() at time zone 'Asia/Kolkata')::date
     cross join hrms_settings h
@@ -53,6 +54,30 @@ select json_build_object(
       'refused_today', (select count(*) from lead_guard_events, t0 where source = 'db_positive_junk_guard' and action = 'JUNK_REFUSED' and created_at >= t0.day_start and created_at < now()),
       'guard_groups_today', (select count(distinct source || '/' || action) from lead_guard_events, t0 where created_at >= t0.day_start and created_at < now()),
       'protections_open', (select count(*) from lead_restore_log where undone_at is null and protected_until > now()))),
+  -- A4: visits / bookings counted in SQL with the Home's windows; the settings row; junk-today inputs per admin.
+  'sql_sales', (select json_build_object(
+      'visit', (select json_build_array(count(*) filter (where created_at >= t0.day_start and created_at < now()), count(*) filter (where created_at >= t0.day_start - interval '1 day' and created_at < now() - interval '1 day')) from site_visits, t0 where event_type = 'VISIT'),
+      'revisit', (select json_build_array(count(*) filter (where created_at >= t0.day_start and created_at < now()), count(*) filter (where created_at >= t0.day_start - interval '1 day' and created_at < now() - interval '1 day')) from site_visits, t0 where event_type = 'REVISIT'),
+      'booked', (select json_build_array(count(*) filter (where created_at >= t0.day_start and created_at < now()), count(*) filter (where created_at >= t0.day_start - interval '1 day' and created_at < now() - interval '1 day')) from site_visits, t0 where event_type = 'BOOKED'),
+      'bookings_today', (select count(*) from leads, t0 where board_stage = 'BOOKING' and board_stage_changed_at >= t0.day_start and board_stage_changed_at < now()),
+      'bookings_month', (select count(*) from leads where board_stage = 'BOOKING' and board_stage_changed_at >= date_trunc('month', now() at time zone 'Asia/Kolkata') at time zone 'Asia/Kolkata' and board_stage_changed_at < now()),
+      'leaderboard_booked_month', (select count(*) from site_visits where event_type = 'BOOKED' and created_at >= date_trunc('month', now() at time zone 'Asia/Kolkata') at time zone 'Asia/Kolkata'))),
+  'settings_row', (select row_to_json(s) from lead_engine_settings s where id = 1),
+  'sql_controls', (select json_object_agg(k, v) from lead_engine_settings s, lateral (values
+      ('auto_recycle_enabled', case when s.auto_recycle_enabled then 'ON' else 'OFF' end),
+      ('auto_junk_enabled', case when s.auto_junk_enabled then 'ON' else 'OFF' end),
+      ('positive_junk_guard_mode', upper(s.positive_junk_guard_mode)),
+      ('restore_hold_mode', upper(s.restore_hold_mode)),
+      ('reminder_hold_mode', upper(s.reminder_hold_mode)),
+      ('recycle_sibling_guard_mode', upper(s.recycle_sibling_guard_mode)),
+      ('given_lead_context_mode', upper(s.given_lead_context_mode)),
+      ('call_quality_enforced', case when s.call_quality_enforced then 'ON' else 'OFF' end)) x(k, v) where s.id = 1),
+  'sql_junk', (select json_build_object(
+      'per_admin_today', (select coalesce(json_agg(c order by c), '[]') from (select (select count(*) from notification n, t0 where n.employee_id = e.id and n.type = 'LEAD_JUNKED' and n.created_at >= t0.day_start and n.created_at < now()) c from employees e where e.is_active and e.role in ('admin', 'super_admin')) z),
+      'per_admin_yesterday_full', (select coalesce(json_agg(c order by c), '[]') from (select (select count(*) from notification n, t0 where n.employee_id = e.id and n.type = 'LEAD_JUNKED' and n.created_at >= t0.day_start - interval '1 day' and n.created_at < t0.day_start) c from employees e where e.is_active and e.role in ('admin', 'super_admin')) z),
+      'admin_junk_today', (select count(*) from lead_guard_events, t0 where source = 'admin_junk' and created_at >= t0.day_start and created_at < now()),
+      'leads_junk_updated_today', (select count(*) from leads, t0 where status = 'JUNK' and updated_at >= t0.day_start),
+      'leads_junk_updated_yesterday', (select count(*) from leads, t0 where status = 'JUNK' and updated_at >= t0.day_start - interval '1 day' and updated_at < t0.day_start))),
   -- The daily job's own answer today (System Health warning no_shift_alert), if it ran.
   'job_no_shift', (select json_build_object('ran', count(*) > 0, 'flagged', max(jsonb_array_length(coalesce(context->'employees', '[]'::jsonb))))
     from system_anomaly_log, t0 where source = 'no_shift_alert' and last_seen_at >= t0.day_start)

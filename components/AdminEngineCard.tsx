@@ -46,7 +46,7 @@ export function AdminEngineCard({ engine }: { engine: ReturnType<typeof useAdmin
   const e = engine.engine;
   const pj = engine.pj;
   const refused = e.data?.groups.find((g) => g.key === POSITIVE_JUNK_REFUSED);
-  const otherGroups = (e.data?.groups ?? []).filter((g) => g.key !== POSITIVE_JUNK_REFUSED);
+  const otherGroups = (e.data?.groups ?? []).filter((g) => g.key !== POSITIVE_JUNK_REFUSED && g.key !== "admin_junk/ADMIN_JUNK");
   return (
     <section aria-labelledby="admin-engine" data-testid="admin-engine" className={CARD}>
       <div className="mb-2 flex items-center justify-between">
@@ -64,6 +64,12 @@ export function AdminEngineCard({ engine }: { engine: ReturnType<typeof useAdmin
       ) : (
         <FadeIn>
           <div className="grid grid-cols-2 gap-2">
+            {e.data.junk && (
+              <Stat testId="admin-engine-junk" value={e.data.junk.sweep[0]} label="Junk today (sweep)" today={e.data.junk.sweep[0]} yesterday={e.data.junk.sweep[1]} href="/admin/leads" />
+            )}
+            {e.data.junk && (
+              <Stat testId="admin-engine-admin-junk" value={e.data.junk.admin[0]} label="Junk today (admin)" today={e.data.junk.admin[0]} yesterday={e.data.junk.admin[1]} href="/admin/leads" />
+            )}
             <Stat testId="admin-engine-recycled" value={e.data.recycled[0]} label="Recycled" today={e.data.recycled[0]} yesterday={e.data.recycled[1]} href="/admin/leads" />
             <Stat
               testId="admin-engine-refused"
@@ -118,7 +124,9 @@ export function AdminEngineCard({ engine }: { engine: ReturnType<typeof useAdmin
               ))}
             </ul>
           )}
-          <p className="mt-2 text-[13px] text-slate-600">Junk today is not shown yet: the database keeps no time for when a lead was junked.</p>
+          <p className="mt-2 text-[13px] text-slate-600" data-testid="admin-engine-junk-note">
+            {e.data.junk ? "Junk today is counted from your Lead marked JUNK notifications (merges not included)." : "Junk today is not shown: no admin id."}
+          </p>
         </FadeIn>
       )}
     </section>

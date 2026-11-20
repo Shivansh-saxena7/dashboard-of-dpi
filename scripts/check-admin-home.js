@@ -91,7 +91,7 @@ eq("no-shift: Ravi only (Testing excluded, Asha too new, Neha worked, Admin not 
 
 // 5) Guards
 const page = read("app/admin/page.tsx");
-if (!has(page, "useAdminHomeMode()") || !has(page, "mode.on && mode.employeeId ? <AdminHomeA1 /> : <AdminSocialDashboard />")) problems.push("app/admin/page.tsx: new Home only when the flag is on; otherwise the old dashboard");
+if (!has(page, "useAdminHomeMode()") || !has(page, "mode.on && mode.employeeId ? <AdminHomeA1 employeeId={mode.employeeId} /> : <AdminSocialDashboard />")) problems.push("app/admin/page.tsx: new Home only when the flag is on; otherwise the old dashboard");
 const social = read("components/AdminSocialDashboard.tsx");
 if (!has(social, "if(!poll) return;") || !has(social, "{ poll = true }")) problems.push("AdminSocialDashboard: old behaviour by default (poll = true); the new Home passes poll={false}");
 const ui = read("components/AdminHomeA1.tsx");
@@ -214,6 +214,37 @@ if (engLimit < engFrom) problems.push(`useAdminEngine: every read bounded (${eng
 const engCard = read("components/AdminEngineCard.tsx");
 if (!engCard.includes("onClick={engine.checkPositiveJunk}")) problems.push("Lead engine card: positive junk behind Check");
 if (/purple|violet|fuchsia|opacity-80/i.test(engCard)) problems.push("AdminEngineCard: no purple, no faded labels");
+
+// 8) A4 (2026-11-20): Visits and bookings, System controls, junk today.
+// Live 19 Nov: each admin got 27 LEAD_JUNKED notifications, admin_junk 0, 27 leads went JUNK that day -> sweep 27.
+eq("junk today: 19 Nov known answer", ah.junkToday(27, 0), { sweep: 27, admin: 0 });
+eq("junk today: admin junk is taken out of the sweep count", ah.junkToday(30, 3), { sweep: 27, admin: 3 });
+eq("junk today: never below 0", ah.junkToday(1, 4), { sweep: 0, admin: 4 });
+eq("month start (IST), 20 Nov 10:00 IST", ah.istMonthStartIso(Date.parse("2026-11-20T10:00:00+05:30")), "2026-10-31T18:30:00.000Z");
+eq("month start (IST), 1 Dec 02:00 IST is December", ah.istMonthStartIso(Date.parse("2026-12-01T02:00:00+05:30")), "2026-11-30T18:30:00.000Z");
+eq("month windows on the 1st: yesterday's share is empty", ah.monthWindows(Date.parse("2026-12-01T10:00:00+05:30")).yesterday, { from: "2026-11-30T18:30:00.000Z", to: "2026-11-30T18:30:00.000Z" });
+eq("month windows mid-month", ah.monthWindows(Date.parse("2026-11-20T10:00:00+05:30")), {
+  now: { from: "2026-10-31T18:30:00.000Z", to: "2026-11-20T04:30:00.000Z" },
+  yesterday: { from: "2026-10-31T18:30:00.000Z", to: "2026-11-19T04:30:00.000Z" }
+});
+// The live lead_engine_settings row of 20 Nov (only the switch columns), before the Home flag SQL.
+const live20 = { auto_junk_enabled: true, auto_recycle_enabled: true, positive_junk_guard_mode: "enforce", restore_hold_mode: "enforce", reminder_hold_mode: "shadow",
+  recycle_sibling_guard_mode: "shadow", given_lead_context_mode: "on", given_lead_context_pilot_ids: [], call_quality_enforced: false };
+eq("controls: live 20 Nov row", ah.controlStates(live20).map((r) => `${r.key}=${r.state}${r.pilots === null ? "" : `/${r.pilots}`}`), [
+  "auto_recycle_enabled=ON", "auto_junk_enabled=ON", "positive_junk_guard_mode=ENFORCE", "restore_hold_mode=ENFORCE", "reminder_hold_mode=SHADOW",
+  "recycle_sibling_guard_mode=SHADOW", "given_lead_context_mode=ON/0", "call_quality_enforced=OFF", "employee_home_mode=NOT_SET", "admin_home_mode=NOT_SET"
+]);
+eq("controls: pilot, admin_pilot, unknown, null", ah.controlStates({ employee_home_mode: "admin_pilot", employee_home_pilot_ids: ["a", "b"], admin_home_mode: "weird", auto_junk_enabled: null })
+  .filter((r) => ["employee_home_mode", "admin_home_mode", "auto_junk_enabled"].includes(r.key)).map((r) => `${r.key}=${r.state}${r.pilots === null ? "" : `/${r.pilots}`}`),
+  ["auto_junk_enabled=NOT_SET", "employee_home_mode=PILOT/2", "admin_home_mode=UNKNOWN"]);
+
+const sales = read("lib/useAdminSales.ts");
+if (/\.rpc\(|setInterval\(|\.channel\(|\.(insert|update|upsert|delete)\(/.test(sales)) problems.push("useAdminSales: read-only, no RPC, no polling, no channel");
+if ((sales.match(/\.from\(/g) || []).length !== 2 || !sales.includes('.eq("id", 1).maybeSingle()') || !sales.includes("head: true")) problems.push("useAdminSales: one settings row + count-only reads");
+const engA4 = read("lib/useAdminEngine.ts");
+if (!engA4.includes('.eq("type", "LEAD_JUNKED")') || !engA4.includes('.eq("employee_id", employeeId)') || !engA4.includes('.eq("source", "admin_junk")')) problems.push("useAdminEngine: junk today = own LEAD_JUNKED notifications + admin_junk events");
+const salesCard = read("components/AdminSalesCards.tsx");
+if (/onChange=|<input|<select|purple|violet|fuchsia|opacity-80/i.test(salesCard)) problems.push("AdminSalesCards: display only (no switches), no purple, no faded labels");
 
 if (problems.length) {
   console.error("check-admin-home FAILED:\n  " + problems.join("\n  "));

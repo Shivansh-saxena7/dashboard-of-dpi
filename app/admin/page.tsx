@@ -8,5 +8,5 @@ import { useAdminHomeMode } from "@/lib/useAdminHomeMode";
 
 export default function AdminDashboard() {
   const mode = useAdminHomeMode();
-  return mode.on && mode.employeeId ? <AdminHomeA1 /> : <AdminSocialDashboard />;
+  return mode.on && mode.employeeId ? <AdminHomeA1 employeeId={mode.employeeId} /> : <AdminSocialDashboard />;
 }

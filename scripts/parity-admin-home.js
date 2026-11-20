@@ -61,6 +61,26 @@ if (J.sql_engine) {
   if (prot.count !== q.protections_open) problems.push(`open protections: Home ${prot.count} vs SQL ${q.protections_open}`);
   engineLine = `Lead engine: recycled ${q.recycled_today} (yesterday at this time ${q.recycled_yesterday}); junk refused ${refused?.today ?? 0} (SQL ${q.refused_today}); guard groups ${groups.length} (SQL ${q.guard_groups_today}): ${groups.map((g) => `${g.key} ${g.today}`).join(", ")}; open protections ${prot.count} (SQL ${q.protections_open})`;
 }
+// A4: switches (Home's rule on the live row vs SQL's own reading), junk today (every admin sees the same count),
+// visits / bookings (SQL counts with the Home's windows; the Home reads the same filters count-only).
+let a4Lines = ["A4: (no A4 data in this export)"];
+if (J.sql_controls && J.settings_row && J.sql_junk && J.sql_sales) {
+  const home = Object.fromEntries(ah.controlStates(J.settings_row).map((r) => [r.key, r.state]));
+  for (const [k, v] of Object.entries(J.sql_controls)) if (home[k] !== v) problems.push(`control ${k}: Home ${home[k]} vs SQL ${v}`);
+  const q = J.sql_junk;
+  const per = q.per_admin_today;
+  if (new Set(per).size > 1) problems.push(`junk today: admins see different counts ${JSON.stringify(per)}`);
+  const jt = ah.junkToday(per[0] ?? 0, q.admin_junk_today);
+  const yfull = q.per_admin_yesterday_full;
+  const jy = ah.junkToday(yfull[0] ?? 0, 0);
+  if (new Set(yfull).size <= 1 && jy.sweep > q.leads_junk_updated_yesterday) problems.push(`junk yesterday: notifications ${jy.sweep} > leads junked ${q.leads_junk_updated_yesterday}`);
+  const ss = J.sql_sales;
+  a4Lines = [
+    `Controls: ${ah.controlStates(J.settings_row).map((r) => `${r.key}=${r.state}`).join(", ")} (SQL agrees on ${Object.keys(J.sql_controls).length})`,
+    `Junk today: sweep ${jt.sweep}, admin ${jt.admin} (per admin ${JSON.stringify(per)}; leads now JUNK touched today ${q.leads_junk_updated_today}); yesterday full day per admin ${JSON.stringify(yfull)} vs leads junked ${q.leads_junk_updated_yesterday}`,
+    `Visits today/yesterday-at-this-time: visit ${ss.visit.join("/")}, revisit ${ss.revisit.join("/")}, booked ${ss.booked.join("/")}; bookings today ${ss.bookings_today}, this month ${ss.bookings_month} (leaderboard BOOKED events this month ${ss.leaderboard_booked_month})`
+  ];
+}
 const rows = ah.needsActionRows({ heartbeats: hb, backup, errors: errs, noShift: flagged.length, transfers: J.transfers, employeeRequests: J.employee_requests });
 
 console.log(`Jobs: ${hb.map((h) => `${h.label} ${h.severity}`).join(", ")}`);
@@ -69,6 +89,7 @@ console.log(`Problems today: Home ${errs.errors} errors / ${errs.warnings} warni
 console.log(`No shift for 3+ working days: Home ${flagged.length}; today's job ${J.job_no_shift && J.job_no_shift.ran ? J.job_no_shift.flagged : "(not run yet today)"}`);
 console.log(teamLine);
 console.log(engineLine);
+for (const l of a4Lines) console.log(l);
 console.log("Positive-history junk: not in this check (get_positive_junk_leads is admin-only and answers the logged-in caller; the Home and the page call it the same way).");
 console.log(`Approvals: ${J.transfers} lead transfers, ${J.employee_requests} employee requests`);
 console.log(`Needs action: ${rows.length ? rows.map((r) => `${r.key}:${r.severity}`).join(", ") : "All clear"}`);
