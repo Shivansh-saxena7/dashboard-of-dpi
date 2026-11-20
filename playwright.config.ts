@@ -14,7 +14,9 @@ export default defineConfig({
   use: { baseURL: `http://localhost:${PORT}`, trace: "off" },
   projects: [
     { name: "android-chrome", use: { ...devices["Pixel 7"] } },
-    { name: "iphone-safari", use: { ...devices["iPhone 14"] } }
+    { name: "iphone-safari", use: { ...devices["iPhone 14"] } },
+    // Admin Performance Report (2026-11-20): admins also use a desktop browser; only that spec runs here.
+    { name: "desktop-chromium", use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 900 } }, testMatch: /admin-perf-report.spec.ts$/ }
   ],
   webServer: {
     command: `npx next dev -p ${PORT}`,

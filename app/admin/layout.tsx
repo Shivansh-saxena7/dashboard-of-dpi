@@ -74,7 +74,8 @@ const menuSections=[
 // still name them.
 const EXTRA_PAGE_TITLES:Record<string,string>={
   "/admin/notification-templates":"Notification Templates",
-  "/admin/leads/import":"Import Leads"
+  "/admin/leads/import":"Import Leads",
+  "/admin/performance-report":"Performance Report"
 };
 
 function currentPageTitle(pathname:string):string{

@@ -3,6 +3,7 @@
 begin;
 drop function if exists public.get_perf_report_leads(date, date, jsonb, text, int, int);
 drop function if exists public.get_perf_report(date, date, jsonb);
+drop function if exists public.perf_group(date, date, jsonb, text);
 drop function if exists public.perf_stints_in(date, date, jsonb);
 drop function if exists public.perf_refresh(boolean);
 drop function if exists public.perf_source(text);
