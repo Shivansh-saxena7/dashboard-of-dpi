@@ -3,37 +3,10 @@
 // (field employees, the ones needing a look first; phone = list, desktop = table; call quality band; workload only when
 // asked). Status = icon + word + colour. Display only.
 import Link from "next/link";
-import { type ReactNode } from "react";
-import { motion, useReducedMotion } from "framer-motion";
+import { BODY, CARD, DELTA, FadeIn, FOCUS, LINK, NUM, PILL, PILL_BASE, PRESS, Retry, Skeleton, TITLE } from "@/components/AdminHomeUi";
 import { deltaText, istTime, TEAM_STATE_VIEW, type TeamMember } from "@/lib/adminHome";
 import type { Band } from "@/lib/callQuality";
 import type { useAdminToday } from "@/lib/useAdminToday";
-
-const CARD = "rounded-2xl border border-slate-200 bg-white p-4 shadow-sm";
-const TITLE = "text-base font-semibold text-slate-900";
-const LINK = "inline-flex min-h-11 items-center px-2 text-[13px] font-semibold text-blue-700";
-const PILL: Record<string, string> = {
-  critical: "bg-red-50 text-red-700",
-  warning: "bg-amber-50 text-amber-800",
-  info: "bg-blue-50 text-blue-700",
-  ok: "bg-emerald-50 text-emerald-700",
-  mute: "bg-slate-100 text-slate-700"
-};
-
-function FadeIn({ children }: { children: ReactNode }) {
-  const reduce = useReducedMotion();
-  return (
-    <motion.div initial={{ opacity: reduce ? 1 : 0 }} animate={{ opacity: 1 }} transition={{ duration: reduce ? 0 : 0.15 }}>
-      {children}
-    </motion.div>
-  );
-}
-const Skeleton = ({ className }: { className: string }) => <div aria-hidden className={`animate-pulse rounded-xl bg-slate-200/70 motion-reduce:animate-none ${className}`} />;
-const Retry = ({ what, onRetry, testId }: { what: string; onRetry: () => void; testId: string }) => (
-  <button type="button" onClick={onRetry} data-testid={testId} className="min-h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-left text-sm font-medium text-slate-700">
-    Couldn&apos;t load {what}. Tap to try again.
-  </button>
-);
 
 function Tile({ testId, value, total, label, today, yesterday, href }: { testId: string; value: number; total?: number; label: string; today: number; yesterday: number; href: string }) {
   const d = deltaText(today, yesterday);
@@ -44,14 +17,14 @@ function Tile({ testId, value, total, label, today, yesterday, href }: { testId:
       data-testid={testId}
       data-tone={zero ? "zero" : "normal"}
       aria-label={`${value}${total !== undefined ? ` of ${total}` : ""} ${label}, ${d.text}`}
-      className={`flex min-h-[92px] flex-col justify-between rounded-2xl border p-3 transition active:scale-[0.98] motion-reduce:transition-none ${zero ? "border-slate-200 bg-slate-50" : "border-slate-200 bg-white"}`}
+      className={`flex min-h-[92px] flex-col justify-between rounded-2xl border border-slate-200 p-3 hover:bg-slate-50 ${PRESS} ${FOCUS} ${zero ? "bg-slate-50" : "bg-white"}`}
     >
-      <span className={`text-[28px] font-bold leading-none tabular-nums ${zero ? "text-slate-600" : "text-slate-900"}`}>
+      <span className={`${NUM} ${zero ? "text-slate-600" : "text-slate-900"}`}>
         {value}
         {total !== undefined && <span className="text-base font-semibold text-slate-600">/{total}</span>}
       </span>
       <span className="text-[13px] font-semibold text-slate-700">{label}</span>
-      <span data-testid={`${testId}-delta`} className={`text-xs font-bold ${d.dir === "up" ? "text-emerald-700" : d.dir === "down" ? "text-red-700" : "text-slate-600"}`}>
+      <span data-testid={`${testId}-delta`} className={DELTA}>
         {d.text}
       </span>
     </Link>
@@ -62,7 +35,7 @@ export function TodaySoFar({ today, teamTotal }: { today: ReturnType<typeof useA
   const t = today.tiles;
   return (
     <section aria-labelledby="admin-today" data-testid="admin-today" className={CARD}>
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex min-h-11 items-center justify-between">
         <h2 id="admin-today" className={TITLE}>Today so far</h2>
         <span className="text-[13px] text-slate-600">vs yesterday at this time</span>
       </div>
@@ -90,7 +63,7 @@ function StatePill({ m }: { m: TeamMember }) {
   const v = TEAM_STATE_VIEW[m.state];
   const time = m.startedAt && (m.state === "ON_SHIFT" || m.state === "LATE" || m.state === "SHIFT_ENDED") ? ` ${istTime(Date.parse(m.startedAt))}` : "";
   return (
-    <span data-testid={`admin-team-state-${m.id}`} data-state={m.state} className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-bold ${PILL[v.severity]}`}>
+    <span data-testid={`admin-team-state-${m.id}`} data-state={m.state} className={`${PILL_BASE} ${PILL[v.severity]}`}>
       <span aria-hidden>{v.icon}</span>
       {v.word}
       {time}
@@ -104,10 +77,10 @@ const BAND: Record<Band, { icon: string; cls: string }> = {
   Red: { icon: "■", cls: PILL.critical }
 };
 function BandPill({ band, loaded }: { band: Band | null; loaded: boolean }) {
-  if (!loaded) return <span className="text-xs text-slate-600">–</span>;
-  if (!band) return <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-bold ${PILL.mute}`}>– Not enough data</span>;
+  if (!loaded) return <span className="text-[13px] text-slate-600">–</span>;
+  if (!band) return <span className={`${PILL_BASE} ${PILL.mute}`}>– Not enough data</span>;
   return (
-    <span data-band={band} className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-bold ${BAND[band].cls}`}>
+    <span data-band={band} className={`${PILL_BASE} ${BAND[band].cls}`}>
       <span aria-hidden>{BAND[band].icon}</span>
       {band}
     </span>
@@ -121,7 +94,7 @@ export function TeamToday({ today }: { today: ReturnType<typeof useAdminToday> }
   const work = (id: string) => w.data?.get(id) ?? { leads: 0, overdue: 0, untouched: 0 };
   return (
     <section aria-labelledby="admin-team" data-testid="admin-team" className={CARD}>
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+      <div className="mb-3 flex min-h-11 flex-wrap items-center justify-between gap-2">
         <h2 id="admin-team" className={TITLE}>Team today</h2>
         <div className="flex items-center gap-1">
           {t.data && !showWork && (
@@ -130,7 +103,7 @@ export function TeamToday({ today }: { today: ReturnType<typeof useAdminToday> }
               data-testid="admin-show-workload"
               onClick={today.loadWorkload}
               disabled={w.loading}
-              className="min-h-11 rounded-xl border border-slate-200 bg-white px-3 text-[13px] font-semibold text-slate-700 disabled:opacity-60"
+              className={`min-h-11 rounded-xl border border-slate-200 bg-white px-3 text-[13px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60 ${FOCUS}`}
             >
               {w.loading ? "Loading workload…" : "Show workload"}
             </button>
@@ -147,7 +120,7 @@ export function TeamToday({ today }: { today: ReturnType<typeof useAdminToday> }
       ) : t.error || !t.data ? (
         <Retry what="the team" onRetry={today.retry.team} testId="admin-retry-team" />
       ) : t.data.members.length === 0 ? (
-        <p className="flex min-h-11 items-center text-sm text-slate-700">No field employees.</p>
+        <p className={`flex min-h-11 items-center text-slate-700 ${BODY}`}>No field employees.</p>
       ) : (
         <FadeIn>
           {/* Phone: a list */}
@@ -170,9 +143,9 @@ export function TeamToday({ today }: { today: ReturnType<typeof useAdminToday> }
             ))}
           </ul>
           {/* Desktop: a table */}
-          <table className="hidden w-full border-collapse text-sm md:table" data-testid="admin-team-table">
+          <table className={`hidden w-full border-collapse md:table ${BODY}`} data-testid="admin-team-table">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs font-bold uppercase tracking-wide text-slate-600">
+              <tr className="border-b border-slate-200 text-left text-[13px] font-bold uppercase tracking-wide text-slate-600">
                 <th className="py-2 pr-2">Employee</th>
                 <th className="py-2 pr-2">Shift</th>
                 <th className="py-2 pr-2">Call quality</th>
@@ -183,10 +156,10 @@ export function TeamToday({ today }: { today: ReturnType<typeof useAdminToday> }
             </thead>
             <tbody>
               {t.data.members.map((m) => (
-                <tr key={m.id} className="border-b border-slate-100 last:border-0">
+                <tr key={m.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
                   <td className="py-2.5 pr-2 font-semibold text-slate-900">
                     {m.name}
-                    {m.inGrace && m.state !== "IN_GRACE" && <span className="ml-2 text-xs font-normal text-slate-600">back from leave</span>}
+                    {m.inGrace && m.state !== "IN_GRACE" && <span className="ml-2 text-[13px] font-normal text-slate-600">back from leave</span>}
                   </td>
                   <td className="py-2.5 pr-2"><StatePill m={m} /></td>
                   <td className="py-2.5 pr-2"><BandPill band={m.band} loaded={t.data!.bandsLoaded} /></td>

@@ -246,6 +246,19 @@ if (!engA4.includes('.eq("type", "LEAD_JUNKED")') || !engA4.includes('.eq("emplo
 const salesCard = read("components/AdminSalesCards.tsx");
 if (/onChange=|<input|<select|purple|violet|fuchsia|opacity-80/i.test(salesCard)) problems.push("AdminSalesCards: display only (no switches), no purple, no faded labels");
 
+// 9) A5 (2026-11-20): one look for every card (design.md "Look"), Needs action announced, no off-scale type.
+const homeFiles = ["components/AdminHomeA1.tsx", "components/AdminTodayCards.tsx", "components/AdminEngineCard.tsx", "components/AdminSalesCards.tsx"];
+for (const f of homeFiles) {
+  const src = read(f);
+  if (!src.includes('from "@/components/AdminHomeUi"')) problems.push(`${f}: uses the shared Home building blocks`);
+  if (/\btext-(xs|sm|lg|xl)\b|text-\[(?!13px|15px|22px|28px)[0-9]+px\]/.test(src)) problems.push(`${f}: type scale is 22 / 16 / 28 / 15 / 13 only`);
+  if (/^(const CARD|function FadeIn|const Skeleton|function Skeleton|const Retry|function Retry)/m.test(src)) problems.push(`${f}: no private copy of a shared block`);
+  if (/text-(red|emerald)-700"? ?:? ?.*d\.dir/.test(src)) problems.push(`${f}: deltas are neutral (red only for act now)`);
+}
+const shell = read("components/AdminHomeA1.tsx");
+if (!shell.includes('aria-live="polite"')) problems.push("Needs action: aria-live");
+if (!shell.includes("aria-busy={busy}")) problems.push("Refresh: busy state");
+
 if (problems.length) {
   console.error("check-admin-home FAILED:\n  " + problems.join("\n  "));
   process.exit(1);

@@ -4,8 +4,8 @@
 // hidden, "All clear") · System (jobs, backup, errors today) · Social posts (the old dashboard, collapsed; nothing is
 // read until it is opened). Every status = icon + word + colour. Read-only.
 import Link from "next/link";
-import { useState, type ReactNode } from "react";
-import { motion, useReducedMotion } from "framer-motion";
+import { useState } from "react";
+import { BODY, CARD, DELTA, FadeIn, FOCUS, LINK, NUM, PILL, PILL_BASE, PRESS, Retry, Skeleton, TITLE } from "@/components/AdminHomeUi";
 import AdminSocialDashboard from "@/components/AdminSocialDashboard";
 import { useAdminHome } from "@/lib/useAdminHome";
 import { useAdminToday } from "@/lib/useAdminToday";
@@ -16,10 +16,6 @@ import { useAdminSales } from "@/lib/useAdminSales";
 import { SystemControls, VisitsBookings } from "@/components/AdminSalesCards";
 import { istHeaderDate, istTime, minutesText, needsActionRows, type Severity } from "@/lib/adminHome";
 
-const CARD = "rounded-2xl border border-slate-200 bg-white p-4 shadow-sm";
-const TITLE = "text-base font-semibold text-slate-900";
-const LINK = "inline-flex min-h-11 items-center px-2 text-[13px] font-semibold text-blue-700";
-
 const SEV: Record<Severity, { icon: string; word: string; pill: string; box: string }> = {
   critical: { icon: "✕", word: "Critical", pill: "bg-red-50 text-red-700", box: "bg-red-50 text-red-700" },
   warning: { icon: "▲", word: "Warning", pill: "bg-amber-50 text-amber-800", box: "bg-amber-50 text-amber-800" },
@@ -27,36 +23,10 @@ const SEV: Record<Severity, { icon: string; word: string; pill: string; box: str
   ok: { icon: "✓", word: "OK", pill: "bg-emerald-50 text-emerald-700", box: "bg-emerald-50 text-emerald-700" }
 };
 
-function FadeIn({ children }: { children: ReactNode }) {
-  const reduce = useReducedMotion();
-  return (
-    <motion.div initial={{ opacity: reduce ? 1 : 0 }} animate={{ opacity: 1 }} transition={{ duration: reduce ? 0 : 0.15 }}>
-      {children}
-    </motion.div>
-  );
-}
-
-function Skeleton({ className }: { className: string }) {
-  return <div aria-hidden className={`animate-pulse rounded-xl bg-slate-200/70 motion-reduce:animate-none ${className}`} />;
-}
-
-function Retry({ what, onRetry, testId }: { what: string; onRetry: () => void; testId: string }) {
-  return (
-    <button
-      type="button"
-      onClick={onRetry}
-      data-testid={testId}
-      className="min-h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-left text-sm font-medium text-slate-700"
-    >
-      Couldn&apos;t load {what}. Tap to try again.
-    </button>
-  );
-}
-
 function Pill({ severity, text, testId }: { severity: Severity; text: string; testId?: string }) {
   const s = SEV[severity];
   return (
-    <span data-testid={testId} data-severity={severity} className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-bold ${s.pill}`}>
+    <span data-testid={testId} data-severity={severity} className={`${PILL_BASE} ${s.pill}`}>
       <span aria-hidden>{s.icon}</span>
       {text}
     </span>
@@ -81,6 +51,7 @@ export default function AdminHomeA1({ employeeId = null }: { employeeId?: string
   };
   const [socialOpen, setSocialOpen] = useState(false);
   const now = Date.now();
+  const busy = home.system.loading || home.errors.loading || today.tiles.loading || today.team.loading || engine.engine.loading || sales.sales.loading || sales.controls.loading;
 
   const allLoaded = !home.system.loading && !home.errors.loading && !home.approvals.loading && !home.noShift.loading;
   const anyFailed = home.system.error || home.errors.error || home.approvals.error || home.noShift.error;
@@ -110,9 +81,10 @@ export default function AdminHomeA1({ employeeId = null }: { employeeId?: string
             type="button"
             data-testid="admin-refresh"
             onClick={refreshAll}
-            className="min-h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 active:scale-[0.98] motion-reduce:transform-none"
+            aria-busy={busy}
+            className={`min-h-11 rounded-xl border border-slate-200 bg-white px-4 text-[15px] font-semibold text-slate-700 hover:bg-slate-50 ${PRESS} ${FOCUS}`}
           >
-            Refresh
+            {busy ? "Refreshing…" : "Refresh"}
           </button>
         </div>
       </header>
@@ -127,6 +99,7 @@ export default function AdminHomeA1({ employeeId = null }: { employeeId?: string
             <h2 id="admin-needs-action" className={TITLE}>Needs action</h2>
             {rows.length > 0 && worst && <Pill severity={worst} text={`${rows.length} open`} testId="admin-open-count" />}
           </div>
+          <div aria-live="polite" aria-busy={!allLoaded} data-testid="admin-needs-live">
           {rows.length > 0 ? (
             <FadeIn>
               <ul className="divide-y divide-slate-100">
@@ -136,9 +109,9 @@ export default function AdminHomeA1({ employeeId = null }: { employeeId?: string
                       href={r.href}
                       data-testid={`admin-row-${r.key}`}
                       data-severity={r.severity}
-                      className="flex min-h-[52px] items-center gap-3 rounded-lg px-1 py-1.5 transition-colors hover:bg-slate-50 motion-reduce:transition-none"
+                      className={`flex min-h-[52px] items-center gap-3 rounded-lg px-1 py-1.5 hover:bg-slate-50 ${PRESS} ${FOCUS}`}
                     >
-                      <span aria-hidden className={`grid h-7 w-7 flex-none place-items-center rounded-lg text-sm font-bold ${SEV[r.severity].box}`}>{SEV[r.severity].icon}</span>
+                      <span aria-hidden className={`grid h-7 w-7 flex-none place-items-center rounded-lg text-[15px] font-bold ${SEV[r.severity].box}`}>{SEV[r.severity].icon}</span>
                       <span className="min-w-0 flex-1">
                         <span className="block text-[15px] font-semibold text-slate-900">{r.title}</span>
                         <span className="block text-[13px] text-slate-600">{r.detail}</span>
@@ -165,6 +138,7 @@ export default function AdminHomeA1({ employeeId = null }: { employeeId?: string
               Some checks couldn&apos;t load, so this list may be incomplete. See the cards below or tap Refresh.
             </p>
           )}
+          </div>
           {home.noShift.error && <div className="mt-2"><Retry what="the shift check" onRetry={home.retry.noShift} testId="admin-retry-no-shift" /></div>}
           {home.approvals.error && <div className="mt-2"><Retry what="pending approvals" onRetry={home.retry.approvals} testId="admin-retry-approvals" /></div>}
         </section>
@@ -184,7 +158,7 @@ export default function AdminHomeA1({ employeeId = null }: { employeeId?: string
             <Retry what="the system status" onRetry={home.retry.system} testId="admin-retry-system" />
           ) : (
             <FadeIn>
-              <ul className="divide-y divide-slate-100 text-sm">
+              <ul className={`divide-y divide-slate-100 ${BODY}`}>
                 {shownJobs.map((h) => (
                   <li key={h.name} className="flex min-h-11 items-center justify-between gap-2" data-testid={`admin-job-${h.name}`}>
                     <span className="text-slate-800">{h.label}</span>
@@ -209,7 +183,7 @@ export default function AdminHomeA1({ employeeId = null }: { employeeId?: string
             ) : home.errors.error ? (
               <Retry what="today's errors" onRetry={home.retry.errors} testId="admin-retry-errors" />
             ) : home.errors.data ? (
-              <div className="flex min-h-11 items-center justify-between gap-2 text-sm" data-testid="admin-errors">
+              <div className={`flex min-h-11 items-center justify-between gap-2 ${BODY}`} data-testid="admin-errors">
                 <span className="text-slate-800">Problems today</span>
                 {home.errors.data.errors > 0 ? (
                   <Pill severity="critical" text={`${home.errors.data.errors} error${home.errors.data.errors === 1 ? "" : "s"}${home.errors.data.warnings ? ` · ${home.errors.data.warnings} warning${home.errors.data.warnings === 1 ? "" : "s"}` : ""}`} />
@@ -250,7 +224,7 @@ export default function AdminHomeA1({ employeeId = null }: { employeeId?: string
           aria-expanded={socialOpen}
           aria-controls="admin-social"
           data-testid="admin-social-toggle"
-          className={`flex min-h-12 w-full items-center justify-between px-4 text-left ${TITLE}`}
+          className={`flex min-h-12 w-full items-center justify-between rounded-2xl px-4 py-2 text-left hover:bg-slate-50 ${TITLE} ${FOCUS}`}
         >
           <span>
             Social posts
