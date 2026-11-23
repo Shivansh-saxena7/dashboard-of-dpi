@@ -200,7 +200,17 @@ const u = await tryq(`select admin_undo_report_batch($1, 'Undo the test batch', 
 eq("undo: L4 back to OLD, L2 skipped (new owner worked on it)", [u.r?.r.moved, u.r?.r.skipped_breakdown, (await own(L(4))).o, (await own(L(2))).o],
   [1, { "the new owner already worked on it": 1 }, OLD, SALES]);
 eq("undo twice refused", /already undone/.test((await tryq(`select admin_undo_report_batch($1, 'Undo again please', 'key-undo-2') r`, [batch1])).err || ""), true);
+eq("a give key reused for an undo is refused (does nothing silently never)", /already used for another action/.test((await tryq(`select admin_undo_report_batch($1, 'Undo with give key', 'key-give-3') r`, [batch1])).err || ""), true);
+eq("an undo key reused for a give is refused", /already used for another action/.test((await give(items([L(3)], SALES), OLD, "give", true, "key-undo-1")).err || ""), true);
 eq("undo retry with the same key returns the first result", (await one(`select admin_undo_report_batch($1, 'Undo the test batch', 'key-undo-1') r`, [batch1])).r.repeat, true);
+
+// Owner rule: undo only within 7 days.
+const old = (await one(`select batch_id b from perf_reassign_batch_leads bl join perf_reassign_batches x on x.id = bl.batch_id where x.idempotency_key = 'key-give-3' limit 1`)).b;
+await db.exec(`update perf_reassign_batches set created_at = now() - interval '8 days' where id = '${old}'`);
+eq("undo of a batch older than 7 days refused", /7 days/.test((await tryq(`select admin_undo_report_batch($1, 'Too late undo try', 'key-undo-old') r`, [old])).err || ""), true);
+await db.exec(`update perf_reassign_batches set created_at = now() - interval '6 days' where id = '${old}'`);
+const u6 = await tryq(`select admin_undo_report_batch($1, 'Six days is fine', 'key-undo-6d') r`, [old]);
+eq("undo of a 6-day-old batch allowed (moved again since, so skipped with a reason)", [u6.err, u6.r?.r.skipped_breakdown], [undefined, { "moved again since the batch": 1 }]);
 
 // Who can do what.
 await asUser(EMP_U);

@@ -368,6 +368,11 @@ export function drillMetric(k: MetricKey): string {
 // Give leads from the report: at most 200 leads a call; the owner the admin saw travels with each lead so the SQL can
 // skip a lead that moved in between.
 export const REASSIGN_CHUNK = 200;
+// Owner (23 Nov): no hard cap per receiver, but warn above this many leads to one person in one go.
+export const MANY_LEADS_WARN = 100;
+// Owner (23 Nov): a batch can be undone for 7 days.
+export const UNDO_DAYS = 7;
+export const undoOpen = (createdAt: string, nowMs: number) => nowMs - Date.parse(createdAt) <= UNDO_DAYS * 86400e3;
 export interface ReassignItem { lead_id: string; expected_owner: string | null }
 export function chunks<T>(xs: T[], size = REASSIGN_CHUNK): T[][] {
   const out: T[][] = [];

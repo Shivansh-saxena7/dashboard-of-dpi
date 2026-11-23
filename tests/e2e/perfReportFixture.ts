@@ -71,7 +71,7 @@ export function report(filters: Row, api: 1 | 2 | 3) {
 export interface Ctx { state: MockState; calls: { rpc: string; body: Row; url: string }[] }
 export interface OpenOpts {
   flag?: "on" | "off" | "missing"; reassign?: "on" | "off"; role?: "admin" | "super_admin"; fail?: boolean; api?: 1 | 2 | 3; goto?: string;
-  receiverProblem?: string | null;
+  receiverProblem?: string | null; oldBatch?: boolean;
 }
 const json = (body: unknown, status = 200) => ({ status, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(body) });
 
@@ -146,7 +146,7 @@ export async function openReport(context: BrowserContext, page: Page, opts: Open
       return r.fulfill(json([{ batch_id: "b0000001-0000-4000-8000-000000000001", created_at: "2026-10-24T05:00:00Z", mode: "give", label: "Oct visits to D", reason: "No visits in 3 weeks",
         to_employee_id: D, to_name: "Employee D", from_employee_ids: [A], moved: 9, skipped: 2, undo_of: null, undone_by: null, by_name: "Test Admin" }]));
     if (rpc === "get_report_batch_outcome")
-      return r.fulfill(json({ batch: { batch_id: body.p_batch_id, created_at: "2026-10-24T05:00:00Z", mode: "give", label: "Oct visits to D", reason: "No visits in 3 weeks", to_employee_id: D, to_name: "Employee D",
+      return r.fulfill(json({ batch: { batch_id: body.p_batch_id, created_at: new Date(Date.now() - (opts.oldBatch ? 8 : 1) * 86400e3).toISOString(), mode: "give", label: "Oct visits to D", reason: "No visits in 3 weeks", to_employee_id: D, to_name: "Employee D",
         from_employee_ids: [A], from_names: ["Employee A"], moved: 9, skipped: 2, skipped_breakdown: { "positive lead (excluded)": 2 }, undo_of: null, undone_by: null },
         before: { leads: 9, followup: 0, visit: 0, connected: 1, converted: 0, no_result: 8 }, after: { leads: 9, followup: 3, visit: 2, connected: 6, converted: 1, no_result: 2 }, leads: [] }));
     if (rpc === "admin_undo_report_batch")

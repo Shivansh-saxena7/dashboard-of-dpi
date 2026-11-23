@@ -137,7 +137,7 @@ begin
   if p_mode not in ('give', 'give_back') then raise exception 'report reassign: mode must be give or give_back'; end if;
   perform perf_reassign_check_items(p_items);
   v_problem := perf_reassign_receiver_problem(p_to_employee);
-  for v_item in select value from jsonb_array_elements(p_items) order by value ->> 'lead_id' loop
+  for v_item in select value from jsonb_array_elements(p_items) order by (value ->> 'lead_id')::uuid loop
     v := perf_reassign_verdict((v_item ->> 'lead_id')::uuid, nullif(v_item ->> 'expected_owner', '')::uuid, p_to_employee, p_mode, p_include_positive);
     if (v ->> 'ok')::boolean then
       v_ok := v_ok + 1;
@@ -168,7 +168,12 @@ begin
   if length(coalesce(p_idempotency_key, '')) < 8 then raise exception 'report reassign: idempotency key needed'; end if;
   perform perf_reassign_check_items(p_items);
   select * into v_existing from perf_reassign_batches where idempotency_key = p_idempotency_key;
-  if found then return coalesce(v_existing.result, '{}'::jsonb) || jsonb_build_object('repeat', true); end if;
+  if found then
+    if v_existing.mode not in ('give', 'give_back') or v_existing.mode <> p_mode or v_existing.to_employee_id <> p_to_employee then
+      raise exception 'report reassign: idempotency key already used for another action';
+    end if;
+    return coalesce(v_existing.result, '{}'::jsonb) || jsonb_build_object('repeat', true);
+  end if;
   if not perf_reassign_enabled() then raise exception 'report reassign: turned off (admin_report_reassign_mode)'; end if;
   v_problem := perf_reassign_receiver_problem(p_to_employee);
   if v_problem is not null then raise exception 'report reassign: %', v_problem; end if;
@@ -179,9 +184,12 @@ begin
     returning id into v_batch;
   exception when unique_violation then
     select * into v_existing from perf_reassign_batches where idempotency_key = p_idempotency_key;
+    if v_existing.mode not in ('give', 'give_back') or v_existing.mode <> p_mode or v_existing.to_employee_id <> p_to_employee then
+      raise exception 'report reassign: idempotency key already used for another action';
+    end if;
     return coalesce(v_existing.result, '{}'::jsonb) || jsonb_build_object('repeat', true);
   end;
-  for v_item in select value from jsonb_array_elements(p_items) order by value ->> 'lead_id' loop  -- fixed lock order
+  for v_item in select value from jsonb_array_elements(p_items) order by (value ->> 'lead_id')::uuid loop  -- fixed lock order
     v_lead := (v_item ->> 'lead_id')::uuid;
     v_expected := nullif(v_item ->> 'expected_owner', '')::uuid;
     perform 1 from leads where id = v_lead for update;  -- the sweep cannot move it while we check and move
@@ -217,7 +225,7 @@ begin
 end;
 $$;
 
--- Undo a give / give_back batch: each moved lead goes back to its previous owner only if nothing happened since (same
+-- Undo a give / give_back batch (owner: within 7 days): each moved lead goes back to its previous owner only if nothing happened since (same
 -- owner, same assignment, no result / stage move / visit on it). Same guards and path as a give.
 create or replace function public.admin_undo_report_batch(p_batch_id uuid, p_reason text, p_idempotency_key text)
 returns jsonb language plpgsql security definer set search_path to 'public' as $$
@@ -229,11 +237,17 @@ begin
   if length(btrim(coalesce(p_reason, ''))) < 5 then raise exception 'report reassign: a reason of at least 5 characters is needed'; end if;
   if length(coalesce(p_idempotency_key, '')) < 8 then raise exception 'report reassign: idempotency key needed'; end if;
   select * into v_existing from perf_reassign_batches where idempotency_key = p_idempotency_key;
-  if found then return coalesce(v_existing.result, '{}'::jsonb) || jsonb_build_object('repeat', true); end if;
+  if found then
+    if v_existing.mode <> 'undo' or v_existing.undo_of is distinct from p_batch_id then
+      raise exception 'report reassign: idempotency key already used for another action';
+    end if;
+    return coalesce(v_existing.result, '{}'::jsonb) || jsonb_build_object('repeat', true);
+  end if;
   select * into b from perf_reassign_batches where id = p_batch_id for update;
   if not found or b.mode = 'undo' then raise exception 'report reassign: no such give batch'; end if;
   if not perf_reassign_enabled() then raise exception 'report reassign: turned off (admin_report_reassign_mode)'; end if;
   if b.undone_by is not null then raise exception 'report reassign: this batch was already undone'; end if;
+  if b.created_at < now() - interval '7 days' then raise exception 'report reassign: undo is possible for 7 days after a batch'; end if;
   select id into v_admin from employees where auth_user_id = auth.uid() limit 1;
   insert into perf_reassign_batches (created_by, mode, to_employee_id, reason, label, include_positive, requested, idempotency_key, undo_of)
   values (v_admin, 'undo', b.to_employee_id, btrim(p_reason), b.label, true, b.moved, p_idempotency_key, b.id) returning id into v_undo;

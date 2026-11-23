@@ -45,6 +45,7 @@ test("give 2 leads: preview first (no write), reason needed, then one call with 
   await expect(give.getByTestId("perf-give-will-move")).toHaveText("2");
   await expect(give.getByTestId("perf-give-from")).toHaveText("Employee A (2)");
   await expect(give.getByTestId("perf-give-positive")).toHaveText("0 left out");
+  await expect(give.getByTestId("perf-give-many")).toHaveCount(0); // 2 leads: no "many leads" warning
   expect(giveCalls()).toHaveLength(0); // preview only
   expect(previewCalls().at(-1)!.body).toEqual({ p_items: [{ lead_id: "00000000-0000-4000-9000-000000000000", expected_owner: A }, { lead_id: "00000000-0000-4000-9000-000000000002", expected_owner: A }],
     p_to_employee: D, p_mode: "give", p_include_positive: false });
@@ -81,6 +82,8 @@ test("select all 450: preview and give go in pages of 200 / 200 / 50, one run ke
   expect(previewCalls().map((c) => (c.body.p_items as unknown[]).length)).toEqual([200, 200, 50]);
   await expect(give.getByTestId("perf-give-skips")).toContainText("Skipped 90: Owner changed since the list was opened");
   await expect(give.getByTestId("perf-give-from")).toHaveText("Employee A (360), Employee B (90)");
+  await expect(give.getByTestId("perf-give-many")).toContainText("240 leads to Employee D at once (more than 100)."); // owner: warn, no hard cap
+  await page.screenshot({ path: `${SHOTS}/give-many-warning-${info.project.name}.png` });
   await give.getByTestId("perf-give-reason").fill("Rebalance after leave");
   await give.getByTestId("perf-give-confirm").click();
   await expect(give.getByTestId("perf-give-result-line")).toContainText("447 moved to Employee D, 3 skipped.");
@@ -166,6 +169,16 @@ test("batches: before / after for a batch, undo needs a reason and sends one key
   const undo = ctx.calls.filter((c) => c.rpc === "admin_undo_report_batch");
   expect(undo).toHaveLength(1);
   expect(undo[0].body).toMatchObject({ p_batch_id: "b0000001-0000-4000-8000-000000000001", p_reason: "Wrong receiver" });
+});
+
+test("undo closed for a batch older than 7 days (owner rule): no Undo button, a plain note", async ({ page, context }, info) => {
+  ctx = await openReport(context, page, { reassign: "on", oldBatch: true });
+  await expect(total(page, info)).toContainText("600");
+  await page.getByTestId("perf-batch-row").first().click();
+  const b = page.getByTestId("perf-batch");
+  await expect(b.getByTestId("perf-batch-undo-closed")).toHaveText("Undo is possible for 7 days after a batch; this one is older.");
+  await expect(b.getByTestId("perf-batch-undo")).toHaveCount(0);
+  expect(ctx.calls.filter((c) => c.rpc === "admin_undo_report_batch")).toHaveLength(0);
 });
 
 test("axe on the confirm sheet (contrast, target size)", async ({ page, context }, info) => {

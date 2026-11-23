@@ -103,6 +103,7 @@ eq("one-employee line", pr.summaryLine("A", row({ leads: 4, came_fresh: 1, came_
   "A was given 4 leads (1 fresh, 2 recycled, 1 other) in 1–31 Oct: 1 follow-ups (25.0%), 1 visits (25.0%), 2 connected (50.0%), 0 converted (0.0%), 1 not interested (25.0%), 1 not connected (25.0%); details shared to about 1 (estimate).");
 eq("one-employee line: no leads", pr.summaryLine("A", row({}), "Today", true), "A was given no leads in Today.");
 eq("Given as words", ["FRESH", "RECYCLED", "RESTORED", "ADMIN_GIVEN"].map(pr.originWord), ["Fresh", "Recycled", "Given back", "Given by admin"]);
+eq("owner rules: warn above 100 to one receiver, undo for 7 days", [pr.MANY_LEADS_WARN, pr.UNDO_DAYS, pr.undoOpen("2026-11-16T10:00:00Z", Date.parse("2026-11-23T09:59:00Z")), pr.undoOpen("2026-11-16T10:00:00Z", Date.parse("2026-11-23T10:01:00Z"))], [100, 7, true, false]);
 eq("chunks of 200 (450 -> 200, 200, 50)", pr.chunks(Array.from({ length: 450 }, (_, i) => i)).map((c) => c.length), [200, 200, 50]);
 eq("reassign items: one per lead, with the owner the admin saw", pr.reassignItems([{ lead_id: "l1", current_owner_id: "e1" }, { lead_id: "l1", current_owner_id: "e1" }, { lead_id: "l2", current_owner_id: null }, { lead_id: "" }]),
   [{ lead_id: "l1", expected_owner: "e1" }, { lead_id: "l2", expected_owner: null }]);
@@ -180,7 +181,10 @@ check("SQL give: stale owner and positive checks, lead row locked", ra.includes(
 check("SQL give: receiver leave / return grace / Sales checks", ra.includes("employee_in_return_grace(p_employee, today)") && ra.includes("'receiver is on leave today'") && ra.includes("'receiver is not in Sales'"));
 check("SQL give: batch tables admin-only (RLS, no anon)", (ra.match(/enable row level security/g) || []).length === 2 && (ra.match(/using \(coalesce\(\(select is_admin\(\)\), false\)\)/g) || []).length === 2 && ra.includes("from public, anon, authenticated;"));
 check("SQL give: helpers without an admin check are revoked from authenticated too", ra.includes("public.perf_reassign_check_items(jsonb), public.perf_reassign_enabled()\n  from public, anon, authenticated;") && v3.includes("revoke all on function public.perf_stint_facts(uuid) from public, anon, authenticated;"));
-check("SQL give: items checked up front (uuid, no duplicates), fixed lock order, flag enforced in the database", ra.includes("perform perf_reassign_check_items(p_items);") && ra.includes("order by value ->> 'lead_id' loop  -- fixed lock order") && (ra.match(/if not perf_reassign_enabled\(\) then raise exception/g) || []).length === 2);
+check("SQL give: items checked up front (uuid, no duplicates), fixed lock order, flag enforced in the database", ra.includes("perform perf_reassign_check_items(p_items);") && ra.includes("order by (value ->> 'lead_id')::uuid loop  -- fixed lock order") && (ra.match(/if not perf_reassign_enabled\(\) then raise exception/g) || []).length === 2);
+check("SQL undo: only within 7 days (also in the database)", ra.includes("if b.created_at < now() - interval '7 days' then raise exception") && read("components/PerfReassign.tsx").includes("undoOpen(b.created_at, Date.now())"));
+check("SQL: a reused idempotency key must belong to the same action (give vs undo)", (ra.match(/idempotency key already used for another action/g) || []).length === 3);
+check("confirm sheet warns above 100 leads to one receiver", read("components/PerfReassign.tsx").includes("p.will_move > MANY_LEADS_WARN"));
 check("SQL give and v3: drafts, flag default off", v3.includes("DRAFT, NOT APPLIED") && ra.includes("DRAFT, NOT APPLIED") && fl.includes("default 'off'"));
 
 if (problems.length) {

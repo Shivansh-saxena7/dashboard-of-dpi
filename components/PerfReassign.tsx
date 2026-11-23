@@ -5,7 +5,7 @@
 // (admin_reassign_leads_from_report), which re-checks everything; employees see only "Given by admin", never the
 // reason or the label (those stay in the admin-only batch tables).
 import { useEffect, useMemo, useRef, useState } from "react";
-import { originWord, skipText, statusTone, statusWord, type ReassignItem } from "@/lib/perfReport";
+import { MANY_LEADS_WARN, originWord, skipText, statusTone, statusWord, UNDO_DAYS, undoOpen, type ReassignItem } from "@/lib/perfReport";
 import { loadJourney, type JourneyStint } from "@/lib/usePerfReport";
 import {
   applyGive, loadBatches, loadLeadBatches, loadOutcome, loadSalesEmployees, previewGive, undoBatch,
@@ -98,6 +98,11 @@ export function GiveSheet({ items, mode, giveBackTo, ownerName, onClose, onDone 
               )}
               {p && <Breakdown items={Object.fromEntries(Object.entries(p.skipped).filter(([k]) => k !== "positive lead (excluded)"))} testId="perf-give-skips" />}
               {p?.receiver_problem && <Banner tone="red" icon="✕" testId="perf-give-receiver">Can&apos;t give to {toName}: {p.receiver_problem}.</Banner>}
+              {p && !p.receiver_problem && p.will_move > MANY_LEADS_WARN && (
+                <Banner tone="amber" icon="▲" testId="perf-give-many">
+                  {p.will_move.toLocaleString("en-IN")} leads to {toName} at once (more than {MANY_LEADS_WARN}). Please check this person can handle them.
+                </Banner>
+              )}
             </div>
           )}
           <label className="flex min-h-11 items-center gap-3 text-[15px] text-slate-800">
@@ -256,7 +261,10 @@ function BatchSheet({ batchId, onClose, onChanged }: { batchId: string; onClose:
         With {fromNames}: {o.before.followup} follow-ups, {o.before.visit} visits, {o.before.connected} connected, {o.before.converted} converted.
         {" "}Given to {b.to_name ?? "–"}: {o.after.followup} follow-ups, {o.after.visit} visits, {o.after.connected} connected, {o.after.converted} converted.
       </p>
-      {b.mode !== "undo" && !b.undone_by && (
+      {b.mode !== "undo" && !b.undone_by && !undoOpen(b.created_at, Date.now()) && (
+        <p className="mt-3 text-[13px] text-slate-600" data-testid="perf-batch-undo-closed">Undo is possible for {UNDO_DAYS} days after a batch; this one is older.</p>
+      )}
+      {b.mode !== "undo" && !b.undone_by && undoOpen(b.created_at, Date.now()) && (
         <div className="mt-3 space-y-2">
           {!undo.open ? (
             <button type="button" className={`${BTN} w-full`} onClick={() => setUndo((u) => ({ ...u, open: true }))} data-testid="perf-batch-undo">Undo this batch…</button>
