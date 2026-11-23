@@ -6,6 +6,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.112.0";
 import { normalizeMobile } from "../../../lib/normalizeMobile.ts";
 import { normalizeLeadPriority } from "../../../lib/normalizeLeadPriority.ts";
 import { corsHeaders } from "../_shared/cors.ts";
+import { updateInChunks } from "../_shared/updateInChunks.ts";
 import { resolveCallingEmployeeId } from "../_shared/auth.ts";
 import { fetchDistributionInputs, distributeLeadsBatch, distributeDataLeadsManually } from "../_shared/distributeLeads.ts";
 
@@ -332,10 +333,9 @@ serve(withMonitoring("import-leads-csv", async (req) => {
     // Tag every inserted lead with this batch — retry-lead-distribution
     // and delete_csv_batch_atomic both find "this batch's leads"
     // through this column.
-    const { error: tagError } = await supabase
-      .from("leads")
-      .update({ csv_import_batch_id: batchRow.id })
-      .in("id", insertedLeads.map((l) => l.id));
+    // In chunks: one .in() list of every id is too long for the URL above
+    // ~640 leads (2026-11-23: "400 Bad Request", import stopped untagged).
+    const tagError = await updateInChunks(supabase, "leads", { csv_import_batch_id: batchRow.id }, insertedLeads.map((l) => l.id));
 
     if (tagError) {
       return respond({ success: false, step: "TAG_LEADS_WITH_BATCH", error: tagError.message }, 500);
@@ -427,10 +427,7 @@ serve(withMonitoring("import-leads-csv", async (req) => {
     // reservation would. ---
     if (target_team_id) {
 
-      const { error: reserveError } = await supabase
-        .from("leads")
-        .update({ pending_team_id: target_team_id })
-        .in("id", insertedLeads.map((l) => l.id));
+      const reserveError = await updateInChunks(supabase, "leads", { pending_team_id: target_team_id }, insertedLeads.map((l) => l.id));
 
       if (reserveError) {
         return respond({ success: false, step: "RESERVE_FOR_TEAM", error: reserveError.message }, 500);
