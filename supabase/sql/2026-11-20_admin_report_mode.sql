@@ -1,3 +1,4 @@
+-- APPLIED 2026-11-20 17:48 IST (live), and set to on at 17:48:50 IST. The DRAFT wording below is from before the apply.
 -- 2026-11-20 Admin Performance Report page flag. DRAFT, NOT APPLIED. Apply last (after the report SQL, its first
 -- build and the hourly job), on the owner's "haan", from an LF copy, away from a sweep. Rollback:
 -- 2026-11-20_admin_report_mode_rollback.sql. Additive: one column, default 'off' (the page stays hidden). While the

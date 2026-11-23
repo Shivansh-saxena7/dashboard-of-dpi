@@ -22,7 +22,9 @@ const menuSections=[
       { name:"Dashboard", href:"/admin", icon:"📊" },
       { name:"Analytics", href:"/admin/analytics", icon:"📈" },
       { name:"Leaderboard", href:"/admin/leaderboard", icon:"🏆" },
-      { name:"Work Reports", href:"/admin/work-reports", icon:"📝" }
+      { name:"Work Reports", href:"/admin/work-reports", icon:"📝" },
+      // Shown only while lead_engine_settings.admin_report_mode = 'on' (2026-11-23).
+      { name:"Performance Report", href:"/admin/performance-report", icon:"📋", flag:"admin_report_mode" }
     ]
   },
   {
@@ -98,6 +100,8 @@ const [adminName,setAdminName]=useState("Admin");
 const [menuOpen,setMenuOpen]=useState(false);
 const [connectionLost,setConnectionLost]=useState(false);
 const [accessChecked,setAccessChecked]=useState(false);
+// Performance Report menu item: only when its flag is on (missing column / error = hidden).
+const [reportOn,setReportOn]=useState(false);
 const router=useRouter();
 const pathname=usePathname();
 
@@ -162,6 +166,13 @@ if(data.role !== "admin" && data.role !== "super_admin"){
 setAdminName(data.name);
 setAccessChecked(true);
 
+try{
+  const { data: flagRow } = await supabase.from("lead_engine_settings").select("*").eq("id",1).maybeSingle();
+  setReportOn((flagRow as Record<string, unknown> | null)?.admin_report_mode === "on");
+}catch{
+  setReportOn(false);
+}
+
 };
 const handleLogout=async()=>{
 
@@ -205,7 +216,7 @@ return(
       <div key={section.title} className="mb-3">
         <p className="px-3 pt-2 pb-1 text-[10px] font-bold tracking-[0.15em] text-slate-400 uppercase">{section.title}</p>
         <div className="space-y-0.5">
-          {section.items.map((item)=>(
+          {section.items.filter((item)=>!("flag" in item) || reportOn).map((item)=>(
             <SidebarNavLink
               key={item.href}
               href={item.href}
@@ -213,6 +224,8 @@ return(
               name={item.name}
               active={isNavItemActive(pathname,item.href,"/admin")}
               onNavigate={()=>setMenuOpen(false)}
+              tall={"flag" in item}
+              testId={"flag" in item ? "nav-performance-report" : undefined}
             />
           ))}
         </div>

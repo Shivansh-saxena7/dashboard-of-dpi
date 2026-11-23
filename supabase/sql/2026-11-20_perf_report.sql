@@ -1,8 +1,9 @@
+-- APPLIED 2026-11-20 17:18 IST (live; first full build 17:18:44, 16,665 rows). The DRAFT wording below is from before the apply.
 -- 2026-11-20 Admin Performance Report: one row per assignment ("stint") + admin-only read RPCs. DRAFT, NOT APPLIED.
 -- Apply only after the owner's "haan", from an LF copy (git show <commit>:<this file>), after a rolled-back dry run,
 -- at least 2 minutes away from a recycle sweep (:00/:15/:30/:45). Rollback: 2026-11-20_perf_report_rollback.sql.
 -- Additive only: 3 new tables, 6 new functions; nothing existing is changed. Separate files, in this order:
---   1. this file   2. select public.perf_refresh(true) once, check it   3. 2026-11-20_perf_report_cron.sql (hourly)
+--   1. this file   2. select public.perf_refresh(true) once, check it   3. 2026-11-20_perf_report_cron.sql (hourly, :37 IST)
 --   4. 2026-11-20_admin_report_mode.sql (the page's flag; default off)
 --
 -- Why a snapshot: the sweep keeps moving leads, so a lead's status today says nothing about what one employee did with
