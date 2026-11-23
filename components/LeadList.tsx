@@ -29,6 +29,8 @@ import type { WorkingCalendar } from "@/lib/workingCalendar";
 import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 import { isUntouchedInCurrentAssignment } from "@/lib/newLeadFilter";
 import { useGivenLeadContext } from "@/lib/useGivenLeadContext";
+import { useReassignedJourney } from "@/lib/useReassignedJourney";
+import ReassignedJourneySheet from "./ReassignedJourneySheet";
 import { GIVEN_BY_ADMIN_FILTER, givenFilterCount, givenFilterLeads } from "@/lib/givenLeadContext";
 import { NEEDS_CALL_FILTER, needsCallFilterLeads, needsCallOptionText } from "@/lib/needsYourCall";
 import { useNeedsYourCall } from "@/lib/useNeedsYourCall";
@@ -499,6 +501,11 @@ export default function LeadList({ employeeId }: LeadListProps) {
   }
 
   const givenContext = useGivenLeadContext(employeeId);
+  // "Previously with" + Journey (2026-11-23): one background call for the whole list, only while its flag is on.
+  const journey = useReassignedJourney(employeeId);
+  const [journeyLeadId, setJourneyLeadId] = useState<string | null>(null);
+  const openJourney = useCallback((id: string) => setJourneyLeadId(id), []);
+  const closeJourney = useCallback(() => setJourneyLeadId(null), []);
   const needsCall = useNeedsYourCall(employeeId);
 
   // The feature went off while this filter was selected: back to all statuses, not an empty list.
@@ -1036,10 +1043,14 @@ export default function LeadList({ employeeId }: LeadListProps) {
               onOpen={handleOpenLead}
               onQuickDial={handleQuickDial}
               lead={cardLead}
+              previouslyWith={journey.tags.has(cardLead.id) ? journey.tags.get(cardLead.id)?.previously_with ?? null : undefined}
+              onJourney={journey.tags.has(cardLead.id) ? openJourney : undefined}
             />
           ))}
         </div>
       )}
+
+      {journeyLeadId && <ReassignedJourneySheet leadId={journeyLeadId} onClose={closeJourney} />}
 
       {selectedLead && (
         <LeadDetailModal

@@ -10,6 +10,7 @@ import { MAX_DATA_ATTEMPTS } from "@/lib/calculateSLAStatus";
 import { buildWhatsAppLink } from "@/lib/buildWhatsAppLink";
 import { rememberCalledCard } from "@/lib/lastCalledLead";
 import { logCallClick } from "@/lib/logCallClick";
+import { tagText } from "@/lib/reassignedJourney";
 
 interface DataCardLead {
   id: string;
@@ -31,6 +32,10 @@ interface DataCardProps {
   // skip re-rendering unchanged cards.
   onOpen: (id: string) => void;
   index?: number;
+  // "Previously with" + Journey (2026-11-23): only for leads an admin gave from the Performance Report; the list passes
+  // these two only then. Absent = the card renders exactly as before.
+  previouslyWith?: string | null;
+  onJourney?: (id: string) => void;
 }
 
 // Deliberately NOT a reuse of LeadCard — no SLA countdown (Data has
@@ -49,7 +54,7 @@ interface DataCardProps {
 // memoized per-card lead object, this actually skips unchanged cards
 // instead of re-rendering the whole visible list on every DataList
 // state change (search, filter, tab switch).
-function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
+function DataCard({ lead, onOpen, index = 0, previouslyWith, onJourney }: DataCardProps) {
 
   const statusDisplay = LEAD_STATUS_DISPLAY[lead.status];
   const initial = lead.name?.charAt(0)?.toUpperCase() || "?";
@@ -148,6 +153,25 @@ function DataCard({ lead, onOpen, index = 0 }: DataCardProps) {
           )
         )}
       </div>
+
+      {previouslyWith !== undefined && onJourney && (
+        <div className="mt-2 flex items-center gap-2" data-testid="reassigned-tag-row">
+          <span className="min-w-0 truncate rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700" data-testid="reassigned-tag">
+            {tagText(previouslyWith)}
+          </span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onJourney(lead.id);
+            }}
+            data-testid="reassigned-journey"
+            className="shrink-0 min-h-11 rounded-xl border border-blue-200 bg-blue-50 px-3 text-[13px] font-semibold text-blue-700"
+          >
+            Journey
+          </button>
+        </div>
+      )}
 
       <div className="mt-4 flex items-center gap-2">
         <motion.a

@@ -17,6 +17,7 @@ import type { LeadSibling } from "@/lib/useLeadSiblings";
 import ExistingClientBadge from "./ExistingClientBadge";
 import RecycledBadge from "./RecycledBadge";
 import TimerPausedBadge from "./TimerPausedBadge";
+import { tagText } from "@/lib/reassignedJourney";
 
 interface LeadCardLead {
   id: string;
@@ -65,6 +66,10 @@ interface LeadCardProps {
   // for every card, see LeadList.tsx's own handleQuickDial comment.
   onQuickDial: () => void;
   index?: number;
+  // "Previously with" + Journey (2026-11-23): only for leads an admin gave from the Performance Report; the list passes
+  // these two only then. Absent = the card renders exactly as before.
+  previouslyWith?: string | null;
+  onJourney?: (id: string) => void;
 }
 
 // Stale/Recycle-Warning filter (2026-09-16) — days+hours, distinct
@@ -129,7 +134,7 @@ function formatCountdown(msRemaining: number): string {
 // reference-stable props — see onOpen's own comment above; `lead`
 // itself is already a stable object reference between renders unless
 // its actual data changed, straight from the Supabase response.
-function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) {
+function LeadCard({ lead, now, onOpen, onQuickDial, index = 0, previouslyWith, onJourney }: LeadCardProps) {
   // Working calendar (Step 4) — same one the recycle sweep counts with,
   // so the badge/countdown matches when the lead actually recycles.
   const workingCalendar = useWorkingCalendar();
@@ -357,6 +362,25 @@ function LeadCard({ lead, now, onOpen, onQuickDial, index = 0 }: LeadCardProps) 
               </>
             )}
           </p>
+        </div>
+      )}
+
+      {previouslyWith !== undefined && onJourney && (
+        <div className="mt-2 flex items-center gap-2" data-testid="reassigned-tag-row">
+          <span className="min-w-0 truncate rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700" data-testid="reassigned-tag">
+            {tagText(previouslyWith)}
+          </span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onJourney(lead.id);
+            }}
+            data-testid="reassigned-journey"
+            className="shrink-0 min-h-11 rounded-xl border border-blue-200 bg-blue-50 px-3 text-[13px] font-semibold text-blue-700"
+          >
+            Journey
+          </button>
         </div>
       )}
 

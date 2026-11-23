@@ -73,7 +73,7 @@ function makeLeads(type: "LEAD" | "DATA", count: number) {
 }
 
 // Settings rows the pages read on load (times and switches only; no real ids or locations).
-const LEAD_ENGINE_SETTINGS = {
+export const LEAD_ENGINE_SETTINGS = {
   id: 1, auto_junk_enabled: true, auto_recycle_enabled: true, call_quality_enforced: false, call_quality_share_line: true,
   call_quality_visible_to_employees: false, distribution_guard_mode: "shadow", first_half_min_end_time: "13:30:00",
   first_half_start_time: "10:30:00", first_half_start_window_end: "11:30:00", geofence_radius_meters: 100,

@@ -16,6 +16,8 @@ import ResumeCallStrip from "./ResumeCallStrip";
 import { normalizeMobile } from "@/lib/normalizeMobile";
 import { istDateStringToRangeStartUTC, istDateStringToRangeEndUTC } from "@/lib/istTime";
 import { useGivenLeadContext } from "@/lib/useGivenLeadContext";
+import { useReassignedJourney } from "@/lib/useReassignedJourney";
+import ReassignedJourneySheet from "./ReassignedJourneySheet";
 import { useNeedsYourCall } from "@/lib/useNeedsYourCall";
 import { useDataPreviousPositive } from "@/lib/useDataPreviousPositive";
 import {
@@ -110,6 +112,11 @@ export default function DataList({ employeeId }: DataListProps) {
   // Status filter (2026-11-04): remembered for this browser session, see lib/dataStatusFilter.ts.
   const [statusFilter, setStatusFilter] = useState(() => readSavedDataStatusFilter(employeeId));
   const givenContext = useGivenLeadContext(employeeId);
+  // "Previously with" + Journey (2026-11-23): one background call for the whole list, only while its flag is on.
+  const journey = useReassignedJourney(employeeId);
+  const [journeyLeadId, setJourneyLeadId] = useState<string | null>(null);
+  const openJourney = useCallback((id: string) => setJourneyLeadId(id), []);
+  const closeJourney = useCallback(() => setJourneyLeadId(null), []);
   const previousPositive = useDataPreviousPositive(employeeId);
   const needsCall = useNeedsYourCall(employeeId);
   const activeStatusFilter = effectiveDataStatusFilter(statusFilter, givenContext.enabled, needsCall.enabled);
@@ -560,12 +567,16 @@ export default function DataList({ employeeId }: DataListProps) {
                   index={index}
                   onOpen={handleOpenLead}
                   lead={cardLead}
+                  previouslyWith={journey.tags.has(cardLead.id) ? journey.tags.get(cardLead.id)?.previously_with ?? null : undefined}
+                  onJourney={journey.tags.has(cardLead.id) ? openJourney : undefined}
                 />
               ))}
             </div>
           )}
         </>
       )}
+
+      {journeyLeadId && <ReassignedJourneySheet leadId={journeyLeadId} onClose={closeJourney} />}
 
       {selectedLead && (
         <DataDetailModal

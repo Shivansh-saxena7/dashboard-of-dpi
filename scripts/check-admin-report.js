@@ -17,7 +17,8 @@ const path = require("path");
 const ts = require("typescript");
 
 const root = path.join(__dirname, "..");
-const read = (p) => fs.readFileSync(path.join(root, p), "utf8");
+// LF everywhere, so the checks pass the same on a Windows (CRLF) checkout and on Linux.
+const read = (p) => fs.readFileSync(path.join(root, p), "utf8").replace(/\r\n/g, "\n");
 const problems = [];
 const eq = (name, got, want) => {
   const g = JSON.stringify(got), w = JSON.stringify(want);
