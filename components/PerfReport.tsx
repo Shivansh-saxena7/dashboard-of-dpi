@@ -3,7 +3,7 @@
 // leads, % of the row's leads. Filters -> one report call; every number opens the leads behind it. Display only.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  addDays, asOfText, buildCsv, buildDrillCsv, CAME_KEYS, DATA_SINCE, drillMetric, empSourceGroups, filtersActive, isV2, istYmd,
+  addDays, asOfText, buildCsv, buildDrillCsv, CAME_KEYS, CONVERTED_NOTE, DATA_SINCE, STATUS_MIX_LABEL, drillMetric, empSourceGroups, filtersActive, isV2, istYmd,
   MAX_DAYS, METRIC, metricPct, mixKeys, mixMetric, mixPct, n, NO_FILTERS, originWord, presetRange, rangeNote, rangeText,
   stageWord, statusTone, statusWord, TABLE_KEYS, TABLE_KEYS_V1, TILE_KEYS, TILE_KEYS_V1,
   type Filters, type MetricKey, type MetricRow, type PerfReport, type Preset, type Tone
@@ -402,6 +402,7 @@ export default function PerfReport() {
       {def && (
         <Sheet title={defs[def]?.label ?? "Definition"} sub={`Definitions v${r?.def_version ?? 1}`} onClose={() => setDef(null)} testId="perf-def">
           <p className="text-[15px] text-slate-800">{defs[def]?.rule ?? "—"}</p>
+          {def === "converted" && <p className="mt-2 text-[15px] text-slate-800" data-testid="perf-def-converted-note">{CONVERTED_NOTE}</p>}
           <p className="mt-3 text-[13px] text-slate-600">Each lead is credited to the person who had it at the time, so a lead’s status today never changes past numbers.</p>
         </Sheet>
       )}
@@ -520,7 +521,10 @@ function Mix({ field, r, by, view, nameOf, drill, onDef }: {
   return (
     <section className={CARD} aria-label={title} data-testid={`perf-${field.replace("_", "-")}`}>
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-base font-semibold text-slate-900">{title}</h2>
+        <div className="min-w-0">
+          <h2 className="text-base font-semibold text-slate-900">{title}</h2>
+          {field === "status_mix" && <p className="text-[13px] text-slate-600" data-testid="perf-status-mix-label">{STATUS_MIX_LABEL}</p>}
+        </div>
         <InfoButton label={title} onClick={onDef} />
       </div>
       <div className="mt-2 overflow-x-auto">

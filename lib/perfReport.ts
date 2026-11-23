@@ -124,6 +124,10 @@ export function statusTone(k: string): { tone: Tone; icon: string } {
   return { tone: "blue", icon: "◆" };
 }
 
+// Labels (2026-11-23): the Converted tile and the status mix answer different questions.
+export const STATUS_MIX_LABEL = "Final status of each lead in this period (last result)";
+export const CONVERTED_NOTE = "Tile counts leads ever marked Converted; the mix shows each lead's final status, so the two can differ.";
+
 // Mix columns from the data itself: known keys in a fixed order first, then any new key alphabetically.
 const STATUS_ORDER = ["CONNECTED", "CONVERTED", "NOT_CONNECTED", "SWITCHED_OFF", "NOT_INTERESTED", "NO_RESULT"];
 const STAGE_ORDER = ["LEADS", "FOLLOW_UP", "VISIT", "BOOKING"];

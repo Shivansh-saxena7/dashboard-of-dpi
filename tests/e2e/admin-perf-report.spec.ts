@@ -318,4 +318,8 @@ test("axe (contrast, target size), no horizontal scroll, definitions popup", asy
   expect(v).toEqual([]);
   await page.getByRole("button", { name: "About Visits", exact: true }).click();
   await expect(page.getByTestId("perf-def")).toContainText("One lead counts once.");
+  await page.getByTestId("perf-def-close").click();
+  await expect(page.getByTestId("perf-status-mix-label")).toHaveText("Final status of each lead in this period (last result)");
+  await page.getByRole("button", { name: "About Converted", exact: true }).click();
+  await expect(page.getByTestId("perf-def-converted-note")).toHaveText("Tile counts leads ever marked Converted; the mix shows each lead's final status, so the two can differ.");
 });

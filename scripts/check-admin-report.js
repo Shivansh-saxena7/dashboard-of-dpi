@@ -96,6 +96,7 @@ check("an invalid range is never sent", read("lib/usePerfReport.ts").includes("i
 check("drill-down pages of 200", read("lib/usePerfReport.ts").includes("export const DRILL_PAGE = 200;"));
 check("no purple / violet / fuchsia, no dark mode", !/purple|violet|fuchsia|dark:/i.test(all));
 check("errors are reported", (all.match(/reportClientError\(/g) || []).length >= 4);
+check("status mix label and the Converted note", read("lib/perfReport.ts").includes("Final status of each lead in this period (last result)") && read("lib/perfReport.ts").includes("Tile counts leads ever marked Converted; the mix shows each lead's final status, so the two can differ.") && read("components/PerfReport.tsx").includes("{STATUS_MIX_LABEL}") && read("components/PerfReport.tsx").includes("{CONVERTED_NOTE}"));
 check("estimate label on details", read("components/PerfReport.tsx").includes(">Estimate</Pill>"));
 check("800-day message and date limits", read("lib/perfReport.ts").includes("Please choose a range of ${maxDays} days or less.") && read("components/PerfReport.tsx").includes("max={addDays(custom.from, MAX_DAYS)}"));
 check("LeadCard / DataCard / Homes untouched by this page", !/LeadCard|DataCard|AdminHome|EmployeeHome/.test(all));
