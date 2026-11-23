@@ -1,6 +1,6 @@
-// Admin Performance Report (2026-11-20, v2 2026-11-23): pure helpers shared by the page, the tests and
-// scripts/check-admin-report.js. Every number comes from get_perf_report_v2 (or v1 when v2 is not applied yet);
-// this file only formats, groups and exports.
+// Admin Performance Report (2026-11-20, v2 2026-11-23, v3 simple view 2026-11-23): pure helpers shared by the page,
+// the tests and scripts/check-admin-report.js. Every number comes from get_perf_report_v3 (falling back to v2, then v1
+// while the newer SQL is not applied); this file only formats, groups and exports.
 
 export interface MetricRow {
   leads: number;
@@ -18,6 +18,7 @@ export interface MetricRow {
   came_admin_given?: number;
   came_other?: number;
   recycled_any?: number;
+  connected?: number;
   followup: number;
   visit: number;
   visit_verified: number;
@@ -36,6 +37,7 @@ export interface MetricRow {
 }
 export type EmpRow = Partial<MetricRow> & { employee_id: string; name: string | null; active?: boolean };
 export type EmpSourceRow = Partial<MetricRow> & { employee_id: string; source: string };
+export type EmpOriginRow = Partial<MetricRow> & { employee_id: string; origin: string };
 export interface PerfReport {
   def_version: number;
   api?: number;
@@ -50,14 +52,16 @@ export interface PerfReport {
   by_source: (Partial<MetricRow> & { source: string })[];
   by_employee_type: (Partial<MetricRow> & { employee_id: string; lead_type: string | null })[];
   by_emp_source?: EmpSourceRow[];
-  options: { employees: { id: string; name: string | null; active?: boolean }[]; teams: { id: string; name: string | null }[]; sources: string[]; projects: string[] } | null;
+  by_emp_origin?: EmpOriginRow[];
+  options: { employees: { id: string; name: string | null; active?: boolean }[]; teams?: { id: string; name: string | null }[]; sources: string[]; projects: string[] } | null;
   definitions: { key: string; label: string; rule: string }[];
 }
 
 export type MetricKey =
   | "leads" | "came_fresh" | "came_recycled" | "came_data" | "came_restored" | "came_admin_given" | "came_other"
   | "recycled_any" | "fresh" | "recycled" | "restored" | "admin_given" | "other"
-  | "followup" | "visit" | "visit_verified" | "booked" | "converted" | "details_est" | "not_connected" | "not_interested" | "no_result";
+  | "followup" | "visit" | "visit_verified" | "booked" | "converted" | "details_est" | "not_connected" | "not_interested" | "no_result"
+  | "connected";
 
 // "def" = the definitions key for the "i" popup.
 export const METRIC: Record<MetricKey, { label: string; short: string; def: string }> = {
@@ -82,7 +86,8 @@ export const METRIC: Record<MetricKey, { label: string; short: string; def: stri
   details_est: { label: "Details sent, no visit", short: "Details (est.)", def: "details_est" },
   not_connected: { label: "Not connected", short: "Not conn.", def: "not_connected" },
   not_interested: { label: "Not interested", short: "Not int.", def: "not_interested" },
-  no_result: { label: "No result", short: "No result", def: "status_mix" }
+  no_result: { label: "No result", short: "No result", def: "status_mix" },
+  connected: { label: "Connected", short: "Connected", def: "connected" }
 };
 // How a lead came: add up to the row's leads (v2). Fresh / Recycled / Data / Given back / By admin / Other.
 export const CAME_KEYS: MetricKey[] = ["came_fresh", "came_recycled", "came_data", "came_restored", "came_admin_given", "came_other"];
@@ -93,6 +98,24 @@ export const TABLE_KEYS_V1: MetricKey[] = ["leads", "fresh", "recycled", "restor
 export const TILE_KEYS: MetricKey[] = ["leads", "came_fresh", "came_data", "recycled_any", "followup", "visit", "converted", "details_est", "not_connected", "not_interested"];
 export const TILE_KEYS_V1: MetricKey[] = ["leads", "fresh", "recycled", "followup", "visit", "converted", "booked", "details_est", "not_connected", "not_interested"];
 export const isV2 = (r: PerfReport | null | undefined) => (r?.api ?? 1) >= 2;
+export const isV3 = (r: PerfReport | null | undefined) => (r?.api ?? 1) >= 3;
+
+// Simple view (v3): one main table, counts first, then every % together at the end (% of leads given).
+export const MAIN_KEYS: MetricKey[] = ["leads", "followup", "visit", "connected", "converted", "not_interested", "not_connected", "details_est"];
+export const MAIN_LABEL: Partial<Record<MetricKey, string>> = {
+  leads: "Leads given", followup: "Follow-ups", visit: "Visits done", connected: "Connected", converted: "Converted",
+  not_interested: "Not interested", not_connected: "Not connected", details_est: "Details shared (estimate)"
+};
+// Connected needs v3; the older report has no such count, so its column is left out rather than shown as 0.
+export const mainKeys = (r: PerfReport | null | undefined): MetricKey[] => (isV3(r) ? MAIN_KEYS : MAIN_KEYS.filter((k) => k !== "connected"));
+export const mainLabel = (k: MetricKey) => MAIN_LABEL[k] ?? METRIC[k].label;
+export const mainPctLabel = (k: MetricKey) => `${mainLabel(k).replace(" (estimate)", "")} %`;
+// "Given as" chips; none chosen = all (personal / other included).
+export const ORIGIN_CHIPS: { v: string; l: string }[] = [
+  { v: "FRESH", l: "Fresh" }, { v: "RECYCLED", l: "Recycled" }, { v: "RESTORED", l: "Given back" }, { v: "ADMIN_GIVEN", l: "Given by admin" }
+];
+export const TYPE_CHIPS: { v: "LEAD" | "DATA"; l: string }[] = [{ v: "LEAD", l: "Lead" }, { v: "DATA", l: "Data" }];
+export type SplitBy = "none" | "origin" | "source";
 
 export const n = (r: Partial<MetricRow> | null | undefined, k: MetricKey | "stints" | "recycled_stints"): number => Number((r as Record<string, unknown> | undefined)?.[k] ?? 0) || 0;
 
@@ -187,22 +210,68 @@ export interface Filters {
   team: string;
   source: string[];
   project: string;
-  leadType: "" | "LEAD" | "DATA";
-  origin: string;
+  leadTypes: ("LEAD" | "DATA")[];
+  origins: string[];
 }
-export const NO_FILTERS: Filters = { employee: [], team: "", source: [], project: "", leadType: "", origin: "" };
-// Sent in the RPC body (POST), never in a URL, so long employee / source lists are fine.
-export function filtersJson(f: Partial<Filters>): Record<string, unknown> {
+export const NO_FILTERS: Filters = { employee: [], team: "", source: [], project: "", leadTypes: [], origins: [] };
+// Sent in the RPC body (POST), never in a URL, so long employee / source lists are fine. v3 takes several types; the
+// older report takes one (both chosen = no type filter either way).
+export function filtersJson(f: Partial<Filters>, api: 1 | 2 | 3 = 3): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   if (f.employee?.length) out.employee_ids = [...new Set(f.employee)];
   if (f.team) out.team_ids = [f.team];
   if (f.source?.length) out.sources = [...new Set(f.source)];
   if (f.project) out.projects = [f.project];
-  if (f.leadType) out.lead_type = f.leadType;
-  if (f.origin) out.origins = f.origin === "OTHER" ? ["SELF", "OTHER"] : [f.origin];
+  const types = [...new Set(f.leadTypes ?? [])];
+  if (types.length === 1) {
+    if (api >= 3) out.lead_types = types;
+    else out.lead_type = types[0];
+  }
+  const origins = [...new Set(f.origins ?? [])];
+  if (origins.length) out.origins = origins;
   return out;
 }
+// Active filters as removable tags.
+export function filterTags(f: Filters, nameOf: (id: string) => string, teamName: (id: string) => string): { key: string; label: string; clear: Partial<Filters> }[] {
+  const out: { key: string; label: string; clear: Partial<Filters> }[] = [];
+  const list = (xs: string[], max = 2) => (xs.length <= max ? xs.join(", ") : `${xs.slice(0, max).join(", ")} +${xs.length - max}`);
+  if (f.employee.length) out.push({ key: "employee", label: list(f.employee.map(nameOf)), clear: { employee: [] } });
+  if (f.origins.length) out.push({ key: "origins", label: list(f.origins.map(originWord), 4), clear: { origins: [] } });
+  if (f.leadTypes.length) out.push({ key: "types", label: f.leadTypes.map((t) => (t === "LEAD" ? "Lead" : "Data")).join(", "), clear: { leadTypes: [] } });
+  if (f.source.length) out.push({ key: "source", label: list(f.source), clear: { source: [] } });
+  if (f.team) out.push({ key: "team", label: `Team: ${teamName(f.team)}`, clear: { team: "" } });
+  if (f.project) out.push({ key: "project", label: `Project: ${f.project}`, clear: { project: "" } });
+  return out;
+}
+
+// One employee chosen: the plain-English line above the table.
+export function summaryLine(name: string, r: Partial<MetricRow>, range: string, withConnected: boolean): string {
+  const leads = n(r, "leads");
+  if (!leads) return `${name} was given no leads in ${range}.`;
+  const word: Partial<Record<MetricKey, string>> = { followup: "follow-ups", visit: "visits", connected: "connected", converted: "converted", not_interested: "not interested", not_connected: "not connected" };
+  const p = (k: MetricKey) => `${n(r, k).toLocaleString("en-IN")} ${word[k]} (${metricPct(r, k)})`;
+  const fresh = n(r, "came_fresh"), rec = n(r, "came_recycled"), other = Math.max(0, leads - fresh - rec);
+  const how = r.came_fresh === undefined ? ""
+    : ` (${([[fresh, "fresh"], [rec, "recycled"], [other, "other"]] as [number, string][]).filter(([c]) => c > 0).map(([c, w]) => `${c.toLocaleString("en-IN")} ${w}`).join(", ")})`;
+  const parts = (["followup", "visit", ...(withConnected ? ["connected"] : []), "converted", "not_interested", "not_connected"] as MetricKey[]).map(p);
+  return `${name} was given ${leads.toLocaleString("en-IN")} lead${leads === 1 ? "" : "s"}${how} in ${range}: ${parts.join(", ")}; details shared to about ${n(r, "details_est").toLocaleString("en-IN")} (estimate).`;
+}
+
+// Split rows under each employee (Given as needs v3, Source needs v2).
+export function splitRows(r: PerfReport, by: SplitBy, employeeId: string): { key: string; label: string; row: Partial<MetricRow>; extra: Partial<Filters> }[] {
+  if (by === "origin")
+    return (r.by_emp_origin ?? []).filter((x) => x.employee_id === employeeId).map((x) => ({
+      key: x.origin, label: originWord(x.origin), row: x, extra: { origins: x.origin === "OTHER" ? ["SELF", "OTHER"] : [x.origin] }
+    }));
+  if (by === "source") return (r.by_emp_source ?? []).filter((x) => x.employee_id === employeeId).map((x) => ({ key: x.source, label: x.source, row: x, extra: { source: [x.source] } }));
+  return [];
+}
 export const filtersActive = (f: Filters) => JSON.stringify(f) !== JSON.stringify(NO_FILTERS);
+
+const ORIGIN_WORDS: Record<string, string> = { FRESH: "Fresh", RECYCLED: "Recycled", RESTORED: "Given back", ADMIN_GIVEN: "Given by admin", SELF: "Personal", OTHER: "Other" };
+export function originWord(k: unknown): string {
+  return ORIGIN_WORDS[String(k)] ?? String(k ?? "");
+}
 
 // Employee x Source: per employee (most leads first) its sources (most leads first), its subtotal (the employee row)
 // and a grand total that is the sum of the employees.
@@ -253,13 +322,31 @@ export function buildCsv(r: PerfReport, nameOf: (id: string) => string): string 
   }
   return out.join("\n") + "\n";
 }
-const ORIGIN_WORDS: Record<string, string> = { FRESH: "Fresh", RECYCLED: "Recycled", RESTORED: "Given back", ADMIN_GIVEN: "By admin", SELF: "Personal", OTHER: "Other" };
-export const originWord = (k: unknown) => ORIGIN_WORDS[String(k)] ?? String(k ?? "");
-export function buildDrillCsv(title: string, rows: Record<string, unknown>[]): string {
-  const out = [line([title]), line(["Lead", "Employee", "Type", "Source", "Project", "Given as", "Given on (IST)", "Last result", "Stage"])];
+// Drill-down CSV: a header row and one row per lead, nothing else.
+export function buildDrillCsv(rows: Record<string, unknown>[]): string {
+  const out = [line(["Lead", "Employee", "Type", "Source", "Project", "Given as", "Given on (IST)", "Last result", "Stage"])];
   for (const x of rows)
     out.push(line([x.lead_name, x.employee_name, x.lead_type, x.source, x.project, originWord(x.origin),
       x.assigned_at ? istYmd(Date.parse(String(x.assigned_at))) : "", statusWord(String(x.last_result ?? "NO_RESULT")), stageWord(String(x.last_stage ?? "LEADS"))]));
+  return out.join("\n") + "\n";
+}
+
+// Main CSV (simple view): exactly the screen table: Employee, [split], the counts, then the % columns; total last.
+export function buildSimpleCsv(r: PerfReport, rows: EmpRow[], by: SplitBy, nameOf: (id: string) => string): string {
+  const keys = mainKeys(r);
+  const pk = keys.filter((k) => k !== "leads");
+  const split = by !== "none";
+  const vals = (x: Partial<MetricRow>) => [...keys.map((k) => n(x, k)), ...pk.map((k) => metricPct(x, k))];
+  const out = [line(["Employee", ...(split ? [by === "origin" ? "Given as" : "Source"] : []), ...keys.map(mainLabel), ...pk.map(mainPctLabel)])];
+  for (const e of rows) {
+    const name = e.name ?? nameOf(e.employee_id);
+    if (!split) out.push(line([name, ...vals(e)]));
+    else {
+      for (const x of splitRows(r, by, e.employee_id)) out.push(line([name, x.label, ...vals(x.row)]));
+      out.push(line([name, "All", ...vals(e)]));
+    }
+  }
+  out.push(line(["Total", ...(split ? ["All"] : []), ...vals(r.totals)]));
   return out.join("\n") + "\n";
 }
 
@@ -277,3 +364,26 @@ const CAME_METRIC: Record<string, string> = {
 export function drillMetric(k: MetricKey): string {
   return CAME_METRIC[k] ? `came:${CAME_METRIC[k]}` : k;
 }
+
+// Give leads from the report: at most 200 leads a call; the owner the admin saw travels with each lead so the SQL can
+// skip a lead that moved in between.
+export const REASSIGN_CHUNK = 200;
+export interface ReassignItem { lead_id: string; expected_owner: string | null }
+export function chunks<T>(xs: T[], size = REASSIGN_CHUNK): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < xs.length; i += size) out.push(xs.slice(i, i + size));
+  return out;
+}
+export function reassignItems(rows: Record<string, unknown>[]): ReassignItem[] {
+  const seen = new Set<string>();
+  const out: ReassignItem[] = [];
+  for (const r of rows) {
+    const id = String(r.lead_id ?? "");
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ lead_id: id, expected_owner: r.current_owner_id ? String(r.current_owner_id) : null });
+  }
+  return out;
+}
+// Skip reasons come from the SQL in plain English; only the first letter is raised.
+export const skipText = (k: string) => k.charAt(0).toUpperCase() + k.slice(1);

@@ -1,11 +1,13 @@
 "use client";
-// Admin Performance Report (2026-11-20, v2 2026-11-23): data for app/admin/performance-report. Read-only.
-//   * Flag: lead_engine_settings.admin_report_mode, one row. Missing column / error / anything but 'on' = page hidden.
-//   * Report: one get_perf_report_v2 call per filter change (falls back to v1 while the v2 SQL is not applied); a
-//     newer request wins, stale answers are dropped; an invalid range (over 800 days) is never sent.
-//   * Drill-down: get_perf_report_leads_v2 (or v1) only when a number is tapped, 200 rows per page; its CSV pages
-//     through the same RPC. Filters always travel in the RPC body (POST), never in a URL.
-//   * No polling, no realtime channel.
+// Admin Performance Report (2026-11-20, v2 2026-11-23, v3 simple view 2026-11-23): data for app/admin/performance-report.
+//   * Flags: lead_engine_settings.admin_report_mode (the page) and admin_report_reassign_mode (give leads from the
+//     report), one row. Missing column / error / anything but 'on' = off.
+//   * Report: one get_perf_report_v3 call per filter change, falling back to v2 and then v1 while the newer SQL is not
+//     applied; a newer request wins, stale answers are dropped; an invalid range (over 800 days) is never sent.
+//   * Drill-down: get_perf_report_leads_v3 (or v2 / v1) only when a number is tapped, 200 rows per page; its CSV pages
+//     through the same RPC. Journey: get_lead_journey for one lead, on tap. Filters travel in the RPC body (POST),
+//     never in a URL.
+//   * No polling, no realtime channel. Read-only (the give / give back calls live in lib/usePerfReassign.ts).
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { reportClientError } from "@/lib/reportClientError";
@@ -13,9 +15,13 @@ import { filtersJson, rangeProblem, type Filters, type PerfReport } from "@/lib/
 
 export const DRILL_PAGE = 200;
 export const DRILL_CSV_MAX = 20000;
+type Api = 1 | 2 | 3;
+const REPORT_RPC: Record<Api, string> = { 3: "get_perf_report_v3", 2: "get_perf_report_v2", 1: "get_perf_report" };
+const LEADS_RPC: Record<Api, string> = { 3: "get_perf_report_leads_v3", 2: "get_perf_report_leads_v2", 1: "get_perf_report_leads" };
 
-export function useAdminReportMode(): "loading" | "on" | "off" {
-  const [mode, setMode] = useState<"loading" | "on" | "off">("loading");
+export interface ReportFlags { mode: "loading" | "on" | "off"; reassign: boolean }
+export function useAdminReportFlags(): ReportFlags {
+  const [flags, setFlags] = useState<ReportFlags>({ mode: "loading", reassign: false });
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -23,17 +29,32 @@ export function useAdminReportMode(): "loading" | "on" | "off" {
       if (!alive) return;
       if (error) reportClientError("perf-report:flag", error.message, "warning");
       const row = (data ?? null) as Record<string, unknown> | null;
-      setMode(!error && row && row.admin_report_mode === "on" ? "on" : "off");
+      const mode = !error && row && row.admin_report_mode === "on" ? "on" : "off";
+      setFlags({ mode, reassign: mode === "on" && !!row && row.admin_report_reassign_mode === "on" });
     })();
     return () => {
       alive = false;
     };
   }, []);
-  return mode;
+  return flags;
 }
+export const useAdminReportMode = () => useAdminReportFlags().mode;
 
-// v2 not applied yet -> PostgREST "function not found" (PGRST202) or Postgres 42883.
+// Newer SQL not applied yet -> PostgREST "function not found" (PGRST202) or Postgres 42883.
 const missingFn = (e: { code?: string; message?: string } | null) => !!e && (e.code === "PGRST202" || e.code === "42883" || /could not find the function/i.test(e.message || ""));
+
+// Call the newest report RPC this database has, stepping down on "function not found". The step-down is decided per
+// request (two loads can be in flight: React dev runs effects twice), then remembered for the next calls.
+async function callApi(names: Record<Api, string>, api: { current: Api }, args: (v: Api) => Record<string, unknown>) {
+  let v: Api = api.current;
+  let res = await supabase.rpc(names[v], args(v));
+  while (v > 1 && missingFn(res.error)) {
+    v = (v - 1) as Api;
+    if (api.current > v) api.current = v;
+    res = await supabase.rpc(names[v], args(v));
+  }
+  return res;
+}
 
 export interface DrillState {
   metric: string;
@@ -49,7 +70,7 @@ export function usePerfReport(from: string, to: string, filters: Filters, enable
   const [state, setState] = useState<{ data: PerfReport | null; loading: boolean; error: boolean }>({ data: null, loading: true, error: false });
   const [drill, setDrill] = useState<DrillState | null>(null);
   const seq = useRef(0);
-  const api = useRef<1 | 2>(2);
+  const api = useRef<Api>(3);
   const key = JSON.stringify([from, to, filters]);
   const invalid = rangeProblem(from, to);
 
@@ -58,14 +79,7 @@ export function usePerfReport(from: string, to: string, filters: Filters, enable
     if (rangeProblem(f, t)) return;
     const my = ++seq.current;
     setState((s) => ({ ...s, loading: true, error: false }));
-    const args = { p_from: f, p_to: t, p_filters: filtersJson(flt) };
-    // Remember which one this request asked: two loads can be in flight (React dev runs effects twice).
-    const usedV2 = api.current === 2;
-    let res = await supabase.rpc(usedV2 ? "get_perf_report_v2" : "get_perf_report", args);
-    if (usedV2 && missingFn(res.error)) {
-      api.current = 1;
-      res = await supabase.rpc("get_perf_report", args);
-    }
+    const res = await callApi(REPORT_RPC, api, (v) => ({ p_from: f, p_to: t, p_filters: filtersJson(flt, v) }));
     if (my !== seq.current) return;
     if (res.error || !res.data) {
       reportClientError("perf-report:load", res.error?.message ?? "empty answer", "warning");
@@ -82,13 +96,7 @@ export function usePerfReport(from: string, to: string, filters: Filters, enable
   const fetchDrillPage = useCallback(
     async (metric: string, extra: Partial<Filters>, offset: number) => {
       const [f, t, flt] = JSON.parse(key) as [string, string, Filters];
-      const args = { p_from: f, p_to: t, p_filters: filtersJson({ ...flt, ...extra }), p_metric: metric, p_limit: DRILL_PAGE, p_offset: offset };
-      const usedV2 = api.current === 2;
-      let res = await supabase.rpc(usedV2 ? "get_perf_report_leads_v2" : "get_perf_report_leads", args);
-      if (usedV2 && missingFn(res.error)) {
-        api.current = 1;
-        res = await supabase.rpc("get_perf_report_leads", args);
-      }
+      const res = await callApi(LEADS_RPC, api, (v) => ({ p_from: f, p_to: t, p_filters: filtersJson({ ...flt, ...extra }, v), p_metric: metric, p_limit: DRILL_PAGE, p_offset: offset }));
       return res as { data: { rows: Record<string, unknown>[]; total: number } | null; error: { message: string } | null };
     },
     [key]
@@ -115,7 +123,7 @@ export function usePerfReport(from: string, to: string, filters: Filters, enable
     setDrill(null);
   }, []);
 
-  // Every lead behind one number, page by page (200 each), for the drill-down CSV.
+  // Every lead behind one number, page by page (200 each), for the drill-down CSV and "Select all".
   const allDrillRows = useCallback(
     async (metric: string, extra: Partial<Filters>, onProgress?: (done: number, total: number) => void) => {
       const rows: Record<string, unknown>[] = [];
@@ -137,4 +145,18 @@ export function usePerfReport(from: string, to: string, filters: Filters, enable
   );
 
   return { ...state, invalid, retry: load, drill, openDrill, closeDrill, allDrillRows };
+}
+
+// One lead's journey: every assignment with how it came and what happened. Needs the v3 SQL.
+export interface JourneyStint {
+  stint_id: string; employee_id: string; employee_name: string | null; assigned_at: string; ended_at: string | null; active: boolean; origin: string;
+  followup: boolean; visit: boolean; converted: boolean; connected: boolean; result: string | null;
+}
+export async function loadJourney(leadId: string): Promise<{ stints: JourneyStint[] } | { error: string }> {
+  const { data, error } = await supabase.rpc("get_lead_journey", { p_lead_id: leadId });
+  if (error || !data) {
+    reportClientError("perf-report:journey", error?.message ?? "empty answer", "warning");
+    return { error: missingFn(error) ? "The journey needs the latest database update." : "Couldn't load the journey." };
+  }
+  return { stints: (data as { stints?: JourneyStint[] }).stints ?? [] };
 }

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Admin Performance Report (2026-11-20, v2 2026-11-23) known-answer + guard check, run in prebuild. No DB access.
+// Admin Performance Report (2026-11-20, v2 2026-11-23, simple view v3 + give leads 2026-11-23) known-answer + guard
+// check, run in prebuild. No DB access.
 // 1) lib/perfReport.ts: % of leads ("–" at 0), "came as" adds up, status / stage columns from the data, IST presets,
 //    800-day range message, future / before-data notes, multi-select filters JSON, employee x source grand total,
 //    CSV (page + drill-down) with count and % and no formula injection.
@@ -7,6 +8,9 @@
 //    the flag from one settings row; no polling, no realtime, no writes, no id list in a URL; English, no purple.
 //    The admin menu shows the report only while the flag is on.
 // 3) The SQL keeps its safety pieces: admin check, range cap, 200 drill-down cap, IST days, rollback for every file.
+// 4) Simple view (v3): main columns in order with every % at the end, one-employee line, flat CSV, Connected.
+// 5) Give leads from the report: behind its own flag, 200 a call in the request body, an idempotency key per page,
+//    only the fixed "Given by admin" reaches employees, batch tables admin-only (RLS), nothing on LeadCard / DataCard.
 
 const fs = require("fs");
 const path = require("path");
@@ -52,8 +56,10 @@ eq("range notes: future, partly future, before data, fine", [
   pr.rangeNote("2027-01-01", "2027-01-31", "2026-11-23"), pr.rangeNote("2026-11-01", "2026-11-30", "2026-11-23"),
   pr.rangeNote("2026-07-01", "2026-07-31", "2026-11-23"), pr.rangeNote("2026-07-01", "2026-09-30", "2026-11-23"), pr.rangeNote("2026-10-01", "2026-10-31", "2026-11-23")],
   ["No data yet: these dates are in the future.", "No data yet after today (23 Nov); the numbers cover up to today.", "No data before 17 Aug.", "Data starts on 17 Aug.", null]);
-eq("filters JSON (several employees / sources, de-duplicated)", [pr.filtersJson(pr.NO_FILTERS), pr.filtersJson({ ...pr.NO_FILTERS, employee: ["e1", "e2", "e1"], source: ["Meta", "99acres"], leadType: "DATA", origin: "OTHER" })],
-  [{}, { employee_ids: ["e1", "e2"], sources: ["Meta", "99acres"], lead_type: "DATA", origins: ["SELF", "OTHER"] }]);
+eq("filters JSON (several employees / sources / Given as, de-duplicated)", [pr.filtersJson(pr.NO_FILTERS), pr.filtersJson({ ...pr.NO_FILTERS, employee: ["e1", "e2", "e1"], source: ["Meta", "99acres"], leadTypes: ["DATA"], origins: ["FRESH", "ADMIN_GIVEN", "FRESH"] })],
+  [{}, { employee_ids: ["e1", "e2"], sources: ["Meta", "99acres"], lead_types: ["DATA"], origins: ["FRESH", "ADMIN_GIVEN"] }]);
+eq("filters JSON: one type for the older report; both types = no type filter", [pr.filtersJson({ ...pr.NO_FILTERS, leadTypes: ["LEAD"] }, 2), pr.filtersJson({ ...pr.NO_FILTERS, leadTypes: ["LEAD", "DATA"] }, 3), pr.filtersJson({ ...pr.NO_FILTERS, leadTypes: ["LEAD", "DATA"] }, 1)],
+  [{ lead_type: "LEAD" }, {}, {}]);
 const row = (o) => ({ leads: 0, stints: 0, fresh: 0, recycled: 0, restored: 0, admin_given: 0, other: 0, came_fresh: 0, came_recycled: 0, came_data: 0, came_restored: 0, came_admin_given: 0, came_other: 0,
   followup: 0, visit: 0, visit_verified: 0, booked: 0, converted: 0, details_est: 0, not_connected: 0, not_interested: 0, no_result: 0, calls: 0, ...o });
 const rep = {
@@ -75,18 +81,53 @@ check("CSV: employee x source with subtotal and grand total", csv.includes("Empl
 check("CSV: status mix with count and %", /Status mix: employee,Leads,Converted,Converted %,No result,No result %/.test(csv) && csv.includes("Total,3,1,33.3%,2,66.7%"));
 check("CSV: a cell starting with = is neutralised", csv.includes(`"'=cmd|x"`) && !csv.includes("\n=cmd"));
 check("CSV v1 fallback: no came-as / employee x source", (() => { const c = pr.buildCsv({ ...rep, api: 1 }, (id) => id); return !c.includes("Employee,Source") && c.includes("Recycled,Recycled %"); })());
-const dcsv = pr.buildDrillCsv("Visits · All", [{ lead_name: "+91 lead", employee_name: "A", lead_type: "LEAD", source: "Meta", project: "P1", origin: "RECYCLED", assigned_at: "2026-10-31T19:00:00Z", last_result: null, last_stage: "VISIT" }]);
+const dcsv = pr.buildDrillCsv([{ lead_name: "+91 lead", employee_name: "A", lead_type: "LEAD", source: "Meta", project: "P1", origin: "RECYCLED", assigned_at: "2026-10-31T19:00:00Z", last_result: null, last_stage: "VISIT" }]);
+check("drill CSV: header row first (no title), then rows", dcsv.startsWith("Lead,Employee,Type,Source,Project,Given as,Given on (IST),Last result,Stage\n") && dcsv.trim().split("\n").length === 2);
 check("drill CSV: header, IST date, words, neutralised cell", dcsv.includes("Lead,Employee,Type,Source,Project,Given as,Given on (IST),Last result,Stage") && dcsv.includes(`"'+91 lead",A,LEAD,Meta,P1,Recycled,2026-11-01,No result,Visit`));
 eq("as-of text", [pr.asOfText(null), pr.asOfText("2026-11-20T09:37:00Z")], ["Not built yet", "As of 15:07, 20 Nov"]);
 
+// 4) Simple view known answers.
+eq("main columns: counts in order (Connected needs v3)", [pr.mainKeys({ api: 3 }), pr.mainKeys({ api: 2 })],
+  [["leads", "followup", "visit", "connected", "converted", "not_interested", "not_connected", "details_est"], ["leads", "followup", "visit", "converted", "not_interested", "not_connected", "details_est"]]);
+eq("main labels", pr.mainKeys({ api: 3 }).map(pr.mainLabel), ["Leads given", "Follow-ups", "Visits done", "Connected", "Converted", "Not interested", "Not connected", "Details shared (estimate)"]);
+const r3 = { ...rep, api: 3, totals: { ...rep.totals, connected: 2 },
+  by_employee: [{ ...rep.by_employee[0], connected: 1 }, { ...rep.by_employee[1], connected: 1 }],
+  by_emp_origin: [{ employee_id: "e1", origin: "FRESH", ...row({ leads: 1, visit: 1 }) }, { employee_id: "e1", origin: "RECYCLED", ...row({ leads: 1 }) }] };
+const scsv = pr.buildSimpleCsv(r3, r3.by_employee, "none", (id) => id).trim().split("\n");
+eq("flat CSV: header = screen columns, % at the end", scsv[0], "Employee,Leads given,Follow-ups,Visits done,Connected,Converted,Not interested,Not connected,Details shared (estimate),Follow-ups %,Visits done %,Connected %,Converted %,Not interested %,Not connected %,Details shared %");
+eq("flat CSV: one row per employee + total, nothing else", [scsv.length, scsv[2], scsv[3]], [4, "B,2,0,0,1,0,0,0,0,0.0%,0.0%,50.0%,0.0%,0.0%,0.0%,0.0%", "Total,3,0,1,2,1,0,0,0,0.0%,33.3%,66.7%,33.3%,0.0%,0.0%,0.0%"]);
+const ocsv = pr.buildSimpleCsv(r3, r3.by_employee, "origin", (id) => id).trim().split("\n");
+eq("flat CSV split by Given as: sub-rows then the employee's All row", [ocsv[0].split(",").slice(0, 3), ocsv.slice(1, 4).map((l) => l.split(",").slice(0, 3).join(","))],
+  [["Employee", "Given as", "Leads given"], ["\"'=cmd|x\",Fresh,1", "\"'=cmd|x\",Recycled,1", "\"'=cmd|x\",All,2"]]);
+eq("one-employee line", pr.summaryLine("A", row({ leads: 4, came_fresh: 1, came_recycled: 2, followup: 1, visit: 1, connected: 2, converted: 0, not_interested: 1, not_connected: 1, details_est: 1 }), "1–31 Oct", true),
+  "A was given 4 leads (1 fresh, 2 recycled, 1 other) in 1–31 Oct: 1 follow-ups (25.0%), 1 visits (25.0%), 2 connected (50.0%), 0 converted (0.0%), 1 not interested (25.0%), 1 not connected (25.0%); details shared to about 1 (estimate).");
+eq("one-employee line: no leads", pr.summaryLine("A", row({}), "Today", true), "A was given no leads in Today.");
+eq("Given as words", ["FRESH", "RECYCLED", "RESTORED", "ADMIN_GIVEN"].map(pr.originWord), ["Fresh", "Recycled", "Given back", "Given by admin"]);
+eq("chunks of 200 (450 -> 200, 200, 50)", pr.chunks(Array.from({ length: 450 }, (_, i) => i)).map((c) => c.length), [200, 200, 50]);
+eq("reassign items: one per lead, with the owner the admin saw", pr.reassignItems([{ lead_id: "l1", current_owner_id: "e1" }, { lead_id: "l1", current_owner_id: "e1" }, { lead_id: "l2", current_owner_id: null }, { lead_id: "" }]),
+  [{ lead_id: "l1", expected_owner: "e1" }, { lead_id: "l2", expected_owner: null }]);
+eq("active filter tags", pr.filterTags({ ...pr.NO_FILTERS, employee: ["e1", "e2", "e3"], origins: ["FRESH"], leadTypes: ["DATA"] }, (id) => id.toUpperCase(), (id) => id).map((t) => t.label), ["E1, E2 +1", "Fresh", "Data"]);
+
 // 2) Guards on the page code.
-const files = ["components/PerfReport.tsx", "lib/usePerfReport.ts", "app/admin/performance-report/page.tsx"];
+const files = ["components/PerfReport.tsx", "components/perfUi.tsx", "lib/usePerfReport.ts", "app/admin/performance-report/page.tsx"];
 const all = files.map(read).join("\n");
-const rpcs = [...new Set([...all.matchAll(/\.rpc\((?:"([a-z0-9_]+)"|usedV2 \? "([a-z0-9_]+)" : "([a-z0-9_]+)")/g)].flatMap((m) => [m[1], m[2], m[3]]).filter(Boolean))].sort();
-check("v1 fallback decided per request (two loads can be in flight)", (all.match(/if \(usedV2 && missingFn\(res\.error\)\)/g) || []).length === 2);
-eq("only the report RPCs (v2 with v1 fallback)", rpcs, ["get_perf_report", "get_perf_report_leads", "get_perf_report_leads_v2", "get_perf_report_v2"]);
+const giveFiles = ["components/PerfReassign.tsx", "lib/usePerfReassign.ts"];
+const give = giveFiles.map(read).join("\n");
+const rpcNames = (src) => [...new Set([...src.matchAll(/\.rpc\("([a-z0-9_]+)"/g)].map((m) => m[1]).concat([...src.matchAll(/\d: "(get_perf_report[a-z0-9_]*)"/g)].map((m) => m[1])))].sort();
+check("older-report fallback decided per request, stepping v3 -> v2 -> v1", read("lib/usePerfReport.ts").includes("while (v > 1 && missingFn(res.error))") && read("lib/usePerfReport.ts").includes("let v: Api = api.current;"));
+eq("report page: only the report RPCs (v3, v2, v1) and the journey", rpcNames(all), ["get_lead_journey", "get_perf_report", "get_perf_report_leads", "get_perf_report_leads_v2", "get_perf_report_leads_v3", "get_perf_report_v2", "get_perf_report_v3"]);
+eq("give controls: only their own RPCs", rpcNames(give), ["admin_reassign_leads_from_report", "admin_report_reassign_preview", "admin_undo_report_batch", "get_lead_report_batches", "get_report_batch_outcome", "get_report_batches"]);
 const froms = [...all.matchAll(/\.from\("([a-z_]+)"\)/g)].map((m) => m[1]);
 eq("only the flag row is read directly", froms, ["lead_engine_settings"]);
+eq("give controls read only the sales employee list directly (bounded)", [...give.matchAll(/\.from\("([a-z_]+)"\)/g)].map((m) => m[1]), ["employees"]);
+check("employee list is bounded", read("lib/usePerfReassign.ts").includes('.eq("is_active", true).eq("department", "sales").order("name").limit(500)'));
+check("give controls: no writes to tables, no id list in a URL, no polling", !/\.in\(|setInterval\(|\.channel\(|\.(insert|update|upsert|delete)\(/.test(give));
+check("give: 200 leads a call, one idempotency key per page", read("lib/perfReport.ts").includes("export const REASSIGN_CHUNK = 200;") && read("lib/usePerfReassign.ts").includes("p_idempotency_key: `${runKey}-${i}`") && read("lib/usePerfReassign.ts").includes("chunks(items, REASSIGN_CHUNK)"));
+check("give: the run key is made once per confirm sheet (a double tap repeats, never doubles)", read("components/PerfReassign.tsx").includes("const runKey = useRef(newKey());") && read("components/PerfReassign.tsx").includes("const undoKey = useRef(newKey());"));
+check("give controls only behind their own flag (and the report flag)", read("lib/usePerfReport.ts").includes('reassign: mode === "on" && !!row && row.admin_report_reassign_mode === "on"') && read("app/admin/performance-report/page.tsx").includes("<PerfReport reassign={reassign} />") && read("components/PerfReport.tsx").includes("reassign={reassign && v3}"));
+check("give: preview first, confirm needs a reason, deliberate-action warning shown", give.includes("previewGive(items, to, mode, incPos)") && give.includes("reason.trim().length >= MIN_REASON") && give.includes("This is a deliberate admin decision."));
+check("give: positive leads left out unless ticked", give.includes("useState(false);") && give.includes("Include positive leads"));
+check("give files: English, no purple, no dark mode, no lead cards", !/purple|violet|fuchsia|dark:|LeadCard|DataCard/i.test(give));
 check("no id list in a URL (.in()) anywhere in the page", !/\.in\(/.test(all));
 check("flag read is one row", all.includes('.from("lead_engine_settings").select("*").eq("id", 1).maybeSingle()'));
 check("flag: anything but 'on' (missing column, error) = hidden", all.includes('row.admin_report_mode === "on" ? "on" : "off"'));
@@ -100,6 +141,8 @@ check("status mix label and the Converted note", read("lib/perfReport.ts").inclu
 check("estimate label on details", read("components/PerfReport.tsx").includes(">Estimate</Pill>"));
 check("800-day message and date limits", read("lib/perfReport.ts").includes("Please choose a range of ${maxDays} days or less.") && read("components/PerfReport.tsx").includes("max={addDays(custom.from, MAX_DAYS)}"));
 check("LeadCard / DataCard / Homes untouched by this page", !/LeadCard|DataCard|AdminHome|EmployeeHome/.test(all));
+check("main table: counts then every % at the end; More details closed by default", read("components/PerfReport.tsx").includes("{keys.map((k) => sortHead(k, mainLabel(k)))}\n                      {pctKeys.map((k) => sortHead(k, PCT_SHORT[k] ?? mainLabel(k), true))}") && read("components/PerfReport.tsx").includes("const [more, setMore] = useState(false);"));
+check("CSV button exports exactly the screen table", read("components/PerfReport.tsx").includes("buildSimpleCsv(r, employees, splitOk ? split : \"none\", nameOf)"));
 const layout = read("app/admin/layout.tsx");
 check("menu: Performance Report item, flag-gated", layout.includes('{ name:"Performance Report", href:"/admin/performance-report", icon:"📋", flag:"admin_report_mode" }') && layout.includes('.filter((item)=>!("flag" in item) || reportOn)'));
 check("menu: flag read only after the admin check", layout.indexOf("setAccessChecked(true);") < layout.indexOf('admin_report_mode === "on"'));
@@ -122,6 +165,23 @@ const v2code = v2.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n
 check("SQL v2: draft, additive, every read through the admin-checked perf_stints_in", v2.includes("DRAFT, NOT APPLIED") && !/alter table|drop |create table|delete from|update public/i.test(v2code) && (v2code.match(/perf_stints_in\(/g) || []).length >= 3);
 check("SQL v2: came as adds up (one segment per lead)", v2.includes("(array_agg(case when lead_type = 'DATA' then 'DATA' when origin in ('SELF', 'OTHER') then 'OTHER' else origin end"));
 check("flag SQL: default off", read("supabase/sql/2026-11-20_admin_report_mode.sql").includes("default 'off'"));
+
+// 5) SQL for v3 and give leads (drafts until applied).
+const v3 = read("supabase/sql/2026-11-23_perf_report_v3.sql");
+const ra = read("supabase/sql/2026-11-23_perf_report_reassign.sql");
+const fl = read("supabase/sql/2026-11-23_admin_report_reassign_mode.sql");
+const code = (t) => t.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+for (const f of ["2026-11-23_perf_report_v3", "2026-11-23_perf_report_reassign", "2026-11-23_admin_report_reassign_mode"]) check(`${f}: rollback exists`, fs.existsSync(path.join(root, `supabase/sql/${f}_rollback.sql`)));
+check("SQL v3: additive (functions only), admin check, range cap, 200 cap", !/alter table|drop |create table|delete from|update public/i.test(code(v3)) && v3.includes("raise exception 'perf report: admin only'") && v3.includes("p_to - p_from > 800") && v3.includes("least(greatest(coalesce(p_limit, 200), 1), 200)"));
+check("SQL v3: Connected = Connected / Converted / Not interested saved, or follow-up, or visit", v3.includes("(x.followup_move or x.visit or exists (select 1 from lead_activity_log a where a.lead_id = x.lead_id and a.lead_history_id = x.stint_id\n         and a.activity_type = 'STATUS_UPDATE' and a.detail in ('CONNECTED', 'CONVERTED', 'NOT_INTERESTED'))) as reached"));
+check("SQL give: admin only, 200 a call, idempotency key unique", (ra.match(/raise exception 'report reassign: admin only'/g) || []).length >= 6 && ra.includes("not between 1 and 200") && ra.includes("idempotency_key text not null unique"));
+check("SQL give: every move through admin_reassign_leads with the fixed text only", (code(ra).match(/admin_reassign_leads\(/g) || []).length === 2 && (code(ra).match(/admin_reassign_leads\(array\[[a-z_.]+\], [a-z_.]+, 'Given by admin', 'auto'\)/g) || []).length === 2);
+check("SQL give: stale owner and positive checks, lead row locked", ra.includes("'owner changed since the list was opened'") && ra.includes("'positive lead (excluded)'") && ra.includes("for update;  -- the sweep cannot move it"));
+check("SQL give: receiver leave / return grace / Sales checks", ra.includes("employee_in_return_grace(p_employee, today)") && ra.includes("'receiver is on leave today'") && ra.includes("'receiver is not in Sales'"));
+check("SQL give: batch tables admin-only (RLS, no anon)", (ra.match(/enable row level security/g) || []).length === 2 && (ra.match(/using \(coalesce\(\(select is_admin\(\)\), false\)\)/g) || []).length === 2 && ra.includes("from public, anon, authenticated;"));
+check("SQL give: helpers without an admin check are revoked from authenticated too", ra.includes("public.perf_reassign_check_items(jsonb), public.perf_reassign_enabled()\n  from public, anon, authenticated;") && v3.includes("revoke all on function public.perf_stint_facts(uuid) from public, anon, authenticated;"));
+check("SQL give: items checked up front (uuid, no duplicates), fixed lock order, flag enforced in the database", ra.includes("perform perf_reassign_check_items(p_items);") && ra.includes("order by value ->> 'lead_id' loop  -- fixed lock order") && (ra.match(/if not perf_reassign_enabled\(\) then raise exception/g) || []).length === 2);
+check("SQL give and v3: drafts, flag default off", v3.includes("DRAFT, NOT APPLIED") && ra.includes("DRAFT, NOT APPLIED") && fl.includes("default 'off'"));
 
 if (problems.length) {
   console.error("check-admin-report FAILED:\n  " + problems.join("\n  "));
