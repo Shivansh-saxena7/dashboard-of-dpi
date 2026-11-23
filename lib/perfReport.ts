@@ -50,7 +50,7 @@ export interface PerfReport {
   totals: Partial<MetricRow>;
   by_employee: EmpRow[];
   by_source: (Partial<MetricRow> & { source: string })[];
-  by_employee_type: (Partial<MetricRow> & { employee_id: string; lead_type: string | null })[];
+  by_employee_type?: (Partial<MetricRow> & { employee_id: string; lead_type: string | null })[];
   by_emp_source?: EmpSourceRow[];
   by_emp_origin?: EmpOriginRow[];
   options: { employees: { id: string; name: string | null; active?: boolean }[]; teams?: { id: string; name: string | null }[]; sources: string[]; projects: string[] } | null;

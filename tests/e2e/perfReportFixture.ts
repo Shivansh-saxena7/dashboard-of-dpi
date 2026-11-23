@@ -64,7 +64,10 @@ export function report(filters: Row, api: 1 | 2 | 3) {
     ]
   };
   if (api >= 2) Object.assign(out, { api, today: "2026-11-23", data_since: "2026-08-17", max_days: 800, by_emp_source: pick ? ES.filter((x) => pick.includes(String(x.employee_id))) : ES });
-  if (api >= 3) out.by_emp_origin = pick ? EO.filter((x) => pick.includes(String(x.employee_id))) : EO;
+  if (api >= 3) {
+    out.by_emp_origin = pick ? EO.filter((x) => pick.includes(String(x.employee_id))) : EO;
+    delete out.by_employee_type; // like the real v3 answer (2026-11-23 production error: More details crashed on it)
+  }
   return out;
 }
 
@@ -153,7 +156,14 @@ export async function openReport(context: BrowserContext, page: Page, opts: Open
       return r.fulfill(json({ batch_id: "u0000001-0000-4000-8000-000000000000", undo_of: body.p_batch_id, requested: 9, moved: 4, skipped: 5, skipped_breakdown: { "the new owner already worked on it": 5 } }));
     return r.fulfill(json({ message: `unexpected rpc ${rpc}` }, 500));
   });
+  // The Next.js dev overlay badge (dev server only, never in production) can sit over the sticky action bar on a phone.
+  await page.addInitScript(() => {
+    const st = document.createElement("style");
+    st.textContent = "nextjs-portal { display: none !important; }";
+    document.documentElement.appendChild(st);
+  });
   await page.goto(opts.goto ?? "/admin/performance-report");
+  await page.addStyleTag({ content: "nextjs-portal { display: none !important; pointer-events: none !important; }" });
   return ctx;
 }
 export const reportCalls = (c: Ctx) => c.calls.filter((x) => /^get_perf_report(_v\d)?$/.test(x.rpc)).length;

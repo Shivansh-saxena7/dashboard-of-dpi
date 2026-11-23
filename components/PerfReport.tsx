@@ -443,7 +443,7 @@ export default function PerfReport({ reassign = false }: { reassign?: boolean })
                         </tr>
                       </thead>
                       <tbody>
-                        {r.by_source.map((s) => (
+                        {(r.by_source ?? []).map((s) => (
                           <tr key={s.source} className="border-b border-slate-100 hover:bg-slate-50">
                             <td className="whitespace-nowrap px-2 py-1 text-left">{s.source}</td>
                             {tableKeys.map((k) => (
@@ -516,7 +516,7 @@ function EmployeeRows({ e, r, cols, open, toggle, drill, cellText }: {
   e: PerfReport["by_employee"][number]; r: PerfReport; cols: MetricKey[]; open: boolean; toggle: () => void;
   drill: (k: MetricKey) => void; cellText: (row: Partial<MetricRow>, k: MetricKey) => string;
 }) {
-  const types = r.by_employee_type.filter((t) => t.employee_id === e.employee_id);
+  const types = (r.by_employee_type ?? []).filter((t) => t.employee_id === e.employee_id);
   return (
     <>
       <tr className="border-b border-slate-100 hover:bg-slate-50" data-testid={`perf-emp-row-${e.employee_id}`}>
@@ -613,8 +613,8 @@ function Mix({ field, r, by, view, nameOf, drill, onDef }: {
 }) {
   const rows: { id: string; label: string; row: Partial<MetricRow>; extra: Partial<Filters> }[] = [
     ...(by === "employee"
-      ? r.by_employee.map((e) => ({ id: e.employee_id, label: e.name ?? nameOf(e.employee_id), row: e as Partial<MetricRow>, extra: { employee: [e.employee_id] } as Partial<Filters> }))
-      : r.by_source.map((s) => ({ id: s.source, label: s.source, row: s as Partial<MetricRow>, extra: { source: [s.source] } as Partial<Filters> }))),
+      ? (r.by_employee ?? []).map((e) => ({ id: e.employee_id, label: e.name ?? nameOf(e.employee_id), row: e as Partial<MetricRow>, extra: { employee: [e.employee_id] } as Partial<Filters> }))
+      : (r.by_source ?? []).map((s) => ({ id: s.source, label: s.source, row: s as Partial<MetricRow>, extra: { source: [s.source] } as Partial<Filters> }))),
     { id: "total", label: "Total", row: r.totals, extra: {} }
   ];
   const keys = mixKeys(rows.map((x) => x.row), field);
