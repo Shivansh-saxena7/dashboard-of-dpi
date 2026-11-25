@@ -163,7 +163,7 @@ export default function PerfJourney({ j, filterText, nameOf }: { j: Hook; filter
                       {(["missed", "won", "assist", "not_counted"] as JourneyCountKey[]).map((k) => (
                         <button key={k} type="button" onClick={() => open(k, e)} data-testid={`lj-card-cell-${e.employee_id}-${k}`} className={`min-h-11 rounded-lg bg-white p-2 text-left ring-1 ring-slate-100 ${FOCUS}`}>
                           <span className="block text-[13px] text-slate-600">{COUNT_LABEL[k]}</span>
-                          <span className="block text-[15px] font-bold tabular-nums text-slate-900">{nf(e[k])}{k !== "not_counted" && <span className="ml-1 text-[13px] font-normal text-slate-600">{jPct(e[k], e.leads)}</span>}</span>
+                          <span className="block text-[15px] font-bold tabular-nums text-slate-900">{nf(e[k])}{k !== "not_counted" && <> <span className="text-[13px] font-normal text-slate-600">{jPct(e[k], e.leads)}</span></>}</span>
                         </button>
                       ))}
                     </div>

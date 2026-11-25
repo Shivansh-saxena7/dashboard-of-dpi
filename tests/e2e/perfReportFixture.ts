@@ -1,5 +1,6 @@
 import { expect, type BrowserContext, type Page } from "@playwright/test";
 import { EMP, FAKE_SUPABASE, UID, mockSupabase, type MockState } from "./mockSupabase";
+import { journeyAnswer } from "./perfJourneyFixture";
 
 // Shared fake data for the Performance Report specs (admin-perf-report, admin-perf-reassign). Fake Supabase answers the
 // report RPCs (v3, v2, v1) with a fixed report (counts already per definitions v1; the SQL itself is tested in PGlite)
@@ -79,7 +80,7 @@ export function report(filters: Row, api: 1 | 2 | 3 | 4) {
 export interface Ctx { state: MockState; calls: { rpc: string; body: Row; url: string }[] }
 export interface OpenOpts {
   flag?: "on" | "off" | "missing"; reassign?: "on" | "off"; role?: "admin" | "super_admin"; fail?: boolean; api?: 1 | 2 | 3 | 4; goto?: string;
-  receiverProblem?: string | null; oldBatch?: boolean;
+  receiverProblem?: string | null; oldBatch?: boolean; journeyFail?: boolean;
 }
 const json = (body: unknown, status = 200) => ({ status, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(body) });
 
@@ -161,6 +162,7 @@ export async function openReport(context: BrowserContext, page: Page, opts: Open
         before: { leads: 9, followup: 0, visit: 0, connected: 1, converted: 0, no_result: 8 }, after: { leads: 9, followup: 3, visit: 2, connected: 6, converted: 1, no_result: 2 }, leads: [] }));
     if (rpc === "admin_undo_report_batch")
       return r.fulfill(json({ batch_id: "u0000001-0000-4000-8000-000000000000", undo_of: body.p_batch_id, requested: 9, moved: 4, skipped: 5, skipped_breakdown: { "the new owner already worked on it": 5 } }));
+    if (rpc === "get_perf_journey" || rpc === "get_perf_journey_rows") return opts.journeyFail ? r.fulfill(json({ message: "boom" }, 500)) : r.fulfill(json(journeyAnswer(rpc, body)));
     return r.fulfill(json({ message: `unexpected rpc ${rpc}` }, 500));
   });
   // The Next.js dev overlay badge (dev server only, never in production) can sit over the sticky action bar on a phone.
@@ -174,6 +176,8 @@ export async function openReport(context: BrowserContext, page: Page, opts: Open
   return ctx;
 }
 export const reportCalls = (c: Ctx) => c.calls.filter((x) => /^get_perf_report(_v\d)?$/.test(x.rpc)).length;
+export const journeyCalls = (c: Ctx) => c.calls.filter((x) => x.rpc === "get_perf_journey");
+export const journeyRowCalls = (c: Ctx) => c.calls.filter((x) => x.rpc === "get_perf_journey_rows");
 export const drillCalls = (c: Ctx) => c.calls.filter((x) => x.rpc.startsWith("get_perf_report_leads"));
 export const desktop = (info: { project: { name: string } }) => info.project.name === "desktop-chromium";
 export async function readDownload(page: Page, click: () => Promise<void>) {
