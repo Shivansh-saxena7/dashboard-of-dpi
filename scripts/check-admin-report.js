@@ -197,6 +197,52 @@ check("SQL: a reused idempotency key must belong to the same action (give vs und
 check("confirm sheet warns above 100 leads to one receiver", read("components/PerfReassign.tsx").includes("p.will_move > MANY_LEADS_WARN"));
 check("SQL give and v3: drafts, flag default off", v3.includes("DRAFT, NOT APPLIED") && ra.includes("DRAFT, NOT APPLIED") && fl.includes("default 'off'"));
 
+// 6) Lead Journey tab (2026-11-26, definitions v3): known answers for lib/perfJourney.ts and guards on its files / SQL.
+{
+  const jt = ts.transpileModule(read("lib/perfJourney.ts"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+  const jm = { exports: {} };
+  new Function("module", "exports", "require", jt)(jm, jm.exports, () => { throw new Error("perfJourney.ts must not import"); });
+  const pj = jm.exports;
+  eq("journey %: of leads given, one decimal, never over 100, – at 0", [pj.jPct(3, 7), pj.jPct(9, 7), pj.jPct(0, 0), pj.jPct(2, null), pj.jPct(1, 3)], ["42.9%", "100.0%", "–", "–", "33.3%"]);
+  eq("journey: low sample under 20 leads given", [pj.lowSample({ leads: 19 }), pj.lowSample({ leads: 20 }), pj.JOURNEY_LOW_SAMPLE], [true, false, 20]);
+  eq("journey: team average from the team row", [pj.teamAvg({ leads: 200, missed: 50 }), pj.teamAvg({ leads: 200, won: 30 }, "won"), pj.teamAvg(null)], ["25.0%", "15.0%", "–"]);
+  eq("journey words", [pj.resultWord("FOLLOWUP"), pj.resultWord("NO_RESULT"), pj.resultWord("CALLBACK_LATER"), pj.moveWord("system"), pj.moveWord("admin"), pj.moveWord(null), pj.excusedWord("leave"), pj.originWordJ("RESTORED")],
+    ["Follow-up", "No result", "Callback Later", "Recycled", "Given by admin", "Still with them", "On leave", "Given back"]);
+  const step = (o) => ({ seq: 1, employee_id: "e1", name: "A", origin: "FRESH", assigned_at: "2026-10-01T04:30:00Z", ended_at: "2026-10-10T04:30:00Z", days: 9, calls: 2, worked: true, positive: false, result: "NOT_CONNECTED", move: "system", excused: null, in_range: true, missed: true, won: false, assist: false, ...o });
+  const jr = { lead_id: "11111111-2222", lead_short: "11111111", first_at: "2026-10-01T04:30:00Z", lead_type: "DATA", source: "=cmd", project: "P", status: "CONNECTED", stage: "FOLLOW_UP", available: true, positive_now: true,
+    got_by: "e2", got_by_name: "B", owners: 6, steps: [step({}), step({ seq: 2, employee_id: "e2", name: "B", origin: "RECYCLED", ended_at: null, positive: true, result: "CONNECTED", move: null, missed: false, won: true })] };
+  const flat = pj.flatJourney(jr);
+  eq("journey flat row: head and row line up; owners in order; formula-safe; who missed / won", [flat.length === pj.FLAT_HEAD.length, flat[0], flat[1], flat[2], flat[4], flat[6], flat[9], flat[10], flat[15], flat.slice(-6)],
+    [true, "11111111", "'=cmd", "Data", "A", "Not connected", "Recycled", "B", "Still with them", [2, "Follow-up", "B", "A", "B", ""]]);
+  const sr = pj.summaryRow("A", { leads: 10, assignments: 11, positive: 2, moved_no_pos: 6, missed: 3, not_counted: 1, won: 0, assist: 1, calls_avg: 1.5, first_action_h: 30 }, { leads: 100, missed: 20 });
+  eq("journey summary: counts first, every % at the end (team average included)", [sr.length === pj.SUMMARY_HEAD.length, pj.SUMMARY_HEAD.slice(-4), sr.slice(-4), sr[10], sr[11]], [true, ["Missed %", "Team avg missed %", "Won %", "Assist %"], ["30.0%", "20.0%", "0.0%", "10.0%"], "1.3 d", "Low sample"]);
+  eq("journey: one employee's sheet = journeys where they had an assignment in the range", [pj.rowsOf([jr], "e1").length, pj.rowsOf([jr], "e9").length], [1, 0]);
+  const used = new Set(["summary"]);
+  eq("journey: Excel sheet names safe and unique", [pj.sheetName("Summary", used), pj.sheetName("A/B: [x]", used), pj.sheetName("A/B: [x]", used)], ["Summary 2", "A B   x", "A B   x 2"]);
+
+  const jf = ["components/PerfJourney.tsx", "lib/usePerfJourney.ts", "lib/perfJourneyExcel.ts", "lib/perfJourney.ts"].map(read).join("\n");
+  eq("journey files: only the two journey RPCs", rpcNames(jf), ["get_perf_journey", "get_perf_journey_rows"]);
+  check("journey files: no direct table reads, no polling, no realtime, no writes, no id list in a URL", !/\.from\("|setInterval\(|\.channel\(|\.(insert|update|upsert|delete)\(|\.in\(/.test(jf));
+  check("journey files: English, no purple / violet / fuchsia, no dark mode, no lead cards", !/purple|violet|fuchsia|dark:|LeadCard|DataCard/i.test(jf));
+  check("journey: one RPC per filter change, only while its tab is open; the report reads only on its own tab",
+    jf.includes("if (enabled) void load();") && jf.includes("if (my !== seq.current) return;") && read("lib/usePerfJourney.ts").includes("if (rangeProblem(f, t)) return;")
+    && read("components/PerfReport.tsx").includes('usePerfReport(range.from, range.to, filters, tab === "report")') && read("components/PerfReport.tsx").includes('usePerfJourney(range.from, range.to, filters, tab === "journey")'));
+  check("journey: fairness note, approx label, low sample label, % of leads given", jf.includes('FAIR_NOTE = "A signal, not a verdict."') && jf.includes("{FAIR_NOTE}") && jf.includes("(approx)") && jf.includes(">Low sample</Pill>") && jf.includes("% of leads given"));
+  check("journey: no client name or number on the page or in Excel (lead short id only)", !/lead_name|mobile|phone/i.test(jf) && jf.includes("r.lead_short"));
+  check("journey Excel: landscape, fit to width, header repeats, Page X of N, definitions sheet", jf.includes('orientation: "landscape"') && jf.includes("fitToWidth: 1") && jf.includes("printTitlesRow") && jf.includes("Page &P of &N") && jf.includes('addWorksheet("Definitions")'));
+  check("journey errors are reported", (jf.match(/reportClientError\(/g) || []).length >= 3);
+  const lj = read("supabase/sql/2026-11-26_perf_lead_journey.sql");
+  const ljc = code(lj);
+  check("SQL journey: draft, additive (functions + definitions v3 rows), rollback exists", lj.includes("DRAFT, NOT APPLIED") && !/alter table|drop |create table|delete from|update public/i.test(ljc)
+    && fs.existsSync(path.join(root, "supabase/sql/2026-11-26_perf_lead_journey_rollback.sql")) && read("supabase/sql/2026-11-26_perf_lead_journey_rollback.sql").includes("delete from public.perf_definitions where version = 3;"));
+  check("SQL journey: admin check in both RPCs, range cap, page cap 500, view list", (ljc.match(/raise exception 'perf report: admin only'/g) || []).length === 2 && (ljc.match(/p_to - p_from > 800/g) || []).length === 2
+    && ljc.includes("least(greatest(coalesce(p_limit, 50), 1), 500)") && ljc.includes("raise exception 'perf report: bad view'"));
+  check("SQL journey: helpers revoked from every API role", ljc.includes("public.perf_journey_json(date, date, jsonb, text, uuid, int, int, boolean) from public, anon, authenticated;") && ljc.includes("revoke all on function public.perf_journey_stints_v1(date, date, jsonb)"));
+  check("SQL journey: owner rules (60 days, 3 days or 1 call, system recycle only, leave / inactive, % capped)", ljc.includes("interval '60 days'") && ljc.includes("(j.held >= 3 or j.calls >= 1 or j.work_at is not null) as eff")
+    && ljc.includes("not k.is_pos and k.mv = 'system' and k.exc is null and k.eff") && ljc.includes("then 'leave'") && ljc.includes("then 'inactive'") && ljc.includes("least(100, round(100.0 *"));
+  check("SQL journey: merged leads included (Leads given = the main report)", !/where not s\.lead_merged/.test(ljc));
+}
+
 if (problems.length) {
   console.error("check-admin-report FAILED:\n  " + problems.join("\n  "));
   process.exit(1);

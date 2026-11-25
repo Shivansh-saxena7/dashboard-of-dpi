@@ -15,6 +15,8 @@ import {
 import { DRILL_PAGE, usePerfReport, type DrillState } from "@/lib/usePerfReport";
 import { Banner, BTN, CARD, CHIP, download, FOCUS, InfoButton, Pill, PRIMARY, Sheet, Skeleton } from "@/components/perfUi";
 import { BatchesSection, GiveSheet, JourneySheet } from "@/components/PerfReassign";
+import PerfJourney from "@/components/PerfJourney";
+import { usePerfJourney } from "@/lib/usePerfJourney";
 
 const PRESETS: { key: Preset; label: string }[] = [
   { key: "today", label: "Today" }, { key: "last7", label: "Last 7 days" }, { key: "this_month", label: "This month" },
@@ -110,9 +112,12 @@ export default function PerfReport({ reassign = false }: { reassign?: boolean })
   const [def, setDef] = useState<string | null>(null);
   const [journey, setJourney] = useState<{ id: string; name: string } | null>(null);
   const [batchKey, setBatchKey] = useState(0);
+  // Lead Journey (2026-11-26): its own tab; only the open tab reads (one RPC per filter change).
+  const [tab, setTab] = useState<"report" | "journey">("report");
   const today = istYmd(Date.now());
   const range = preset === "custom" ? custom : presetRange(preset, Date.now());
-  const rep = usePerfReport(range.from, range.to, filters, true);
+  const rep = usePerfReport(range.from, range.to, filters, tab === "report");
+  const jr = usePerfJourney(range.from, range.to, filters, tab === "journey");
   const r = rep.data;
   const v2 = isV2(r);
   const v3 = isV3(r);
@@ -120,7 +125,7 @@ export default function PerfReport({ reassign = false }: { reassign?: boolean })
   const pctKeys = pctKeysOf(keys);
   const tableKeys = v2 ? TABLE_KEYS : TABLE_KEYS_V1;
   const defs = useMemo(() => Object.fromEntries((r?.definitions ?? []).map((d) => [d.key, d])), [r]);
-  const nameOf = (id: string) => r?.by_employee.find((e) => e.employee_id === id)?.name ?? r?.options?.employees.find((e) => e.id === id)?.name ?? id.slice(0, 8);
+  const nameOf = (id: string) => r?.by_employee.find((e) => e.employee_id === id)?.name ?? r?.options?.employees.find((e) => e.id === id)?.name ?? jr.data?.options?.employees.find((e) => e.id === id)?.name ?? id.slice(0, 8);
   const teamName = (id: string) => r?.options?.teams?.find((t) => t.id === id)?.name ?? id.slice(0, 8);
   const cellText = (row: Partial<MetricRow>, k: MetricKey) => (view === "pct" && k !== "leads" ? metricPct(row, k) : n(row, k).toLocaleString("en-IN"));
   const setF = (patch: Partial<Filters>) => setFilters((f) => ({ ...f, ...patch }));
@@ -136,7 +141,7 @@ export default function PerfReport({ reassign = false }: { reassign?: boolean })
     rows.sort((a, b) => (sort.key === "name" ? String(a.name ?? "").localeCompare(String(b.name ?? "")) : n(a, sort.key) - n(b, sort.key)) * sort.dir);
     return rows;
   }, [r, sort]);
-  const empOptions = (r?.options?.employees ?? []).map((e) => ({ v: e.id, l: `${e.name ?? e.id.slice(0, 8)}${e.active === false ? " (inactive)" : ""}` })).sort((a, b) => a.l.localeCompare(b.l));
+  const empOptions = (r?.options?.employees ?? jr.data?.options?.employees ?? []).map((e) => ({ v: e.id, l: `${e.name ?? e.id.slice(0, 8)}${e.active === false ? " (inactive)" : ""}` })).sort((a, b) => a.l.localeCompare(b.l));
   const one = filters.employee.length === 1 ? r?.by_employee.find((e) => e.employee_id === filters.employee[0]) ?? null : null;
   const sortHead = (key: MetricKey | "name", label: string, pct = false) => (
     <th key={`${key}${pct ? "%" : ""}`} data-label={pct ? mainPctLabel(key as MetricKey, isV4(r)) : label} aria-sort={!pct && sort.key === key ? (sort.dir < 0 ? "descending" : "ascending") : "none"}
@@ -166,18 +171,30 @@ export default function PerfReport({ reassign = false }: { reassign?: boolean })
         <div className="min-w-0">
           <h1 className="text-[22px] font-bold tracking-tight text-slate-900">Performance report</h1>
           <p className="flex items-center text-[13px] text-slate-600" data-testid="perf-asof">
-            {r ? `${asOfText(r.as_of)} (updated hourly) · Definitions v${r.def_version}` : "Loading…"}
+            {tab === "journey" ? (jr.data ? `${asOfText(jr.data.as_of)} (updated hourly) · Definitions v${jr.data.def_version}` : "Loading…")
+              : r ? `${asOfText(r.as_of)} (updated hourly) · Definitions v${r.def_version}` : "Loading…"}
             {r && <InfoButton label="how this is counted" onClick={() => setDef("range")} />}
           </p>
         </div>
         <div className="flex gap-2">
-          <button type="button" className={BTN} onClick={rep.retry} data-testid="perf-refresh" aria-busy={rep.loading} disabled={!!rep.invalid}>{rep.loading && !rep.invalid ? "Loading…" : "Refresh"}</button>
+          <button type="button" className={BTN} onClick={tab === "journey" ? jr.retry : rep.retry} data-testid="perf-refresh" aria-busy={tab === "journey" ? jr.loading : rep.loading} disabled={!!rep.invalid}>{(tab === "journey" ? jr.loading : rep.loading) && !rep.invalid ? "Loading…" : "Refresh"}</button>
+          {tab === "report" && (
           <button type="button" disabled={!r || !!rep.invalid} data-testid="perf-csv" className={PRIMARY}
             onClick={() => r && download(`performance-report-${r.from}-to-${r.to}.csv`, buildSimpleCsv(r, employees, splitOk ? split : "none", nameOf))}>
             Export CSV
           </button>
+          )}
         </div>
       </header>
+
+      <div role="tablist" aria-label="Report view" className="flex gap-1 border-b border-slate-200" data-testid="perf-tabs">
+        {(["report", "journey"] as const).map((t) => (
+          <button key={t} type="button" role="tab" aria-selected={tab === t} data-testid={`perf-tab-${t}`} onClick={() => setTab(t)}
+            className={`-mb-px min-h-11 border-b-[3px] px-4 text-[15px] font-semibold ${tab === t ? "border-blue-700 text-blue-700" : "border-transparent text-slate-600 hover:text-slate-900"} ${FOCUS}`}>
+            {t === "report" ? "Report" : "Lead Journey"}
+          </button>
+        ))}
+      </div>
 
       <section className={`${CARD} space-y-3`} aria-label="Filters">
         <div className="flex gap-2 overflow-x-auto pb-1" role="group" aria-label="Date range">
@@ -205,7 +222,7 @@ export default function PerfReport({ reassign = false }: { reassign?: boolean })
         )}
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
           <MultiSelect id="employee" label="Employee" options={empOptions} value={filters.employee} onChange={(v) => setF({ employee: v })} />
-          <MultiSelect id="source" label="Source" options={(r?.options?.sources ?? []).slice().sort().map((s) => ({ v: s, l: s }))} value={filters.source} onChange={(v) => setF({ source: v })} />
+          <MultiSelect id="source" label="Source" options={(r?.options?.sources ?? jr.data?.options?.sources ?? []).slice().sort().map((s) => ({ v: s, l: s }))} value={filters.source} onChange={(v) => setF({ source: v })} />
           {select("team", "Team", filters.team, (r?.options?.teams ?? []).map((t) => ({ v: t.id, l: t.name ?? t.id.slice(0, 8) })))}
           {select("project", "Project", filters.project, (r?.options?.projects ?? []).slice().sort().map((s) => ({ v: s, l: s })))}
         </div>
@@ -229,7 +246,7 @@ export default function PerfReport({ reassign = false }: { reassign?: boolean })
         {r && !v3 && <Banner tone="mute" icon="–" testId="perf-v1-note">Connected, several types at once and Split by Given as need the latest database update. Showing what this database has.</Banner>}
       </section>
 
-      {rep.invalid ? null : rep.error ? (
+      {tab === "journey" ? <PerfJourney j={jr} filterText={sub} nameOf={nameOf} /> : rep.invalid ? null : rep.error ? (
         <button type="button" onClick={rep.retry} data-testid="perf-retry" className={`min-h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-left text-[15px] font-medium text-slate-700 ${FOCUS}`}>
           Couldn&apos;t load the report. Tap to try again.
         </button>
