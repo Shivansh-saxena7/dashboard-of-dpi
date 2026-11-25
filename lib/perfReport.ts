@@ -18,6 +18,7 @@ export interface MetricRow {
   came_admin_given?: number;
   came_other?: number;
   recycled_any?: number;
+  leads_handled?: number;
   connected?: number;
   followup: number;
   visit: number;
@@ -61,7 +62,7 @@ export type MetricKey =
   | "leads" | "came_fresh" | "came_recycled" | "came_data" | "came_restored" | "came_admin_given" | "came_other"
   | "recycled_any" | "fresh" | "recycled" | "restored" | "admin_given" | "other"
   | "followup" | "visit" | "visit_verified" | "booked" | "converted" | "details_est" | "not_connected" | "not_interested" | "no_result"
-  | "connected";
+  | "connected" | "leads_handled";
 
 // "def" = the definitions key for the "i" popup.
 export const METRIC: Record<MetricKey, { label: string; short: string; def: string }> = {
@@ -87,7 +88,8 @@ export const METRIC: Record<MetricKey, { label: string; short: string; def: stri
   not_connected: { label: "Not connected", short: "Not conn.", def: "not_connected" },
   not_interested: { label: "Not interested", short: "Not int.", def: "not_interested" },
   no_result: { label: "No result", short: "No result", def: "status_mix" },
-  connected: { label: "Connected", short: "Connected", def: "connected" }
+  connected: { label: "Connected", short: "Connected", def: "connected" },
+  leads_handled: { label: "Leads handled", short: "Handled", def: "leads_handled" }
 };
 // How a lead came: add up to the row's leads (v2). Fresh / Recycled / Data / Given back / By admin / Other.
 export const CAME_KEYS: MetricKey[] = ["came_fresh", "came_recycled", "came_data", "came_restored", "came_admin_given", "came_other"];
@@ -99,17 +101,23 @@ export const TILE_KEYS: MetricKey[] = ["leads", "came_fresh", "came_data", "recy
 export const TILE_KEYS_V1: MetricKey[] = ["leads", "fresh", "recycled", "followup", "visit", "converted", "booked", "details_est", "not_connected", "not_interested"];
 export const isV2 = (r: PerfReport | null | undefined) => (r?.api ?? 1) >= 2;
 export const isV3 = (r: PerfReport | null | undefined) => (r?.api ?? 1) >= 3;
+// v4 (2026-11-25, definitions v2): results by event date; % over leads handled.
+export const isV4 = (r: PerfReport | null | undefined) => (r?.api ?? 1) >= 4;
 
 // Simple view (v3): one main table, counts first, then every % together at the end (% of leads given).
 export const MAIN_KEYS: MetricKey[] = ["leads", "followup", "visit", "connected", "converted", "not_interested", "not_connected", "details_est"];
 export const MAIN_LABEL: Partial<Record<MetricKey, string>> = {
-  leads: "Leads given", followup: "Follow-ups", visit: "Visits done", connected: "Connected", converted: "Converted",
+  leads: "Leads given", leads_handled: "Leads handled", followup: "Follow-ups", visit: "Visits done", connected: "Connected", converted: "Converted",
   not_interested: "Not interested", not_connected: "Not connected", details_est: "Details shared (estimate)"
 };
 // Connected needs v3; the older report has no such count, so its column is left out rather than shown as 0.
-export const mainKeys = (r: PerfReport | null | undefined): MetricKey[] => (isV3(r) ? MAIN_KEYS : MAIN_KEYS.filter((k) => k !== "connected"));
+export const mainKeys = (r: PerfReport | null | undefined): MetricKey[] =>
+  isV4(r) ? ["leads", "leads_handled", ...MAIN_KEYS.slice(1)] : isV3(r) ? MAIN_KEYS : MAIN_KEYS.filter((k) => k !== "connected");
+// The % columns: every main key but the two counts of leads.
+export const pctKeysOf = (keys: MetricKey[]) => keys.filter((k) => k !== "leads" && k !== "leads_handled");
+export const pctBaseText = (r: PerfReport | null | undefined) => (isV4(r) ? "% of leads handled" : "% of leads given");
 export const mainLabel = (k: MetricKey) => MAIN_LABEL[k] ?? METRIC[k].label;
-export const mainPctLabel = (k: MetricKey) => `${mainLabel(k).replace(" (estimate)", "")} %`;
+export const mainPctLabel = (k: MetricKey, handled = false) => `${mainLabel(k).replace(" (estimate)", "")} ${handled ? "(% of leads handled)" : "%"}`;
 // "Given as" chips; none chosen = all (personal / other included).
 export const ORIGIN_CHIPS: { v: string; l: string }[] = [
   { v: "FRESH", l: "Fresh" }, { v: "RECYCLED", l: "Recycled" }, { v: "RESTORED", l: "Given back" }, { v: "ADMIN_GIVEN", l: "Given by admin" }
@@ -124,8 +132,12 @@ export function pctText(count: number, leads: number): string {
   if (!leads || !Number.isFinite(leads) || leads <= 0) return "–";
   return `${(Math.round((1000 * count) / leads) / 10).toFixed(1)}%`;
 }
+// Results over leads handled when the row has it (v4, never over 100%); otherwise over leads given (v1 - v3).
+const OVER_HANDLED = new Set<MetricKey>(["followup", "visit", "visit_verified", "booked", "connected", "converted", "not_interested", "not_connected", "details_est"]);
 export function metricPct(r: Partial<MetricRow> | null | undefined, k: MetricKey): string {
   if (k === "leads") return n(r, "leads") > 0 ? "100.0%" : "–";
+  if (k === "leads_handled") return n(r, "leads_handled") > 0 ? "100.0%" : "–";
+  if (r?.leads_handled !== undefined && OVER_HANDLED.has(k)) return pctText(Math.min(n(r, k), n(r, "leads_handled")), n(r, "leads_handled"));
   return pctText(n(r, k), n(r, "leads"));
 }
 
@@ -334,10 +346,10 @@ export function buildDrillCsv(rows: Record<string, unknown>[]): string {
 // Main CSV (simple view): exactly the screen table: Employee, [split], the counts, then the % columns; total last.
 export function buildSimpleCsv(r: PerfReport, rows: EmpRow[], by: SplitBy, nameOf: (id: string) => string): string {
   const keys = mainKeys(r);
-  const pk = keys.filter((k) => k !== "leads");
+  const pk = pctKeysOf(keys);
   const split = by !== "none";
   const vals = (x: Partial<MetricRow>) => [...keys.map((k) => n(x, k)), ...pk.map((k) => metricPct(x, k))];
-  const out = [line(["Employee", ...(split ? [by === "origin" ? "Given as" : "Source"] : []), ...keys.map(mainLabel), ...pk.map(mainPctLabel)])];
+  const out = [line(["Employee", ...(split ? [by === "origin" ? "Given as" : "Source"] : []), ...keys.map(mainLabel), ...pk.map((k) => mainPctLabel(k, isV4(r)))])];
   for (const e of rows) {
     const name = e.name ?? nameOf(e.employee_id);
     if (!split) out.push(line([name, ...vals(e)]));

@@ -133,8 +133,12 @@ const both = await rep("2026-10-01", "2026-11-30");
 eq("Oct-Nov: lead 1's visit stays E1's (1 of E1's 2), E2 has 0 visits", [row(both, E1).visit, row(both, E2).visit ?? 0, row(both, E2).followup], [2, 0, 1]);
 eq("split by how the assignment came: E2's follow-up is on a Recycled assignment", (nov.by_emp_origin.find((x) => x.employee_id === E2 && x.origin === "RECYCLED") ?? {}).followup, 1);
 eq("drill follow-up in November = lead 1 by E2, dated by the event", (await one(`select get_perf_report_leads_v4('2026-11-01', '2026-11-30', '{}'::jsonb, 'followup') r`)).r.rows.map((x) => [x.lead_name, x.employee_id === E2, x.event_at.slice(0, 10)]), [["Lead 1", true, "2026-11-06"]]);
-eq("% over leads given (E1 Oct: 2 visits / 3 given)", row(oct, E1).pct.visit, 66.7);
-eq("an employee with events but no leads given in the range still has a row", (await rep("2026-10-20", "2026-10-31")).by_employee.some((e) => e.employee_id === E1 && e.leads === 0 && e.visit === 1), true);
+eq("leads handled: E1 had 4 leads in October (lead 1 from a September assignment, leads 2, 3, 5); % over handled (2 visits / 4 = 50%)", [row(oct, E1).leads_handled, row(oct, E1).pct.visit, row(oct, E1).pct.leads_handled], [4, 50, 100]);
+const allRows = (r) => [r.totals, ...r.by_employee, ...r.by_source, ...(r.by_emp_source ?? []), ...(r.by_emp_origin ?? [])];
+eq("no % is ever over 100, and every result is within leads handled", [oct, nov, both].every((r) => allRows(r).every((x) =>
+  Object.entries(x.pct ?? {}).every(([k, v]) => v === null || v <= 100) && ["visit", "followup", "connected", "converted", "not_interested", "not_connected", "details_est"].every((k) => (x[k] ?? 0) <= (x.leads_handled ?? 0)))), true);
+eq("an employee with events but no leads given in the range still has a row, with leads handled", (await rep("2026-10-20", "2026-10-31")).by_employee.some((e) => e.employee_id === E1 && e.leads === 0 && e.visit === 1 && e.leads_handled >= 1 && e.pct.visit <= 100), true);
+eq("definitions v2: % of leads handled; NC / NI as history", [(oct.definitions.find((d) => d.key === "percent") ?? {}).label, /also as Connected/.test((oct.definitions.find((d) => d.key === "not_connected") ?? {}).rule)], ["% of leads handled", true]);
 eq("filters still apply (Data only: lead 4)", pick((await rep("2026-10-01", "2026-10-31", { lead_types: ["DATA"] })).totals), [1, 0, 0, 0, 1, 1, 1]);
 
 await asUser(EMP_U);

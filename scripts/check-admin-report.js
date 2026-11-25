@@ -34,6 +34,8 @@ const pr = mod.exports;
 // 1) Known answers.
 eq("pct: one decimal", [pr.pctText(1, 3), pr.pctText(2, 3), pr.pctText(3, 3), pr.pctText(0, 7)], ["33.3%", "66.7%", "100.0%", "0.0%"]);
 eq("pct: no leads -> –, never divides by zero", [pr.pctText(0, 0), pr.pctText(5, 0), pr.pctText(1, null), pr.metricPct({ leads: 0, visit: 0 }, "visit"), pr.metricPct({ leads: 0 }, "leads")], ["–", "–", "–", "–", "–"]);
+eq("v4: results over leads handled, never over 100%; v3 rows unchanged", [pr.metricPct({ leads: 3, leads_handled: 4, visit: 2 }, "visit"), pr.metricPct({ leads: 0, leads_handled: 2, visit: 3 }, "visit"), pr.metricPct({ leads: 3, visit: 2 }, "visit"), pr.metricPct({ leads: 0, leads_handled: 0, visit: 0 }, "visit")], ["50.0%", "100.0%", "66.7%", "–"]);
+eq("v4 main columns and labels", [pr.mainKeys({ api: 4 }).slice(0, 3), pr.pctBaseText({ api: 4 }), pr.pctBaseText({ api: 3 }), pr.mainPctLabel("visit", true)], [["leads", "leads_handled", "followup"], "% of leads handled", "% of leads given", "Visits done (% of leads handled)"]);
 eq("pct: leads column is 100% of itself", pr.metricPct({ leads: 4 }, "leads"), "100.0%");
 eq("came as columns", pr.CAME_KEYS, ["came_fresh", "came_recycled", "came_data", "came_restored", "came_admin_given", "came_other"]);
 eq("table: leads, came as, then results", pr.TABLE_KEYS.slice(0, 8), ["leads", "came_fresh", "came_recycled", "came_data", "came_restored", "came_admin_given", "came_other", "followup"]);

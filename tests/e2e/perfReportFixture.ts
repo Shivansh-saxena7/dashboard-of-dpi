@@ -64,7 +64,11 @@ export function report(filters: Row, api: 1 | 2 | 3 | 4) {
     ]
   };
   if (api >= 2) Object.assign(out, { api, today: "2026-11-23", data_since: "2026-08-17", max_days: 800, by_emp_source: pick ? ES.filter((x) => pick.includes(String(x.employee_id))) : ES });
-  if (api >= 4) Object.assign(out, { def_version: 2 }); // v4: exact history (definitions v2)
+  if (api >= 4) { // v4: exact history (definitions v2), % over leads handled
+    Object.assign(out, { def_version: 2 });
+    out.by_employee = (out.by_employee as Row[]).map((e) => ({ ...e, leads_handled: Number(e.leads) ? Number(e.leads) + 20 : 0 }));
+    out.totals = { ...(out.totals as Row), leads_handled: Number((out.totals as Row).leads) + 40 };
+  }
   if (api >= 3) {
     out.by_emp_origin = pick ? EO.filter((x) => pick.includes(String(x.employee_id))) : EO;
     delete out.by_employee_type; // like the real v3 answer (2026-11-23 production error: More details crashed on it)

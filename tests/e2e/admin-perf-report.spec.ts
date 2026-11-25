@@ -276,6 +276,15 @@ test("v4 (exact history) applied: definitions v2, v4 calls, drill rows show the 
   ctx = await openReport(context, page, { api: 4 });
   await expect(total(page, info)).toContainText("600");
   await expect(page.getByTestId("perf-asof")).toContainText("Definitions v2");
+  if (desktop(info)) {
+    await expect(page.getByTestId("perf-main-pct-head")).toHaveText("% of leads handled");
+    await expect(page.getByTestId(`perf-main-cell-${A}-leads_handled`)).toHaveText("420");
+    await expect(page.getByTestId(`perf-main-pct-${A}-visit`)).toHaveText("1.4%"); // 6 of 420 handled, not of 400 given
+  } else await expect(page.getByTestId(`perf-main-card-cell-${A}-visit`)).toContainText("1.4%");
+  const csv = (await readDownload(page, () => page.getByTestId("perf-csv").click())).text.trim().split("\n");
+  expect(csv[0]).toContain("Leads given,Leads handled,Follow-ups");
+  expect(csv[0]).toContain("Visits done (% of leads handled)");
+  expect(csv[1].startsWith("Employee A,400,420,")).toBe(true);
   expect(ctx.calls.filter((c) => c.rpc.startsWith("get_perf_report")).every((c) => c.rpc === "get_perf_report_v4")).toBe(true);
   await page.getByTestId(desktop(info) ? `perf-main-cell-${A}-visit` : `perf-main-card-cell-${A}-visit`).click();
   await expect(page.getByTestId("perf-drill-row").first()).toContainText("On 20 Oct");

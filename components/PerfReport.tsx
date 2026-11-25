@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   addDays, asOfText, buildDrillCsv, buildSimpleCsv, CAME_KEYS, CONVERTED_NOTE, DATA_SINCE, STATUS_MIX_LABEL, drillMetric, empSourceGroups,
-  filterTags, filtersActive, isV2, isV3, istYmd, mainKeys, mainLabel, mainPctLabel, MAX_DAYS, METRIC, metricPct, mixKeys, mixMetric, mixPct, n,
+  filterTags, filtersActive, isV2, isV3, istYmd, mainKeys, mainLabel, mainPctLabel, pctBaseText, pctKeysOf, isV4, MAX_DAYS, METRIC, metricPct, mixKeys, mixMetric, mixPct, n,
   NO_FILTERS, ORIGIN_CHIPS, originWord, presetRange, rangeNote, rangeText, reassignItems, splitRows, stageWord, statusTone, statusWord,
   summaryLine, TABLE_KEYS, TABLE_KEYS_V1, TILE_KEYS, TILE_KEYS_V1, TYPE_CHIPS,
   type Filters, type MetricKey, type MetricRow, type PerfReport, type Preset, type ReassignItem, type SplitBy, type Tone
@@ -117,7 +117,7 @@ export default function PerfReport({ reassign = false }: { reassign?: boolean })
   const v2 = isV2(r);
   const v3 = isV3(r);
   const keys = mainKeys(r);
-  const pctKeys = keys.filter((k) => k !== "leads");
+  const pctKeys = pctKeysOf(keys);
   const tableKeys = v2 ? TABLE_KEYS : TABLE_KEYS_V1;
   const defs = useMemo(() => Object.fromEntries((r?.definitions ?? []).map((d) => [d.key, d])), [r]);
   const nameOf = (id: string) => r?.by_employee.find((e) => e.employee_id === id)?.name ?? r?.options?.employees.find((e) => e.id === id)?.name ?? id.slice(0, 8);
@@ -139,9 +139,9 @@ export default function PerfReport({ reassign = false }: { reassign?: boolean })
   const empOptions = (r?.options?.employees ?? []).map((e) => ({ v: e.id, l: `${e.name ?? e.id.slice(0, 8)}${e.active === false ? " (inactive)" : ""}` })).sort((a, b) => a.l.localeCompare(b.l));
   const one = filters.employee.length === 1 ? r?.by_employee.find((e) => e.employee_id === filters.employee[0]) ?? null : null;
   const sortHead = (key: MetricKey | "name", label: string, pct = false) => (
-    <th key={`${key}${pct ? "%" : ""}`} data-label={pct ? mainPctLabel(key as MetricKey) : label} aria-sort={!pct && sort.key === key ? (sort.dir < 0 ? "descending" : "ascending") : "none"}
+    <th key={`${key}${pct ? "%" : ""}`} data-label={pct ? mainPctLabel(key as MetricKey, isV4(r)) : label} aria-sort={!pct && sort.key === key ? (sort.dir < 0 ? "descending" : "ascending") : "none"}
       className={`p-0 align-bottom text-[13px] font-bold leading-tight ${key === "name" ? "text-left" : "text-right"} ${pct ? "bg-slate-50" : ""}`}>
-      {pct ? <span className="block px-1 py-2.5" title={mainPctLabel(key as MetricKey)}><span aria-hidden>{label}</span><span className="sr-only">{mainPctLabel(key as MetricKey)}</span></span> : (
+      {pct ? <span className="block px-1 py-2.5" title={mainPctLabel(key as MetricKey, isV4(r))}><span aria-hidden>{label}</span><span className="sr-only">{mainPctLabel(key as MetricKey, isV4(r))}</span></span> : (
         <button type="button" data-testid={`perf-sort-${key}`} className={`min-h-11 w-full px-1 ${key === "name" ? "text-left" : "text-right"} ${FOCUS}`}
           onClick={() => setSort((s) => ({ key, dir: s.key === key ? (-s.dir as 1 | -1) : key === "name" ? 1 : -1 }))}>
           {label}{sort.key === key ? (sort.dir < 0 ? " ▼" : " ▲") : ""}
@@ -263,7 +263,7 @@ export default function PerfReport({ reassign = false }: { reassign?: boolean })
                   <thead>
                     <tr className="text-[13px] text-slate-600">
                       <th colSpan={1 + keys.length} aria-hidden />
-                      <th colSpan={pctKeys.length} className="rounded-t-lg bg-slate-50 px-1 pt-2 text-center font-bold text-slate-700" data-testid="perf-main-pct-head">% of leads given</th>
+                      <th colSpan={pctKeys.length} className="rounded-t-lg bg-slate-50 px-1 pt-2 text-center font-bold text-slate-700" data-testid="perf-main-pct-head">{pctBaseText(r)}</th>
                     </tr>
                     <tr className="border-b border-slate-200 text-[13px] text-slate-600">
                       {sortHead("name", "Employee")}
@@ -349,7 +349,7 @@ export default function PerfReport({ reassign = false }: { reassign?: boolean })
                 </div>
               </div>
               <p className="mt-2 flex flex-wrap items-center text-[13px] text-slate-600">
-                Tap a number to see the leads. % = share of leads given. Details shared is an estimate.
+                Tap a number to see the leads. % = share of {isV4(r) ? "leads handled" : "leads given"}. Details shared is an estimate.
                 {split !== "none" && " A lead given to the same person in two ways counts in both split rows."}
                 {v3 && <InfoButton label="Connected" onClick={() => setDef("connected")} />}
               </p>

@@ -15,8 +15,9 @@
 --                   that result saved in the range. A lead can count in more than one (e.g. Not interested, later a
 --                   follow-up): this is what happened, not the lead's status today.
 --   * details (est.) WhatsApp opened in the range on an assignment that never had a visit.
--- Each number is distinct leads per row. % = number / leads given in the row (can be over 100% when older leads were
--- worked in the range). Fresh / Recycled / Data split = how the assignment that did it came.
+--   * leads handled the leads the person had during the range (an assignment that overlaps it) or had a result on in it.
+-- Each number is distinct leads per row. % = number / leads handled in the row, so it is never over 100%. Leads given
+-- stays a count of its own. Fresh / Recycled / Data split = how the assignment that did it came.
 begin;
 
 insert into public.perf_definitions (version, key, label, rule)
@@ -25,15 +26,16 @@ select 2, key, label, rule from public.perf_definitions where version = 1
 on conflict (version, key) do nothing;
 insert into public.perf_definitions (version, key, label, rule) values
   (2, 'range', 'Date range', 'Leads given: assignments that started in the range. Every result (visit, follow-up, connected, converted, not interested, not connected) is counted on the date it happened, for the person who had the lead then, whatever the lead''s stage or owner is today. India time.'),
-  (2, 'percent', '% of leads given', 'Each number divided by the leads given in that row. It can be over 100% when older leads were worked in the range. No leads given shows “–”.'),
+  (2, 'percent', '% of leads handled', 'Each number divided by the leads handled in that row: the leads the person had at any time in the range, or had a result on in it, each once. Never over 100%. Leads given (assignments that started in the range) is shown as its own count. Nothing handled shows “–”.'),
+  (2, 'leads_handled', 'Leads handled', 'Different leads the person had at any time in the range (an assignment that overlaps it) or had a result on in it.'),
   (2, 'visit', 'Visit', 'A visit or revisit logged in the range, pending or verified, not denied, credited to the person who had the lead then. It stays theirs even if the lead later moves on, is recycled after the visit lock, or its stage changes. One lead counts once per person.'),
   (2, 'visit_verified', 'Verified visit', 'A visit verified in the range.'),
   (2, 'booked', 'Booking', 'A booking logged in the range, not denied.'),
   (2, 'followup', 'Follow-up', 'Moved to Follow-up in the range. Reminders alone do not count.'),
   (2, 'connected', 'Connected', 'The client was reached in the range: a result Connected, Converted or Not interested was saved, or a follow-up or a visit happened.'),
   (2, 'converted', 'Converted', 'The result Converted saved in the range.'),
-  (2, 'not_interested', 'Not interested', 'The result Not interested saved in the range, even if the lead later moved on or became positive.'),
-  (2, 'not_connected', 'Not connected', 'The result Not connected or Switched off saved in the range, even if the client was reached later.'),
+  (2, 'not_interested', 'Not interested', 'The result Not interested saved in the range, even if the lead later moved on or became positive. Results are history: one lead can count as Not interested and also as Follow-up or Connected.'),
+  (2, 'not_connected', 'Not connected', 'The result Not connected or Switched off saved in the range, even if the client was reached later: one lead can count as Not connected and also as Connected.'),
   (2, 'details_est', 'Details sent, no visit (estimate)', 'WhatsApp opened in the range on an assignment that never had a visit. An estimate until the app has a “Details shared” result.')
 on conflict (version, key) do nothing;
 
@@ -75,6 +77,10 @@ begin
     union all
     select c.lead_history_id, c.clicked_at, 'WHATSAPP' from contact_click_log c
     where c.click_type = 'WHATSAPP' and c.clicked_at >= t0 and c.clicked_at < t1
+    union all
+    -- held: an assignment that overlaps the range (started before its end; ended after its start, or still open)
+    select p.stint_id, greatest(p.assigned_at, t0), 'HELD' from perf_stints p
+    where p.assigned_at < t1 and (p.ended_at > t0 or (p.ended_at is null and (p.is_active or p.assigned_at >= t0)))
   )
   select s.stint_id, s.lead_id, s.employee_id, s.team_id, s.lead_type, s.source, s.project,
     case when s.origin = 'RESTORED' and exists (select 1 from lead_restore_log r join lead_activity_log ra on ra.id = r.activity_id
@@ -116,7 +122,7 @@ language sql stable security definer set search_path to 'public' as $$
     'not_connected', count(distinct lead_id) filter (where kind = 'NOT_CONNECTED'),
     'connected', count(distinct lead_id) filter (where kind in ('CONNECTED', 'CONVERTED', 'NOT_INTERESTED', 'FOLLOWUP', 'VISIT')),
     'details_est', count(distinct lead_id) filter (where kind = 'WHATSAPP' and stint_id not in (select stint_id from visited)),
-    'leads_worked', count(distinct lead_id) filter (where kind <> 'WHATSAPP'))
+    'leads_handled', count(distinct lead_id))
   from e group by gk
 $$;
 
@@ -139,13 +145,14 @@ begin
 end;
 $$;
 
--- One row: event counts replace the cohort counts; % recomputed over leads given.
+-- One row: event counts replace the cohort counts; % recomputed over leads handled (never over 100%).
 create or replace function public.perf_merge_v4(p_row jsonb, p_ev jsonb, p_keys text[])
 returns jsonb language sql immutable as $$
   with r as (select coalesce(p_row, jsonb_build_object('leads', 0, 'stints', 0)) || (select coalesce(jsonb_object_agg(k, coalesce((p_ev ->> k)::int, 0)), '{}'::jsonb) from unnest(p_keys) k)
-                    || jsonb_build_object('leads_worked', coalesce((p_ev ->> 'leads_worked')::int, 0)) as j)
+                    || jsonb_build_object('leads_handled', coalesce((p_ev ->> 'leads_handled')::int, 0)) as j)
   select j || jsonb_build_object('pct', coalesce(j -> 'pct', '{}'::jsonb) || (select coalesce(jsonb_object_agg(k,
-    case when coalesce((j ->> 'leads')::int, 0) = 0 then null else round(100.0 * (j ->> k)::numeric / (j ->> 'leads')::int, 1) end), '{}'::jsonb) from unnest(p_keys) k))
+    case when coalesce((j ->> 'leads_handled')::int, 0) = 0 then null else least(100, round(100.0 * (j ->> k)::numeric / (j ->> 'leads_handled')::int, 1)) end), '{}'::jsonb) from unnest(p_keys) k)
+    || jsonb_build_object('leads_handled', case when coalesce((j ->> 'leads_handled')::int, 0) = 0 then null else 100.0 end))
   from r
 $$;
 
@@ -167,7 +174,7 @@ returns jsonb language sql stable security definer set search_path to 'public' a
         else jsonb_build_object('employee_id', split_part(ev.gk, '|', 1), 'origin', split_part(ev.gk, '|', 2)) end
         || jsonb_build_object('leads', 0, 'stints', 0)), ev.m, p_keys) as r
     from base b full join ev on ev.gk = b.gk)
-  select coalesce(jsonb_agg(r order by coalesce((r ->> 'leads')::int, 0) desc, coalesce((r ->> 'leads_worked')::int, 0) desc, gk), '[]'::jsonb) from j
+  select coalesce(jsonb_agg(r order by coalesce((r ->> 'leads')::int, 0) desc, coalesce((r ->> 'leads_handled')::int, 0) desc, gk), '[]'::jsonb) from j
 $$;
 
 -- Drill-down v4: for a result metric, the leads with that event in the range (one row per lead, its latest such
