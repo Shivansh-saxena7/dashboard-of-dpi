@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import fs from "fs";
 import ExcelJS from "exceljs";
-import { A, B, D, desktop, journeyCalls, journeyRowCalls, noSideScroll, openReport, reportCalls, type Ctx } from "./perfReportFixture";
+import { A, B, D, desktop, journeyCalls, journeyExportCalls, journeyRowCalls, noSideScroll, openReport, reportCalls, type Ctx } from "./perfReportFixture";
 import { LJ_SHOTS } from "./perfJourneyFixture";
 
 // Performance Report "Lead Journey" tab (2026-11-26, definitions v3): its own tab; only the open tab reads (one
@@ -95,37 +95,83 @@ test("journeys and drill-down: owners in order, no client name, tap a number -> 
   expect(journeyRowCalls(ctx).at(-1)!.body.p_employee).toBeNull();
 });
 
-test("Excel: Summary, Journeys, one sheet per employee, Definitions; landscape, fit to width, Page X of N, % last", async ({ page, context }, info) => {
-  ctx = await openReport(context, page, { api: 4 });
-  await openJourney(page);
+async function download(page: Page, file: string) {
   const [dl] = await Promise.all([page.waitForEvent("download"), page.getByTestId("lj-excel-btn").click()]);
   expect(dl.suggestedFilename()).toMatch(/^lead-journey-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}\.xlsx$/);
-  const file = `${LJ_SHOTS}/sample-${info.project.name}.xlsx`;
   await dl.saveAs(file);
-  const pages = journeyRowCalls(ctx).map((c) => [c.body.p_view, c.body.p_limit, c.body.p_offset]);
-  expect(pages).toEqual([["all", 500, 0]]);
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(file);
-  expect(wb.worksheets.map((w) => w.name)).toEqual(["Summary", "Journeys", "Employee A", "Employee B", "Employee D", "Definitions"]);
+  return wb;
+}
+const dataRows = (ws: ExcelJS.Worksheet) => { const out: unknown[][] = []; ws.eachRow((r, i) => { if (i > 4 && r.getCell(1).value != null && r.getCell(1).value !== "") out.push((r.values as unknown[]).slice(1)); }); return out; };
+
+test("Excel lists: Missed / Won / Assists / All journeys / per employee; customer-data line; lists = counts = drill-down", async ({ page, context }, info) => {
+  ctx = await openReport(context, page, { api: 4, journey: { consistent: true } });
+  await openJourney(page);
+  const wb = await download(page, `${LJ_SHOTS}/sample-${info.project.name}.xlsx`);
+  expect(wb.worksheets.map((w) => w.name)).toEqual(["Summary", "Missed by me", "Won from others", "Assists", "All journeys", "Employee A", "Employee B", "Employee D", "Definitions"]);
   for (const ws of wb.worksheets) {
+    expect(ws.getCell("A1").value).toBe("Contains customer data: do not share");
     expect([ws.pageSetup.orientation, ws.pageSetup.fitToWidth, ws.pageSetup.fitToHeight, ws.pageSetup.printTitlesRow]).toEqual(["landscape", 1, 0, "4:4"]);
     expect(ws.headerFooter.oddFooter).toContain("Page &P of &N");
+    if (ws.name !== "Definitions") expect(ws.autoFilter).toBeTruthy();
   }
   const s = wb.getWorksheet("Summary")!;
-  const head = (s.getRow(4).values as unknown[]).slice(1);
-  expect(head.slice(-4)).toEqual(["Missed %", "Team avg missed %", "Won %", "Assist %"]);
-  expect((s.getRow(5).values as unknown[]).slice(1, 2)).toEqual(["Employee A"]);
-  expect((s.getRow(5).values as unknown[]).slice(-4)).toEqual(["25.0%", "17.9%", "3.3%", "2.5%"]);
-  expect(wb.getWorksheet("Journeys")!.rowCount).toBe(4 + 260);
-  expect(String(wb.getWorksheet("Employee A")!.getCell("A3").value)).toContain("A signal, not a verdict.");
-  // the per-employee option off: no person sheets
+  expect((s.getRow(4).values as unknown[]).slice(-4)).toEqual(["Missed %", "Team avg missed %", "Won %", "Assist %"]);
+  const sumRow = (name: string) => (dataRows(s).find((r) => String(r[0]).startsWith(name)) ?? []) as unknown[];
+  const missedA = Number(sumRow("Employee A")[5]), wonB = Number(sumRow("Employee B")[7]), assistA = Number(sumRow("Employee A")[8]);
+  const m = dataRows(wb.getWorksheet("Missed by me")!), w = dataRows(wb.getWorksheet("Won from others")!), a = dataRows(wb.getWorksheet("Assists")!);
+  expect([m.filter((r) => r[0] === "Employee A").length, w.filter((r) => r[0] === "Employee B").length, a.filter((r) => r[0] === "Employee A").length]).toEqual([missedA, wonB, assistA]);
+  expect(m[0].slice(1, 3)).toEqual(["Client 0", "'+919000000000"]);
+  expect(m[0].slice(-4)).toEqual(["Employee B", "Connected", "2026-10-12", 7]);
+  expect(String(s.getCell(`A${s.rowCount}`).value ?? "") + String(s.getCell(`A${s.rowCount - 1}`).value ?? "")).toContain("exactly as many rows as its count");
+  const empA = dataRows(wb.getWorksheet("Employee A")!);
+  expect([empA.filter((r) => r[0] === "Missed by me").length, empA.filter((r) => r[0] === "Assist").length]).toEqual([missedA, assistA]);
+  expect(dataRows(wb.getWorksheet("All journeys")!).length).toBe(260);
+  await expect(page.getByTestId("lj-excel-done")).toContainText("Lists match the counts.");
+  // rows = drill-down count
+  await page.getByTestId(desktop(info) ? `lj-cell-${A}-missed` : `lj-card-cell-${A}-missed`).click();
+  await expect(page.getByTestId("lj-drill-total")).toContainText(`${missedA} lead`);
+  await page.getByTestId("lj-drill-close").click();
+  // per-employee option off: no person sheets
   await page.getByTestId("lj-per-employee").uncheck();
-  const [dl2] = await Promise.all([page.waitForEvent("download"), page.getByTestId("lj-excel-btn").click()]);
-  const f2 = `${LJ_SHOTS}/sample-flat-${info.project.name}.xlsx`;
-  await dl2.saveAs(f2);
-  const wb2 = new ExcelJS.Workbook();
-  await wb2.xlsx.readFile(f2);
-  expect(wb2.worksheets.map((w) => w.name)).toEqual(["Summary", "Journeys", "Definitions"]);
+  const wb2 = await download(page, `${LJ_SHOTS}/sample-flat-${info.project.name}.xlsx`);
+  expect(wb2.worksheets.map((x) => x.name)).toEqual(["Summary", "Missed by me", "Won from others", "Assists", "All journeys", "Definitions"]);
+});
+
+test("Excel big export: 500 at a time with progress, every lead, lists = counts", async ({ page, context }) => {
+  ctx = await openReport(context, page, { api: 4, journey: { big: true } });
+  await openJourney(page);
+  const wb = await download(page, `${LJ_SHOTS}/sample-big.xlsx`);
+  expect(journeyExportCalls(ctx).map((c) => [c.body.p_limit, c.body.p_offset])).toEqual([[500, 0], [500, 500], [500, 1000]]);
+  expect(dataRows(wb.getWorksheet("All journeys")!).length).toBe(1234);
+  await expect(page.getByTestId("lj-excel-done")).toContainText("1,234 leads");
+  await expect(page.getByTestId("lj-excel-done")).toContainText("Lists match the counts.");
+});
+
+test("Excel stops half way: clear message (how far it got), no file", async ({ page, context }) => {
+  ctx = await openReport(context, page, { api: 4, journey: { big: true }, journeyExportFailAt: 500 });
+  await openJourney(page);
+  let downloaded = false;
+  page.on("download", () => (downloaded = true));
+  await page.getByTestId("lj-excel-btn").click();
+  await expect(page.getByTestId("lj-excel-error")).toContainText("Stopped after 500 of 1,234 leads");
+  await expect(page.getByTestId("lj-excel-error")).toContainText("No file was made.");
+  await page.waitForTimeout(500);
+  expect(downloaded).toBe(false);
+});
+
+test("Excel on the older database (export function missing): lead id only, lists still = counts", async ({ page, context }) => {
+  ctx = await openReport(context, page, { api: 4, journey: { consistent: true, exportMissing: true } });
+  await openJourney(page);
+  const wb = await download(page, `${LJ_SHOTS}/sample-fallback.xlsx`);
+  expect(journeyRowCalls(ctx).map((c) => [c.body.p_view, c.body.p_limit, c.body.p_offset])).toEqual([["all", 500, 0]]);
+  const all = dataRows(wb.getWorksheet("All journeys")!);
+  expect([all.length, all[0][1]]).toEqual([260, ""]);
+  const s = wb.getWorksheet("Summary")!;
+  let txt = ""; s.eachRow((r) => (txt += String(r.getCell(1).value ?? "") + "\n"));
+  expect(txt).toContain("need the latest database update");
+  expect(txt).toContain("exactly as many rows as its count");
 });
 
 test("errors: a failed journey load shows a retry, never a blank page", async ({ page, context }) => {

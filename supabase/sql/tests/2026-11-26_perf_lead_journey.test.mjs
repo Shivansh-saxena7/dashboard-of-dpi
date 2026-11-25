@@ -1,7 +1,7 @@
 // SQL test for supabase/sql/2026-11-26_perf_lead_journey.sql (Lead Journey, definitions v3). In-memory Postgres, no live
 // DB. Not part of the build: PGlite is not a project dependency. Run from a folder that has it:
 //   npm i @electric-sql/pglite@0.2.17
-//   node <this file> <2026-11-20_perf_report.sql> <2026-11-23_perf_report_v3.sql> <2026-11-25_perf_report_v4.sql> <2026-11-26_perf_lead_journey.sql> <..._rollback.sql> <live_defs.sql>
+//   node <this file> <2026-11-20_perf_report.sql> <2026-11-23_perf_report_v3.sql> <2026-11-25_perf_report_v4.sql> <2026-11-26_perf_lead_journey.sql> <..._rollback.sql> <live_defs.sql> [<2026-11-27_perf_journey_export.sql> <its rollback>]
 // Known answers (October unless noted): A fresh, no positive, sweep recycles to B, B positive => A missed, B won from
 // others; A positive then B positive => assist (not won for B); admin give / give back / leave / inactive => not missed;
 // under 3 days with no call or action => not missed; positive after 60 days => not missed; the same lead given to A twice
@@ -9,8 +9,8 @@
 import { PGlite } from "@electric-sql/pglite";
 import fs from "fs";
 const files = process.argv.slice(2).map((f) => fs.readFileSync(f, "utf8"));
-const [v1, v3, v4, lj, ljrb, live] = files;
-for (const [i, s] of files.entries()) if (i < 5 && s.includes("\r")) throw new Error(`file ${i + 1} has CR`);
+const [v1, v3, v4, lj, ljrb, live, ex, exrb] = files;
+for (const [i, s] of files.entries()) if (i !== 5 && s.includes("\r")) throw new Error(`file ${i + 1} has CR`);
 const db = new PGlite();
 const id = (p, i) => `00000000-0000-0000-0000-${p}${String(i).padStart(12 - p.length, "0")}`;
 const ADM = id("a", 1), ADMU = id("aa", 1);
@@ -172,6 +172,30 @@ const g = await one(`select has_function_privilege('anon', 'get_perf_journey(dat
   has_function_privilege('authenticated', 'get_perf_journey(date,date,jsonb)', 'EXECUTE') ok`);
 eq("grants: anon no; helpers not for employees; the RPC for signed-in users (it checks admin)", [g.a, g.a2, g.h, g.h2, g.ok], [false, false, false, false, true]);
 eq("v4 report unchanged next to it", (await one(`select get_perf_report_v4('2026-10-01', '2026-10-31') ->> 'api' a`)).a, "4");
+
+// 2026-11-27 export lists (optional 7th / 8th files): names + mobile for the Excel, lists = counts.
+if (ex) {
+  await db.exec(`alter table leads add column if not exists mobile text; update leads set mobile = '90000000' || right(id::text, 2);`);
+  await db.exec(ex);
+  const exp = async (from, to, f = {}, lim = 500, off = 0) => (await one(`select get_perf_journey_export($1, $2, $3::jsonb, $4, $5) r`, [from, to, JSON.stringify(f), lim, off])).r;
+  const e1 = await exp("2026-10-01", "2026-10-31");
+  const octNow = await rep("2026-10-01", "2026-10-31");
+  eq("export: same leads as the journeys (9 in October), with name and mobile", [e1.total, e1.rows.length, e1.rows.every((r) => /^Lead \d+$/.test(r.lead_name) && /^90000000/.test(r.mobile))], [9, 9, true]);
+  const list = (rows, f) => new Set(rows.flatMap((r) => r.steps.filter((s) => s.in_range && s[f]).map((s) => `${s.employee_id}|${r.lead_id}`)));
+  const sum = (f) => octNow.by_employee.reduce((a, e) => a + Number(e[f]), 0);
+  eq("export lists = summary counts (missed, won, assist)", [list(e1.rows, "missed").size, list(e1.rows, "won").size, list(e1.rows, "assist").size], [sum("missed"), sum("won"), sum("assist")]);
+  eq("export: A's missed leads are 1, 8, 9; positive date on the winner", [[...list(e1.rows, "missed")].filter((k) => k.startsWith(A)).map((k) => Number(k.slice(-12))).sort((a, b) => a - b),
+    e1.rows.find((r) => r.lead_id === L(1)).steps.find((s) => s.positive).pos_at.slice(0, 10)], [[1, 8, 9], "2026-10-12"]);
+  const p1 = await exp("2026-10-01", "2026-10-31", {}, 4, 0), p2 = await exp("2026-10-01", "2026-10-31", {}, 4, 4), p3 = await exp("2026-10-01", "2026-10-31", {}, 4, 8);
+  eq("export pages: no gaps, no repeats", new Set([...p1.rows, ...p2.rows, ...p3.rows].map((r) => r.lead_id)).size, 9);
+  await asUser(EMP_U);
+  eq("export: admin only", /admin only/.test((await tryq(`select get_perf_journey_export('2026-10-01', '2026-10-31', '{}'::jsonb)`)).err || ""), true);
+  await asUser(ADMU);
+  const g2 = await one(`select has_function_privilege('anon', 'get_perf_journey_export(date,date,jsonb,int,int)', 'EXECUTE') a, has_function_privilege('authenticated', 'perf_journey_export_json(date,date,jsonb,int,int)', 'EXECUTE') h`);
+  eq("export grants: anon no; helper not for employees", [g2.a, g2.h], [false, false]);
+  await db.exec(exrb);
+  eq("export rollback: both gone, journey still answers", [(await one(`select count(*)::int n from pg_proc where proname in ('get_perf_journey_export', 'perf_journey_export_json')`)).n, (await rep("2026-10-01", "2026-10-31")).api], [0, "journey1"]);
+}
 await db.exec(ljrb);
 eq("rollback: journey functions gone, definitions v3 gone, v4 still answers", [(await one(`select count(*)::int n from pg_proc where proname in ('get_perf_journey', 'get_perf_journey_rows', 'perf_journey_json', 'perf_journey_pct', 'perf_journey_stints_v1')`)).n, (await one(`select count(*)::int n from perf_definitions where version = 3`)).n, (await one(`select get_perf_report_v4('2026-10-01', '2026-10-31') ->> 'def_version' a`)).a], [0, 0, "2"]);
 console.log(failures ? `${failures} FAILED` : "ALL PASS");

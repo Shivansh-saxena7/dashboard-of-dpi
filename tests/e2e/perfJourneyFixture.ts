@@ -20,34 +20,61 @@ const step = (seq: number, id: string, name: string, o: Row): Row => ({
   seq, employee_id: id, name, origin: seq === 1 ? "FRESH" : "RECYCLED", assigned_at: `2026-10-${String(seq * 3).padStart(2, "0")}T05:00:00Z`, ended_at: null, days: 4, calls: 1,
   worked: true, positive: false, result: "NOT_CONNECTED", move: null, excused: null, in_range: true, missed: false, won: false, assist: false, ...o
 });
-// 260 journeys: A fresh, no positive, recycled to B who connects (A missed, B won); every 5th also via D; every 7th
-// A had a positive too (assist).
-export const ROWS: Row[] = Array.from({ length: 260 }, (_, i) => {
-  const assist = i % 7 === 3, viaD = i % 5 === 1;
-  const steps = [step(1, A, "Employee A", { ended_at: "2026-10-05T05:00:00Z", move: "system", positive: assist, result: assist ? "CONNECTED" : "NOT_CONNECTED", missed: !assist, assist })];
-  if (viaD) steps.push(step(2, D, "Employee D", { ended_at: "2026-10-09T05:00:00Z", move: "system", excused: i % 10 === 1 ? "leave" : null }));
-  steps.push(step(steps.length + 1, B, "Employee B", { positive: true, result: i % 3 ? "FOLLOWUP" : "CONNECTED", won: !assist }));
-  const id = `${String(i).padStart(8, "0")}-0000-4000-8000-000000000000`;
-  return { lead_id: id, lead_short: id.slice(0, 8), first_at: `2026-10-${String(1 + (i % 28)).padStart(2, "0")}T05:00:00Z`, lead_type: i % 4 ? "DATA" : "LEAD",
-    source: i % 2 ? "99acres" : "Meta", project: "P1", status: "CONNECTED", stage: i % 3 ? "FOLLOW_UP" : "LEADS", available: true, positive_now: true,
-    got_by: B, got_by_name: "Employee B", owners: steps.length, steps };
-});
-const pick = (view: string, employee: string | null) => ROWS.filter((r) => (r.steps as Row[]).some((s) => s.in_range && (!employee || s.employee_id === employee)
+// Journeys: A fresh, no positive, recycled to B who connects (A missed, B won); every 5th also via D; every 7th
+// A had a positive too (assist, both sides). 260 by default; 1,234 for the big Excel (3 pages of 500).
+function makeRows(n: number): Row[] {
+  return Array.from({ length: n }, (_, i) => {
+    const assist = i % 7 === 3, viaD = i % 5 === 1;
+    const steps = [step(1, A, "Employee A", { ended_at: "2026-10-05T05:00:00Z", move: "system", positive: assist, pos_at: assist ? "2026-10-03T05:00:00Z" : null,
+      result: assist ? "CONNECTED" : "NOT_CONNECTED", missed: !assist, assist })];
+    if (viaD) steps.push(step(2, D, "Employee D", { ended_at: "2026-10-09T05:00:00Z", move: "system", excused: i % 10 === 1 ? "leave" : null }));
+    steps.push(step(steps.length + 1, B, "Employee B", { positive: true, pos_at: "2026-10-12T05:00:00Z", result: i % 3 ? "FOLLOWUP" : "CONNECTED", won: !assist, assist }));
+    const id = `${String(i).padStart(8, "0")}-0000-4000-8000-000000000000`;
+    return { lead_id: id, lead_short: id.slice(0, 8), first_at: `2026-10-${String(1 + (i % 28)).padStart(2, "0")}T05:00:00Z`, lead_type: i % 4 ? "DATA" : "LEAD",
+      source: i % 2 ? "99acres" : "Meta", project: "P1", status: "CONNECTED", stage: i % 3 ? "FOLLOW_UP" : "LEADS", available: true, positive_now: true,
+      got_by: B, got_by_name: "Employee B", owners: steps.length, steps, lead_name: `Client ${i}`, mobile: `+9190000${String(i).padStart(5, "0")}` };
+  });
+}
+export const ROWS = makeRows(260);
+const BIG = makeRows(1234);
+// Summary counts that match a row set exactly (Excel lists = counts).
+export function countsOf(rows: Row[]) {
+  const by = [A, B, D].map((id) => {
+    const mine = rows.filter((r) => (r.steps as Row[]).some((s) => s.in_range && s.employee_id === id));
+    const flag = (k: string) => mine.filter((r) => (r.steps as Row[]).some((s) => s.in_range && s.employee_id === id && s[k])).length;
+    const base = EMPS.find((e) => e.employee_id === id)!;
+    return { ...base, leads: mine.length, assignments: mine.length, missed: flag("missed"), won: flag("won"), assist: flag("assist"), positive: flag("positive") };
+  });
+  const sum = (k: string) => by.reduce((x, e) => x + Number(e[k as keyof typeof e] ?? 0), 0);
+  return { by, team: { ...TEAM, leads: sum("leads"), missed: sum("missed"), won: sum("won"), assist: sum("assist"), positive: sum("positive"), distinct_leads: rows.length } };
+}
+const pick = (rowsIn: Row[], view: string, employee: string | null) => rowsIn.filter((r) => (r.steps as Row[]).some((s) => s.in_range && (!employee || s.employee_id === employee)
   && (view === "all" || view === "positive" ? (view === "all" || s.positive) : view === "not_counted" ? !!s.excused : !!s[view])));
+export interface JourneyMode { consistent?: boolean; big?: boolean; exportMissing?: boolean }
 
-export function journeyAnswer(rpc: string, body: Row): Row {
+export function journeyAnswer(rpc: string, body: Row, mode: JourneyMode = {}): Row | null {
   const f = (body.p_filters ?? {}) as Row;
   if (live) {
     if (rpc === "get_perf_journey") return live.report;
+    if (rpc === "get_perf_journey_export") { const o = Number(body.p_offset ?? 0); return { total: live.rows.length, rows: live.rows.slice(o, o + Number(body.p_limit ?? 500)) }; }
     const rows = live.rows.filter((r) => (r.steps as Row[]).some((s) => s.in_range && (!body.p_employee || s.employee_id === body.p_employee) && (body.p_view === "all" || !!s[String(body.p_view)])));
     const off = Number(body.p_offset ?? 0), lim = Number(body.p_limit ?? 200);
     return { view: body.p_view, employee_id: body.p_employee ?? null, total: rows.length, rows: rows.slice(off, off + lim) };
   }
-  const emps = Array.isArray(f.employee_ids) ? EMPS.filter((e) => (f.employee_ids as string[]).includes(String(e.employee_id))) : EMPS;
+  const set = mode.big ? BIG : ROWS;
+  const cc = mode.consistent || mode.big ? countsOf(set) : null;
+  const all = cc ? cc.by : EMPS;
+  const emps = Array.isArray(f.employee_ids) ? all.filter((e) => (f.employee_ids as string[]).includes(String(e.employee_id))) : all;
+  const strip = (r: Row) => { const { lead_name: _n, mobile: _m, ...rest } = r; void _n; void _m; return rest; };
+  if (rpc === "get_perf_journey_export") {
+    if (mode.exportMissing) return null;
+    const off = Number(body.p_offset ?? 0), lim = Number(body.p_limit ?? 500);
+    return { total: set.length, rows: set.slice(off, off + lim) };
+  }
   if (rpc === "get_perf_journey")
     return {
       api: "journey1", def_version: 3, from: body.p_from, to: body.p_to, today: "2026-11-26", as_of: "2026-11-26T04:07:00Z",
-      by_employee: emps, team: TEAM, journeys: { view: "all", employee_id: null, total: ROWS.length, rows: ROWS.slice(0, 50) },
+      by_employee: emps, team: cc ? cc.team : TEAM, journeys: { view: "all", employee_id: null, total: set.length, rows: set.slice(0, 50).map(strip) },
       definitions: [
         { key: "journey_missed", label: "Missed by me", rule: "My assignment had no positive; the system moved the lead on (recycle); I had it at least 3 days or did at least 1 call or action on it; and someone else made it positive within 60 days after it left me." },
         { key: "journey_pct", label: "% of leads given", rule: "Each count divided by the leads given in that row (each lead once). Never over 100%." },
@@ -55,7 +82,7 @@ export function journeyAnswer(rpc: string, body: Row): Row {
       ],
       options: { employees: EMPS.map((e) => ({ id: e.employee_id, name: e.name, active: e.active })), sources: ["99acres", "Meta"] }
     };
-  const rows = pick(String(body.p_view ?? "all"), (body.p_employee as string | null) ?? null);
+  const rows = pick(set, String(body.p_view ?? "all"), (body.p_employee as string | null) ?? null);
   const off = Number(body.p_offset ?? 0), lim = Number(body.p_limit ?? 200);
-  return { view: body.p_view, employee_id: body.p_employee ?? null, total: rows.length, rows: rows.slice(off, off + lim) };
+  return { view: body.p_view, employee_id: body.p_employee ?? null, total: rows.length, rows: rows.slice(off, off + lim).map(strip) };
 }

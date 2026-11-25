@@ -11,6 +11,7 @@ import {
   type JourneyCountKey, type JourneyEmpRow, type JourneyRow, type JourneyStep
 } from "@/lib/perfJourney";
 import { downloadJourneyExcel } from "@/lib/perfJourneyExcel";
+import { reportClientError } from "@/lib/reportClientError";
 import type { usePerfJourney } from "@/lib/usePerfJourney";
 
 type Hook = ReturnType<typeof usePerfJourney>;
@@ -20,22 +21,28 @@ const nf = (x: unknown) => (Number(x ?? 0) || 0).toLocaleString("en-IN");
 export default function PerfJourney({ j, filterText, nameOf }: { j: Hook; filterText: string; nameOf: (id: string) => string }) {
   const [def, setDef] = useState<string | null>(null);
   const [perEmployee, setPerEmployee] = useState(true);
-  const [excel, setExcel] = useState<{ busy: boolean; done: number; total: number; error: boolean }>({ busy: false, done: 0, total: 0, error: false });
+  const [excel, setExcel] = useState<{ busy: boolean; done: number; total: number; error: string | null; result: { missed: number; won: number; assist: number; all: number; ok: boolean } | null }>({ busy: false, done: 0, total: 0, error: null, result: null });
   const r = j.data;
   const defs = useMemo(() => Object.fromEntries((r?.definitions ?? []).map((d) => [d.key, d])), [r]);
   const name = (e: JourneyEmpRow) => `${e.name ?? nameOf(e.employee_id)}${e.active === false ? " (inactive)" : ""}`;
   const open = (k: JourneyCountKey, who: JourneyEmpRow | null) => void j.openDrill(COUNT_VIEW[k], who?.employee_id ?? null, `${COUNT_LABEL[k]} · ${who ? name(who) : "Everyone"}`);
   const team = r?.team ?? null;
 
+  // Excel: pages of 500 with progress; leaving the page while it runs asks first; a failure says how far it got.
   const runExcel = async () => {
     if (!r) return;
-    setExcel({ busy: true, done: 0, total: r.journeys.total, error: false });
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    setExcel({ busy: true, done: 0, total: r.journeys.total, error: null, result: null });
     try {
-      const { rows, total } = await j.allRows((done, total) => setExcel((x) => ({ ...x, done, total })));
-      await downloadJourneyExcel({ report: r, rows, total, filterText, perEmployee, nameOf }, `lead-journey-${r.from}-to-${r.to}.xlsx`);
-      setExcel({ busy: false, done: rows.length, total, error: false });
-    } catch {
-      setExcel((x) => ({ ...x, busy: false, error: true }));
+      const { rows, total, withContacts } = await j.allRows((done, total) => setExcel((x) => ({ ...x, done, total })));
+      const res = await downloadJourneyExcel({ report: r, rows, total, filterText, perEmployee, nameOf, withContacts }, `lead-journey-${r.from}-to-${r.to}.xlsx`);
+      if (res.problems.length) reportClientError("perf-journey:excel-check", res.problems.slice(0, 3).join("; "), "warning");
+      setExcel({ busy: false, done: rows.length, total, error: null, result: { ...res.counts, ok: !res.problems.length } });
+    } catch (e) {
+      setExcel((x) => ({ ...x, busy: false, error: e instanceof Error ? e.message : "The Excel file could not be made." }));
+    } finally {
+      window.removeEventListener("beforeunload", warn);
     }
   };
 
@@ -55,7 +62,7 @@ export default function PerfJourney({ j, filterText, nameOf }: { j: Hook; filter
       </Banner>
 
       <section className={`${CARD} flex flex-wrap items-center justify-between gap-3`} aria-label="Excel" data-testid="lj-excel">
-        <p className="text-[13px] text-slate-600">Excel: Summary, Journeys and Definitions, with the filters above. Prints landscape, fit to width, with page numbers.</p>
+        <p className="text-[13px] text-slate-600">Excel: Summary, the Missed by me / Won from others / Assists lead lists, All journeys and Definitions, with the filters above. Prints landscape, fit to width, with page numbers.</p>
         <div className="flex flex-wrap items-center gap-2">
           <label className={`flex min-h-11 items-center gap-2 rounded-xl px-2 text-[15px] text-slate-800 ${FOCUS}`}>
             <input type="checkbox" className="h-5 w-5 accent-blue-700" checked={perEmployee} onChange={(e) => setPerEmployee(e.target.checked)} data-testid="lj-per-employee" />
@@ -65,7 +72,14 @@ export default function PerfJourney({ j, filterText, nameOf }: { j: Hook; filter
             {excel.busy ? `Preparing… ${nf(excel.done)} / ${nf(excel.total)}` : "Download Excel"}
           </button>
         </div>
-        {excel.error && <Banner tone="red" icon="!" testId="lj-excel-error">The Excel file could not be made. Please try again.</Banner>}
+        {excel.busy && <p className="w-full text-[13px] text-slate-600" data-testid="lj-excel-progress">Loading leads {nf(excel.done)} of {nf(excel.total)} (500 at a time). Keep this page open.</p>}
+        {excel.error && <Banner tone="red" icon="!" testId="lj-excel-error">{excel.error} Please try again.</Banner>}
+        {excel.result && (
+          <Banner tone={excel.result.ok ? "green" : "amber"} icon={excel.result.ok ? "✓" : "!"} testId="lj-excel-done">
+            Excel ready: {nf(excel.result.all)} leads · Missed by me {nf(excel.result.missed)} · Won from others {nf(excel.result.won)} · Assists {nf(excel.result.assist)}.{" "}
+            {excel.result.ok ? "Lists match the counts." : "Lists do not match the counts; please tell the admin team."} Contains customer data: do not share.
+          </Banner>
+        )}
       </section>
 
       {r.journeys.total === 0 && r.by_employee.length === 0 ? (

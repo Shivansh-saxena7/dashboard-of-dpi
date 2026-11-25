@@ -182,3 +182,82 @@ export function sheetName(name: string, used: Set<string>): string {
   used.add(s.toLowerCase());
   return s;
 }
+
+// ---- Excel lists (2026-11-27): one row per (employee, lead) for Missed by me / Won from others / Assist. ----
+// Export rows may carry the lead's name / mobile and each step's positive date (get_perf_journey_export); without them
+// (older database) the lists still build, with the lead id only and no dates.
+export type ExportStep = JourneyStep & { pos_at?: string | null };
+export type ExportRow = Omit<JourneyRow, "steps" | "got_by" | "got_by_name" | "positive_now"> & { lead_name?: string | null; mobile?: string | null; steps: ExportStep[]; got_by?: string | null; got_by_name?: string | null; positive_now?: boolean };
+export const CUSTOMER_DATA_NOTE = "Contains customer data: do not share";
+const DAY = 86400e3;
+const ymd = (iso: string | null | undefined) => (iso ? new Date(Date.parse(iso) + 5.5 * 3600e3).toISOString().slice(0, 10) : "");
+const daysBetween = (a: string | null | undefined, b: string | null | undefined) => (a && b ? Math.max(0, Math.round((Date.parse(b) - Date.parse(a)) / DAY)) : "");
+const who = (s: ExportStep | undefined) => (s ? s.name ?? s.employee_id.slice(0, 8) : "");
+const LEAD_COLS = ["Lead name", "Mobile", "Lead id", "Source", "Lead / Data"];
+const leadCols = (r: ExportRow) => [r.lead_name ?? "", r.mobile ?? "", r.lead_short, r.source ?? "–", typeWord(r.lead_type)];
+const within60 = (from: string | null | undefined, at: string | null | undefined) => !!from && !!at && Date.parse(at) <= Date.parse(from) + 60 * DAY;
+
+export const MISSED_HEAD = ["Employee (missed by)", ...LEAD_COLS, "Came as", "Their result", "Calls (approx)", "Days held", "Moved by", "Made positive by", "Positive result", "Positive date", "Days to positive"];
+export const WON_HEAD = ["Employee (won by)", ...LEAD_COLS, "Came as", "Before: employee", "Before: result", "Before: calls (approx)", "Before: days held", "Won result", "Won date", "Days after it left them"];
+export const ASSIST_HEAD = ["Employee", ...LEAD_COLS, "Their result", "Their positive date", "Other employee", "Other result", "Other positive date", "Days between"];
+export const EMP_HEAD = ["Type", ...LEAD_COLS, "Came as", "Their result", "Calls (approx)", "Days held", "Other employee", "Other result", "Date", "Days"];
+export type ListKind = "missed" | "won" | "assist";
+export interface ListRow { kind: ListKind; employee_id: string; lead_id: string; cells: (string | number)[]; emp: (string | number)[] }
+export const KIND_LABEL: Record<ListKind, string> = { missed: "Missed by me", won: "Won from others", assist: "Assist" };
+
+// Every (employee, lead) once per kind, in the rows' order.
+export function buildLists(rows: ExportRow[]): Record<ListKind, ListRow[]> {
+  const out: Record<ListKind, ListRow[]> = { missed: [], won: [], assist: [] };
+  const seen = new Set<string>();
+  for (const r of rows) {
+    const steps = r.steps;
+    for (const s of steps) {
+      if (!s.in_range) continue;
+      for (const kind of ["missed", "won", "assist"] as ListKind[]) {
+        if (!s[kind]) continue;
+        const key = `${kind}|${s.employee_id}|${r.lead_id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const L = leadCols(r);
+        if (kind === "missed") {
+          const o = steps.find((x) => x.seq > s.seq && x.employee_id !== s.employee_id && x.positive && (!x.pos_at || within60(s.ended_at, x.pos_at)));
+          const move = [moveWord(s.move), excusedWord(s.excused)].filter(Boolean).join(", ");
+          out.missed.push({ kind, employee_id: s.employee_id, lead_id: r.lead_id,
+            cells: [who(s), ...L, originWordJ(s.origin), resultWord(s.result), s.calls, s.days == null ? "" : Math.round(Number(s.days)), move, who(o), o ? resultWord(o.result) : "", ymd(o?.pos_at), daysBetween(s.ended_at, o?.pos_at)].map(safe),
+            emp: [KIND_LABEL[kind], ...L, originWordJ(s.origin), resultWord(s.result), s.calls, s.days == null ? "" : Math.round(Number(s.days)), who(o), o ? resultWord(o.result) : "", ymd(o?.pos_at), daysBetween(s.ended_at, o?.pos_at)].map(safe) });
+        } else if (kind === "won") {
+          const p = [...steps].reverse().find((x) => x.seq < s.seq && x.employee_id !== s.employee_id && !x.positive);
+          out.won.push({ kind, employee_id: s.employee_id, lead_id: r.lead_id,
+            cells: [who(s), ...L, originWordJ(s.origin), who(p), p ? resultWord(p.result) : "", p ? p.calls : "", p?.days == null ? "" : Math.round(Number(p.days)), resultWord(s.result), ymd(s.pos_at), daysBetween(p?.ended_at, s.pos_at)].map(safe),
+            emp: [KIND_LABEL[kind], ...L, originWordJ(s.origin), resultWord(s.result), s.calls, s.days == null ? "" : Math.round(Number(s.days)), who(p), p ? resultWord(p.result) : "", ymd(s.pos_at), daysBetween(p?.ended_at, s.pos_at)].map(safe) });
+        } else {
+          const later = steps.find((x) => x.seq > s.seq && x.employee_id !== s.employee_id && x.positive && (!x.pos_at || within60(s.ended_at, x.pos_at)));
+          const earlier = [...steps].reverse().find((x) => x.seq < s.seq && x.employee_id !== s.employee_id && x.positive && (!s.pos_at || within60(x.ended_at, s.pos_at)));
+          const o = later ?? earlier;
+          const gap = later ? daysBetween(s.pos_at, later.pos_at) : daysBetween(earlier?.pos_at, s.pos_at);
+          out.assist.push({ kind, employee_id: s.employee_id, lead_id: r.lead_id,
+            cells: [who(s), ...L, resultWord(s.result), ymd(s.pos_at), who(o), o ? resultWord(o.result) : "", ymd(o?.pos_at), gap].map(safe),
+            emp: [KIND_LABEL[kind], ...L, originWordJ(s.origin), resultWord(s.result), s.calls, s.days == null ? "" : Math.round(Number(s.days)), who(o), o ? resultWord(o.result) : "", ymd(s.pos_at), gap].map(safe) });
+        }
+      }
+    }
+  }
+  return out;
+}
+// Lists vs the summary counts, per employee: [] when every list matches its count.
+export function listCheck(lists: Record<ListKind, ListRow[]>, emps: { employee_id: string; missed: number; won: number; assist: number }[]): string[] {
+  const bad: string[] = [];
+  for (const e of emps)
+    for (const k of ["missed", "won", "assist"] as ListKind[]) {
+      const n = lists[k].filter((x) => x.employee_id === e.employee_id).length;
+      if (n !== Number(e[k])) bad.push(`${e.employee_id.slice(0, 8)} ${k}: list ${n}, count ${e[k]}`);
+    }
+  return bad;
+}
+// All journeys sheet: the flat row with the lead's name and mobile after the id.
+export const ALL_HEAD = [FLAT_HEAD[0], "Lead name", "Mobile", ...FLAT_HEAD.slice(1)];
+export const allRow = (r: ExportRow) => {
+  const last = [...r.steps].reverse().find((s) => s.positive);
+  const f = flatJourney({ ...r, got_by: r.got_by ?? last?.employee_id ?? null, got_by_name: r.got_by_name ?? last?.name ?? null, positive_now: !!r.positive_now } as JourneyRow);
+  return [f[0], safe(r.lead_name ?? ""), safe(r.mobile ?? ""), ...f.slice(1)];
+};

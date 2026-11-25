@@ -217,19 +217,30 @@ check("SQL give and v3: drafts, flag default off", v3.includes("DRAFT, NOT APPLI
   const sr = pj.summaryRow("A", { leads: 10, assignments: 11, positive: 2, moved_no_pos: 6, missed: 3, not_counted: 1, won: 0, assist: 1, calls_avg: 1.5, first_action_h: 30 }, { leads: 100, missed: 20 });
   eq("journey summary: counts first, every % at the end (team average included)", [sr.length === pj.SUMMARY_HEAD.length, pj.SUMMARY_HEAD.slice(-4), sr.slice(-4), sr[10], sr[11]], [true, ["Missed %", "Team avg missed %", "Won %", "Assist %"], ["30.0%", "20.0%", "0.0%", "10.0%"], "1.3 d", "Low sample"]);
   eq("journey: one employee's sheet = journeys where they had an assignment in the range", [pj.rowsOf([jr], "e1").length, pj.rowsOf([jr], "e9").length], [1, 0]);
+  const ex = { ...jr, lead_name: "Client X", mobile: "+919999999999", steps: [step({ pos_at: null }), step({ seq: 2, employee_id: "e2", name: "B", origin: "RECYCLED", ended_at: null, positive: true, pos_at: "2026-10-20T04:30:00Z", result: "CONNECTED", move: null, missed: false, won: true })] };
+  const ls = pj.buildLists([ex, ex]);
+  eq("journey lists: one row per (employee, lead); missed row names who made it positive, date and days; won row names who had it before", [ls.missed.length, ls.won.length, ls.assist.length, ls.missed[0].cells.slice(0, 3), ls.missed[0].cells.slice(-4), ls.won[0].cells[7], ls.missed[0].cells.length === pj.MISSED_HEAD.length, ls.won[0].cells.length === pj.WON_HEAD.length, ls.missed[0].emp.length === pj.EMP_HEAD.length],
+    [1, 1, 0, ["A", "Client X", "'+919999999999"], ["B", "Connected", "2026-10-20", 10], "A", true, true, true]);
+  eq("journey lists vs counts", [pj.listCheck(ls, [{ employee_id: "e1", missed: 1, won: 0, assist: 0 }, { employee_id: "e2", missed: 0, won: 1, assist: 0 }]), pj.listCheck(ls, [{ employee_id: "e1", missed: 2, won: 0, assist: 0 }]).length], [[], 1]);
+  const lx = read("supabase/sql/2026-11-27_perf_journey_export.sql");
+  check("SQL export: draft, additive, admin check, range cap, 500 page cap, helper revoked, rollback", lx.includes("DRAFT, NOT APPLIED") && !/alter table|drop |create table|delete from|update public/i.test(code(lx))
+    && lx.includes("raise exception 'perf report: admin only'") && lx.includes("p_to - p_from > 800") && lx.includes("least(greatest(coalesce(p_limit, 500), 1), 500)")
+    && lx.includes("revoke all on function public.perf_journey_export_json(date, date, jsonb, int, int) from public, anon, authenticated;") && fs.existsSync(path.join(root, "supabase/sql/2026-11-27_perf_journey_export_rollback.sql")));
+  check("Excel: export RPC first, the older journeys RPC if the function is missing; a failure says how far it got", read("lib/usePerfJourney.ts").includes('supabase.rpc("get_perf_journey_export"') && read("lib/usePerfJourney.ts").includes("missingFn(res.error)") && read("lib/usePerfJourney.ts").includes("No file was made."));
   const used = new Set(["summary"]);
   eq("journey: Excel sheet names safe and unique", [pj.sheetName("Summary", used), pj.sheetName("A/B: [x]", used), pj.sheetName("A/B: [x]", used)], ["Summary 2", "A B   x", "A B   x 2"]);
 
   const jf = ["components/PerfJourney.tsx", "lib/usePerfJourney.ts", "lib/perfJourneyExcel.ts", "lib/perfJourney.ts"].map(read).join("\n");
-  eq("journey files: only the two journey RPCs", rpcNames(jf), ["get_perf_journey", "get_perf_journey_rows"]);
+  eq("journey files: only the journey RPCs (page, rows, Excel export)", rpcNames(jf), ["get_perf_journey", "get_perf_journey_export", "get_perf_journey_rows"]);
   check("journey files: no direct table reads, no polling, no realtime, no writes, no id list in a URL", !/\.from\("|setInterval\(|\.channel\(|\.(insert|update|upsert|delete)\(|\.in\(/.test(jf));
   check("journey files: English, no purple / violet / fuchsia, no dark mode, no lead cards", !/purple|violet|fuchsia|dark:|LeadCard|DataCard/i.test(jf));
   check("journey: one RPC per filter change, only while its tab is open; the report reads only on its own tab",
     jf.includes("if (enabled) void load();") && jf.includes("if (my !== seq.current) return;") && read("lib/usePerfJourney.ts").includes("if (rangeProblem(f, t)) return;")
     && read("components/PerfReport.tsx").includes('usePerfReport(range.from, range.to, filters, tab === "report")') && read("components/PerfReport.tsx").includes('usePerfJourney(range.from, range.to, filters, tab === "journey")'));
   check("journey: fairness note, approx label, low sample label, % of leads given", jf.includes('FAIR_NOTE = "A signal, not a verdict."') && jf.includes("{FAIR_NOTE}") && jf.includes("(approx)") && jf.includes(">Low sample</Pill>") && jf.includes("% of leads given"));
-  check("journey: no client name or number on the page or in Excel (lead short id only)", !/lead_name|mobile|phone/i.test(jf) && jf.includes("r.lead_short"));
-  check("journey Excel: landscape, fit to width, header repeats, Page X of N, definitions sheet", jf.includes('orientation: "landscape"') && jf.includes("fitToWidth: 1") && jf.includes("printTitlesRow") && jf.includes("Page &P of &N") && jf.includes('addWorksheet("Definitions")'));
+  check("journey: no client name or number on the page (Excel only, admin-only, marked)", !/lead_name|mobile|phone/i.test(read("components/PerfJourney.tsx")) && read("components/PerfJourney.tsx").includes("r.lead_short") && jf.includes('CUSTOMER_DATA_NOTE = "Contains customer data: do not share"') && read("lib/perfJourneyExcel.ts").includes("ws.getCell(\"A1\").value = CUSTOMER_DATA_NOTE;"));
+  check("journey Excel: landscape, fit to width, header repeats, Page X of N, definitions sheet", jf.includes('orientation: "landscape"') && jf.includes("fitToWidth: 1") && jf.includes("printTitlesRow") && jf.includes("Page &P of &N") && jf.includes('sheet(wb, "Definitions"') && (jf.match(/filterOn\(/g) || []).length >= 4
+    && jf.includes('"Missed by me", MISSED_HEAD') && jf.includes('"Won from others", WON_HEAD') && jf.includes('"Assists", ASSIST_HEAD') && jf.includes('"All journeys"'));
   check("journey errors are reported", (jf.match(/reportClientError\(/g) || []).length >= 3);
   const lj = read("supabase/sql/2026-11-26_perf_lead_journey.sql");
   const ljc = code(lj);

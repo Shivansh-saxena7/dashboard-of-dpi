@@ -6,7 +6,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { reportClientError } from "@/lib/reportClientError";
 import { filtersJson, rangeProblem, type Filters } from "@/lib/perfReport";
-import { JOURNEY_EXCEL_MAX, JOURNEY_EXCEL_PAGE, JOURNEY_PAGE, type JourneyPage, type JourneyReport, type JourneyView } from "@/lib/perfJourney";
+import { JOURNEY_EXCEL_MAX, JOURNEY_EXCEL_PAGE, JOURNEY_PAGE, type ExportRow, type JourneyPage, type JourneyReport, type JourneyView } from "@/lib/perfJourney";
+
+const missingFn = (e: { code?: string; message?: string } | null) => !!e && (e.code === "PGRST202" || e.code === "42883" || /could not find the function/i.test(e.message || ""));
 
 export interface JourneyDrill { view: JourneyView; employee: string | null; title: string; page: JourneyPage | null; loading: boolean; error: boolean }
 
@@ -66,25 +68,37 @@ export function usePerfJourney(from: string, to: string, filters: Filters, enabl
     setDrill(null);
   }, []);
 
-  // Every journey for the Excel file, 500 a call (at most 20,000).
+  // Every journey for the Excel file, 500 a call (at most 20,000). The export RPC adds the lead's name / mobile and the
+  // positive dates; on an older database (function missing) it falls back to the journeys RPC (lead id only).
   const allRows = useCallback(
     async (onProgress?: (done: number, total: number) => void) => {
-      const rows: JourneyPage["rows"] = [];
+      const [f, t, flt] = JSON.parse(key) as [string, string, Filters];
+      const rows: ExportRow[] = [];
       let total = Infinity;
+      let withContacts = true;
       for (let offset = 0; offset < total && offset < JOURNEY_EXCEL_MAX; offset += JOURNEY_EXCEL_PAGE) {
-        const { data, error } = await fetchRows("all", null, offset, JOURNEY_EXCEL_PAGE);
-        if (error || !data) {
-          reportClientError("perf-journey:excel", error?.message ?? "empty answer", "warning");
-          throw new Error("load failed");
+        let res: { data: unknown; error: { message: string; code?: string } | null } | null = withContacts
+          ? await supabase.rpc("get_perf_journey_export", { p_from: f, p_to: t, p_filters: filtersJson(flt, 4), p_limit: JOURNEY_EXCEL_PAGE, p_offset: offset })
+          : null;
+        if (!res || (offset === 0 && missingFn(res.error))) {
+          withContacts = false;
+          res = await fetchRows("all", null, offset, JOURNEY_EXCEL_PAGE);
+        }
+        if (!res) throw new Error("No answer. No file was made.");
+        const data = res.data as { total: number; rows: ExportRow[] } | null;
+        if (res.error || !data) {
+          const why = res.error?.message ?? "empty answer";
+          reportClientError("perf-journey:excel", why, "warning");
+          throw new Error(`Stopped after ${rows.length.toLocaleString("en-IN")} of ${Number.isFinite(total) ? total.toLocaleString("en-IN") : "?"} leads (${why}). No file was made.`);
         }
         total = data.total;
         rows.push(...data.rows);
         onProgress?.(rows.length, total);
         if (!data.rows.length) break;
       }
-      return { rows, total };
+      return { rows, total, withContacts };
     },
-    [fetchRows]
+    [fetchRows, key]
   );
 
   return { ...state, invalid: rangeProblem(from, to), retry: load, drill, openDrill, closeDrill, allRows };
