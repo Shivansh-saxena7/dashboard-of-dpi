@@ -101,7 +101,7 @@ export default function PerfJourney({ j, filterText, nameOf }: { j: Hook; filter
                   <tr className="border-b border-slate-200 text-[13px] text-slate-600">
                     <th className="px-1 py-2 text-left font-bold">Employee</th>
                     {COUNTS.map((k) => <th key={k} className="px-1 py-2 text-right font-bold">{COUNT_LABEL[k]}</th>)}
-                    <th className="px-1 py-2 text-right font-bold">Calls / lead <span className="font-normal">(approx)</span></th>
+                    <th className="px-1 py-2 text-right font-bold">Calls / assignment <span className="font-normal">(approx)</span></th>
                     <th className="px-1 py-2 text-right font-bold">First action <span className="font-normal">(approx)</span></th>
                     <th className="bg-slate-50 px-1 py-2 text-right font-bold">Missed</th>
                     <th className="bg-slate-50 px-1 py-2 text-right font-bold" data-testid="lj-team-avg-head">Team avg</th>
@@ -167,7 +167,7 @@ export default function PerfJourney({ j, filterText, nameOf }: { j: Hook; filter
                         </button>
                       ))}
                     </div>
-                    <p className="mt-1 text-[13px] text-slate-600">Team avg missed {teamAvg(team)} · calls / lead {e.calls_avg == null ? "–" : Number(e.calls_avg).toFixed(1)} (approx)</p>
+                    <p className="mt-1 text-[13px] text-slate-600">Team avg missed {teamAvg(team)} · calls / assignment {e.calls_avg == null ? "–" : Number(e.calls_avg).toFixed(1)} (approx)</p>
                   </div>
                 );
               })}

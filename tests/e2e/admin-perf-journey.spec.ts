@@ -54,7 +54,7 @@ test("summary: counts, % of leads given never over 100, team average, Low sample
     await expect(page.getByTestId(`lj-row-${A}`)).toHaveAttribute("data-low", "0");
     await expect(page.getByTestId(`lj-row-${B}`)).toContainText("(inactive)");
     await expect(page.getByTestId("lj-team")).toContainText("17.9%");
-    await expect(page.getByTestId("lj-table")).toContainText("Calls / lead (approx)");
+    await expect(page.getByTestId("lj-table")).toContainText("Calls / assignment (approx)");
   } else {
     await expect(page.getByTestId(`lj-card-${D}`)).toHaveAttribute("data-low", "1");
     await expect(page.getByTestId(`lj-card-cell-${A}-missed`)).toContainText("25.0%");
@@ -77,6 +77,7 @@ test("journeys and drill-down: owners in order, no client name, tap a number -> 
   await expect(page.getByTestId("lj-journeys")).toContainText("Latest 50 of 260");
   await page.getByTestId(desktop(info) ? `lj-cell-${A}-missed` : `lj-card-cell-${A}-missed`).click();
   await expect(page.getByTestId("lj-drill")).toBeVisible();
+  await expect.poll(() => journeyRowCalls(ctx).length).toBeGreaterThan(0);
   const call = journeyRowCalls(ctx).at(-1)!;
   expect([call.body.p_view, call.body.p_employee, call.body.p_limit, call.body.p_offset]).toEqual(["missed", A, 200, 0]);
   await expect(page.getByTestId("lj-drill-total")).toContainText("Missed by me");

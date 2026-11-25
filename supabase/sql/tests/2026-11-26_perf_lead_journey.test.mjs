@@ -83,6 +83,7 @@ const leads = {
   8: ["LEAD", [[A, "10-07T10:00", "F", 1], [B, "10-09T10:00", "R", 1], [A, "10-13T10:00", "R", 1], [C, "10-17T10:00", "R", 1]]],
   9: ["DATA", [[A, "10-08T10:00", "F", 1], [B, "10-12T10:00", "R", 1]]],
   10: ["LEAD", [[A, "10-09T10:00", "F", 1], [B, "10-11T10:00", "S", 1]]],
+  11: ["LEAD", [[A, "09-01T10:00", "F", 1], [B, "09-05T10:00", "R", 1], [A, "09-12T10:00", "R", 1]]],
 };
 let sql = "";
 for (const [i, [type, st]] of Object.entries(leads)) {
@@ -105,6 +106,7 @@ sql += ev(7, 0, "STATUS_UPDATE", "NOT_CONNECTED", "10-07T12:00", GONE) + ev(7, 1
 sql += ev(8, 3, "STATUS_UPDATE", "CONNECTED", "10-18T12:00", C);
 sql += ev(9, 1, "STATUS_UPDATE", "CONVERTED", "10-14T12:00", B);
 sql += ev(10, 1, "STATUS_UPDATE", "CONNECTED", "10-12T12:00", B);
+sql += `insert into site_visits (lead_id, employee_id, event_type, created_at, verified_at, denied_at) values ('${L(11)}', '${A}', 'VISIT', '${T("09-15T12:00")}', null, null);\n`;
 sql += `insert into employee_leave_periods (employee_id, start_date, end_date) values ('${LEAVE}', '2026-10-11', '2026-10-12');\n`;
 await db.exec(sql);
 const refresh = async () => { await asUser(null); await db.query("select perf_refresh()"); await asUser(ADMU); };
@@ -122,12 +124,12 @@ const oct = await rep("2026-10-01", "2026-10-31");
 eq("api journey1, definitions v3 (missed rule names 60 days), low sample", [oct.api, oct.def_version, oct.definitions.some((d) => d.key === "journey_missed" && /60 days/.test(d.rule)), row(oct, A).low_sample], ["journey1", 3, true, true]);
 eq("A: 7 leads / 8 assignments (lead 8 twice); 1 positive; 6 moved on; missed 3 (leads 1, 8, 9); not counted 3 (admin, under 3 days, give back); assist 1 (lead 2)",
   pick(row(oct, A)), [7, 8, 1, 6, 3, 3, 0, 1]);
-eq("B: 9 leads; 8 positive; won from others 7 (not lead 2: A had a positive); missed 1 (lead 8, C won it)", pick(row(oct, B)), [9, 9, 8, 1, 1, 0, 7, 0]);
+eq("B: 9 leads; 8 positive; won from others 7 (not lead 2: A had a positive); missed 1 (lead 8, C won it); assist 1 (lead 2, both sides)", pick(row(oct, B)), [9, 9, 8, 1, 1, 0, 7, 1]);
 eq("C: lead 8 won from others", pick(row(oct, C)), [1, 1, 1, 0, 0, 0, 1, 0]);
 eq("on leave when moved: not missed, not counted", pick(row(oct, LEAVE)), [1, 1, 0, 1, 0, 1, 0, 0]);
 eq("inactive (moved after the last action): not missed, not counted", pick(row(oct, GONE)), [1, 1, 0, 1, 0, 1, 0, 0]);
 eq("A %: missed 3 of 7 leads = 42.9; assist 14.3", [row(oct, A).pct.missed, row(oct, A).pct.assist], [42.9, 14.3]);
-eq("team: missed 4, won 8, assist 1", [oct.team.missed, oct.team.won, oct.team.assist].map(Number), [4, 8, 1]);
+eq("team: missed 4, won 8, assist 2", [oct.team.missed, oct.team.won, oct.team.assist].map(Number), [4, 8, 2]);
 eq("drill A missed = leads 1, 8, 9", leadNo(await rows("2026-10-01", "2026-10-31", {}, "missed", A)), [1, 8, 9]);
 eq("drill A not counted = leads 3, 4, 10", leadNo(await rows("2026-10-01", "2026-10-31", {}, "not_counted", A)), [3, 4, 10]);
 eq("drill A assist = lead 2", leadNo(await rows("2026-10-01", "2026-10-31", {}, "assist", A)), [2]);
@@ -137,6 +139,9 @@ eq("lead 8 journey: A, B, A, C; C got it; moves by the system; no client name in
   [[["A", "NO_RESULT", "system"], ["B", "NO_RESULT", "system"], ["A", "NO_RESULT", "system"], ["C", "CONNECTED", null]], true, false]);
 eq("journeys: first page in the main answer, one row per lead (9 leads given in October)", [oct.journeys.total, oct.journeys.rows.length], [9, 9]);
 
+const sep = await rows("2026-09-01", "2026-09-30", {}, "all", null);
+const j11 = sep.rows.find((x) => x.lead_id === L(11));
+eq("A, B, A on lead 11, visit in A's second assignment: credited there only (not to the first); B missed it (A won it back)", j11.steps.map((s) => [s.positive, s.missed, s.won]), [[false, false, false], [false, true, false], [true, false, true]]);
 const aug = await rep("2026-08-01", "2026-08-31");
 eq("August: positive 81 days after it left A (66 after B) => nobody missed; C won it", [pick(row(aug, A)), pick(row(aug, B)), Number(row(aug, C).won)], [[1, 1, 0, 1, 0, 0, 0, 0], [1, 1, 0, 1, 0, 0, 0, 0], 1]);
 

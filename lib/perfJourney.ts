@@ -166,7 +166,7 @@ export function flatJourney(r: JourneyRow): (string | number)[] {
 }
 // Summary sheet / table: counts first, every % at the end.
 export const SUMMARY_HEAD = ["Employee", "Leads given", "Assignments", "Positive with them", "Moved on, no positive", "Missed by me", "Moved, not counted",
-  "Won from others", "Assists", "Calls / lead (approx)", "First action (approx)", "Note", "Missed %", "Team avg missed %", "Won %", "Assist %"];
+  "Won from others", "Assists", "Calls / assignment (approx)", "First action (approx)", "Note", "Missed %", "Team avg missed %", "Won %", "Assist %"];
 export function summaryRow(name: string, r: Partial<JourneyEmpRow>, team: Partial<JourneyTeam> | null, isTeam = false): (string | number)[] {
   return [name, num(r.leads), num(r.assignments), num(r.positive), num(r.moved_no_pos), num(r.missed), num(r.not_counted), num(r.won), num(r.assist),
     r.calls_avg == null ? "–" : Number(r.calls_avg), hoursText(r.first_action_h), !isTeam && lowSample({ leads: r.leads }) ? "Low sample" : "",

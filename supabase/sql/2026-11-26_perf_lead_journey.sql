@@ -1,7 +1,7 @@
 -- 2026-11-26 Performance Report "Lead Journey" (employee seriousness). DRAFT, NOT APPLIED. Apply only on the owner's
 -- "haan", from an LF copy, after a rolled-back dry run, at least 2 minutes away from a recycle sweep (:00/:15/:30/:45 IST)
 -- and the hourly refresh (:37 IST). Rollback: 2026-11-26_perf_lead_journey_rollback.sql.
--- Additive: 3 new functions and the definitions v3 rows. No new table; v1-v4, the snapshot, timers, sweep untouched.
+-- Additive: 5 new functions and the definitions v3 rows. No new table; v1-v4, the snapshot, timers, sweep untouched.
 -- Read only: nothing here moves a lead or writes a row outside perf_definitions.
 --
 -- Owner's rules (25-26 Nov), definitions v3:
@@ -13,8 +13,7 @@
 --                  me. NOT missed: moved by an admin give, a give back (restore), while I was on leave (or the day
 --                  after), or after I became inactive (after my last action in the app).
 --   * won from others my assignment had a positive, and an earlier assignment of the same lead (another employee) had none.
---   * assist       my assignment had a positive, the lead moved on, and someone else also made it positive within 60
---                  days after it left me.
+--   * assist       two people both made it positive, the second within 60 days after it left the first: both get it.
 --   * one lead     each assignment is its own row (leads given counts assignments separately); a lead counts at most
 --                  once as missed / won / assist per employee.
 --   * %            of leads given in the row, never over 100%.
@@ -28,12 +27,12 @@ on conflict (version, key) do nothing;
 insert into public.perf_definitions (version, key, label, rule) values
   (3, 'journey_range', 'Leads given', 'Assignments that started in the range and match the filters. A lead given twice to the same person counts as two assignments, but once in every lead count. What happened later (moves, results) is followed up to today.'),
   (3, 'journey_positive', 'Positive', 'On that assignment: moved to Follow-up, a visit, revisit or booking (not denied), or the result Connected or Converted saved. Dated by the event, so later moves never change it.'),
-  (3, 'journey_missed', 'Missed by me', 'My assignment had no positive; the system moved the lead on (recycle); I had it at least 3 days or did at least 1 call or action on it; and someone else made it positive within 60 days after it left me. Not counted: moved by an admin give or a give back, while I was on leave (or the day after), or after I became inactive.'),
+  (3, 'journey_missed', 'Missed by me', 'My assignment had no positive; the system moved the lead on (recycle); I had it at least 3 days or did at least 1 call or action on it; and someone else made it positive within 60 days after it left me. Not counted: moved by an admin give or a give back, while I was on leave (or the day after), or (for an employee who is now inactive) after their last action in the app.'),
   (3, 'journey_not_counted', 'Moved, not counted', 'Moved on with no positive but not counted as missed: an admin give, a give back, leave, inactive, or less than 3 days with no call or action.'),
   (3, 'journey_won', 'Won from others', 'My assignment had a positive, and an earlier assignment of the same lead (another employee) had none.'),
-  (3, 'journey_assist', 'Assist', 'My assignment had a positive, the lead moved on, and someone else also made it positive within 60 days after it left me. Both get credit.'),
+  (3, 'journey_assist', 'Assist', 'Two people both made the same lead positive, the second within 60 days after it left the first. Both get an assist (the second is not counted as won from others).'),
   (3, 'journey_pct', '% of leads given', 'Each count divided by the leads given in that row (each lead once). Never over 100%.'),
-  (3, 'journey_effort', 'Calls (approx)', 'The call counter on the assignment. Approx: not every call is logged. First action: the first result, stage move, call or WhatsApp tap on the assignment.'),
+  (3, 'journey_effort', 'Calls (approx)', 'The call counter, averaged per assignment. Approx: not every call is logged. First action: the first result, stage move, call or WhatsApp tap on the assignment.'),
   (3, 'journey_low_sample', 'Low sample', 'Fewer than 20 leads given in the range: shown in grey, too few to compare.'),
   (3, 'journey_fair', 'A signal, not a verdict', 'Compare with the team average, keep fresh and recycled apart, and look at leave and lead volume before drawing a conclusion.')
 on conflict (version, key) do nothing;
@@ -73,9 +72,13 @@ language sql stable security definer set search_path to 'public' as $$
     where a.lead_id in (select lead_id from lds)
       and ((a.activity_type = 'STATUS_UPDATE' and a.detail in ('CONNECTED', 'CONVERTED')) or (a.activity_type = 'BOARD_STAGE_MOVE' and a.detail = 'FOLLOW_UP'))
     union all
-    select distinct on (v.id) x.stint_id, v.created_at, case when v.event_type = 'BOOKED' then 'BOOKED' else 'VISIT' end
-    from site_visits v join st x on x.lead_id = v.lead_id and x.employee_id = v.employee_id and x.assigned_at <= v.created_at
-    where v.lead_id in (select lead_id from lds) and v.denied_at is null and v.event_type in ('VISIT', 'REVISIT', 'BOOKED')
+    -- inside that person's assignment window only (as perf_stints.visit); the latest such assignment if ever two
+    select * from (
+      select distinct on (v.id) x.stint_id, v.created_at, case when v.event_type = 'BOOKED' then 'BOOKED' else 'VISIT' end
+      from site_visits v join st x on x.lead_id = v.lead_id and x.employee_id = v.employee_id and x.assigned_at <= v.created_at
+        and v.created_at < coalesce(x.ended_at, 'infinity'::timestamptz)
+      where v.lead_id in (select lead_id from lds) and v.denied_at is null and v.event_type in ('VISIT', 'REVISIT', 'BOOKED')
+      order by v.id, x.assigned_at desc) vv
     union all
     -- the visit lock / pending check set by the person's own visit; a lock copied over by an admin give is not theirs
     select h.id, case when h.pause_reason = 'VISIT_LOCK' then h.paused_until - interval '1 month' else h.paused_until - interval '3 days' end, 'VISIT'
@@ -94,7 +97,7 @@ language sql stable security definer set search_path to 'public' as $$
   work as (select sid, min(at) as at from wev where sid is not null group by sid),
   gone as (
     select e.id, coalesce((select max(a.created_at) from lead_activity_log a where a.employee_id = e.id), '-infinity'::timestamptz) as last_at
-    from employees e where not coalesce(e.is_active, false)),
+    from employees e where e.is_active = false),
   j as (
     select st.*, p.pos_at, p.kind as pkind, w.at as work_at,
       (p.sid is not null or st.visit or st.booked or st.converted or st.followup_move) as is_pos,
@@ -106,13 +109,18 @@ language sql stable security definer set search_path to 'public' as $$
       extract(epoch from coalesce(st.ended_at, now()) - st.assigned_at) / 86400.0 as held
     from st left join pos p on p.sid = st.stint_id left join work w on w.sid = st.stint_id),
   k as (
-    select j.*, coalesce(j.pos_at, case when j.is_pos then j.assigned_at end) as pat,
+    -- a positive with no dated event (rare) is dated at the end of the assignment: never makes anyone "missed" sooner
+    select j.*, coalesce(j.pos_at, case when j.is_pos then coalesce(j.ended_at, now()) end) as pat,
       (j.held >= 3 or j.calls >= 1 or j.work_at is not null) as eff
     from j),
   kp as (select lead_id, sq, employee_id, pat from k where is_pos),
   -- hash joins on the lead (no per-row scan): later positive by someone else within 60 days / earlier no-positive by someone else
   later60 as (select distinct s.stint_id from k s join kp o on o.lead_id = s.lead_id and o.sq > s.sq and o.employee_id <> s.employee_id
               and o.pat <= s.ended_at + interval '60 days' where s.ended_at is not null),
+  -- assist, both sides: a later positive by someone else within 60 days after I left (later60), or I made it positive
+  -- within 60 days after someone else who had also made it positive left (assist_after)
+  assist_after as (select distinct s.stint_id from k s join k o on o.lead_id = s.lead_id and o.sq < s.sq and o.employee_id <> s.employee_id
+              and o.is_pos and o.ended_at is not null and s.pat <= o.ended_at + interval '60 days' where s.is_pos),
   wonset as (select distinct p.stint_id from k p join k o on o.lead_id = p.lead_id and o.sq < p.sq and o.employee_id <> p.employee_id and not o.is_pos
              where p.is_pos)
   select k.lead_id, k.stint_id, k.sq::int as seq, k.employee_id, k.team_id, k.lead_type, k.source, k.project, k.org as origin, k.assigned_at, k.ended_at,
@@ -123,7 +131,7 @@ language sql stable security definer set search_path to 'public' as $$
     -- missed by me / won from others / assist
     (not k.is_pos and k.mv = 'system' and k.exc is null and k.eff and k.stint_id in (select stint_id from later60)) as missed,
     (k.is_pos and k.stint_id in (select stint_id from wonset)) as won,
-    (k.is_pos and k.stint_id in (select stint_id from later60)) as assist
+    (k.is_pos and (k.stint_id in (select stint_id from later60) or k.stint_id in (select stint_id from assist_after))) as assist
   from k
 $$;
 
