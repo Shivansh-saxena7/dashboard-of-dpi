@@ -44,9 +44,12 @@ returns table (lead_id uuid, stint_id uuid, seq int, employee_id uuid, team_id u
   origin text, assigned_at timestamptz, ended_at timestamptz, next_origin text, calls int, worked boolean, first_action_at timestamptz,
   days_held numeric, positive boolean, pos_at timestamptz, pos_kind text, last_result text, in_cohort boolean, move text,
   excused text, effort_ok boolean, missed boolean, won boolean, assist boolean)
-language sql stable security definer set search_path to 'public' as $$
-  with f as (select coalesce(p_filters, '{}'::jsonb) as j,
-                    p_from::timestamp at time zone 'Asia/Kolkata' as t0, (p_to + 1)::timestamp at time zone 'Asia/Kolkata' as t1),
+language plpgsql stable security definer set search_path to 'public' as $fn$
+begin
+  -- EXECUTE: planned with the real dates / filters each call (a cached generic plan was many times slower)
+  return query execute $q$
+  with f as (select coalesce($3, '{}'::jsonb) as j,
+                    $1::timestamp at time zone 'Asia/Kolkata' as t0, ($2 + 1)::timestamp at time zone 'Asia/Kolkata' as t1),
   adm as (select r.new_lead_history_id as sid from lead_restore_log r join lead_activity_log ra on ra.id = r.activity_id
           where ra.activity_type = 'ADMIN_REASSIGN' and r.new_lead_history_id is not null),
   s0 as (
@@ -133,7 +136,9 @@ language sql stable security definer set search_path to 'public' as $$
     (k.is_pos and k.stint_id in (select stint_id from wonset)) as won,
     (k.is_pos and (k.stint_id in (select stint_id from later60) or k.stint_id in (select stint_id from assist_after))) as assist
   from k
-$$;
+$q$ using p_from, p_to, p_filters;
+end;
+$fn$;
 
 -- % of leads given, never over 100 (null when nothing was given).
 create or replace function public.perf_journey_pct(p jsonb)
