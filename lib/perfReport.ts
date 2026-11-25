@@ -216,7 +216,7 @@ export interface Filters {
 export const NO_FILTERS: Filters = { employee: [], team: "", source: [], project: "", leadTypes: [], origins: [] };
 // Sent in the RPC body (POST), never in a URL, so long employee / source lists are fine. v3 takes several types; the
 // older report takes one (both chosen = no type filter either way).
-export function filtersJson(f: Partial<Filters>, api: 1 | 2 | 3 = 3): Record<string, unknown> {
+export function filtersJson(f: Partial<Filters>, api: 1 | 2 | 3 | 4 = 4): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   if (f.employee?.length) out.employee_ids = [...new Set(f.employee)];
   if (f.team) out.team_ids = [f.team];

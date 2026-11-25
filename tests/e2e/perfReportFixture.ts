@@ -35,7 +35,7 @@ const EO: Row[] = [
   { employee_id: A, origin: "OTHER", ...row({ leads: 120, followup: 5, visit: 1, connected: 20, converted: 1, not_connected: 40 }) },
   { employee_id: B, origin: "RECYCLED", ...row({ leads: 250, followup: 12, visit: 2, connected: 70, converted: 1, not_connected: 90 }) }
 ];
-export function report(filters: Row, api: 1 | 2 | 3) {
+export function report(filters: Row, api: 1 | 2 | 3 | 4) {
   const pick = filters.employee_ids as string[] | undefined;
   const by_employee = pick ? EMPS.filter((e) => pick.includes(String(e.employee_id))) : EMPS;
   const sum = (k: string) => by_employee.reduce((a, e) => a + Number(e[k] ?? 0), 0);
@@ -64,6 +64,7 @@ export function report(filters: Row, api: 1 | 2 | 3) {
     ]
   };
   if (api >= 2) Object.assign(out, { api, today: "2026-11-23", data_since: "2026-08-17", max_days: 800, by_emp_source: pick ? ES.filter((x) => pick.includes(String(x.employee_id))) : ES });
+  if (api >= 4) Object.assign(out, { def_version: 2 }); // v4: exact history (definitions v2)
   if (api >= 3) {
     out.by_emp_origin = pick ? EO.filter((x) => pick.includes(String(x.employee_id))) : EO;
     delete out.by_employee_type; // like the real v3 answer (2026-11-23 production error: More details crashed on it)
@@ -73,7 +74,7 @@ export function report(filters: Row, api: 1 | 2 | 3) {
 
 export interface Ctx { state: MockState; calls: { rpc: string; body: Row; url: string }[] }
 export interface OpenOpts {
-  flag?: "on" | "off" | "missing"; reassign?: "on" | "off"; role?: "admin" | "super_admin"; fail?: boolean; api?: 1 | 2 | 3; goto?: string;
+  flag?: "on" | "off" | "missing"; reassign?: "on" | "off"; role?: "admin" | "super_admin"; fail?: boolean; api?: 1 | 2 | 3 | 4; goto?: string;
   receiverProblem?: string | null; oldBatch?: boolean;
 }
 const json = (body: unknown, status = 200) => ({ status, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(body) });
@@ -93,15 +94,16 @@ export async function openReport(context: BrowserContext, page: Page, opts: Open
   });
   await context.route(`${FAKE_SUPABASE}/rest/v1/lead_engine_settings**`, (r) => r.fulfill(json((r.request().headers()["accept"] || "").includes("object") ? settings : [settings])));
   let failLeft = opts.fail ? 2 : 0; // the first load (twice under React dev StrictMode) fails
-  const version = (rpc: string) => (rpc.endsWith("_v3") ? 3 : rpc.endsWith("_v2") ? 2 : 1);
+  const version = (rpc: string) => (rpc.endsWith("_v4") ? 4 : rpc.endsWith("_v3") ? 3 : rpc.endsWith("_v2") ? 2 : 1);
   let batchSeq = 0;
   await context.route(`${FAKE_SUPABASE}/rest/v1/rpc/*`, async (r) => {
     const url = r.request().url();
     const rpc = new URL(url).pathname.split("/").pop() as string;
     const body = JSON.parse(r.request().postData() || "{}");
+    // A newer report RPC this fake database does not have: 404 like PostgREST, and not counted as a call.
+    if (rpc.startsWith("get_perf_report") && version(rpc) > api) return r.fulfill(json({ code: "PGRST202", message: `Could not find the function public.${rpc}` }, 404));
     ctx.calls.push({ rpc, body, url });
     if (rpc.startsWith("get_perf_report")) {
-      if (version(rpc) > api) return r.fulfill(json({ code: "PGRST202", message: `Could not find the function public.${rpc}` }, 404));
       if (rpc.startsWith("get_perf_report_leads")) {
         const total = body.p_metric === "visit" ? 450 : 3;
         const rows = Array.from({ length: Math.max(0, Math.min(body.p_limit, total - body.p_offset)) }, (_, i) => {
@@ -110,13 +112,14 @@ export async function openReport(context: BrowserContext, page: Page, opts: Open
             stint_id: `s${k}`, lead_id: `00000000-0000-4000-9000-${String(k).padStart(12, "0")}`, lead_name: `Lead ${1000 + k}`, employee_id: A, employee_name: "Employee A",
             source: "99acres", project: "P1", lead_type: "LEAD", origin: i % 2 ? "RECYCLED" : "FRESH", assigned_at: "2026-10-12T05:00:00Z",
             last_result: ["NOT_CONNECTED", "CONNECTED", "CALLBACK_LATER"][i % 3], last_stage: i % 2 ? "VISIT" : "LEADS",
+            ...(version(rpc) >= 4 ? { event_at: "2026-10-20T06:00:00Z" } : {}),
             ...(version(rpc) >= 3 ? { current_owner_id: k % 5 === 4 ? B : A, current_owner_name: k % 5 === 4 ? "Employee B" : "Employee A", positive: k % 3 === 1, available: true } : {})
           };
         });
         return r.fulfill(json({ metric: body.p_metric, total, rows }));
       }
       if (failLeft > 0) { failLeft--; return r.fulfill(json({ message: "fake failure" }, 500)); }
-      return r.fulfill(json(report(body.p_filters ?? {}, version(rpc) as 1 | 2 | 3)));
+      return r.fulfill(json(report(body.p_filters ?? {}, version(rpc) as 1 | 2 | 3 | 4)));
     }
     if (rpc === "get_lead_journey")
       return r.fulfill(json({ lead_id: body.p_lead_id, stints: [

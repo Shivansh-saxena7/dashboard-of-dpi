@@ -272,6 +272,16 @@ for (const api of [2, 1] as const) {
   });
 }
 
+test("v4 (exact history) applied: definitions v2, v4 calls, drill rows show the date the result happened", async ({ page, context }, info) => {
+  ctx = await openReport(context, page, { api: 4 });
+  await expect(total(page, info)).toContainText("600");
+  await expect(page.getByTestId("perf-asof")).toContainText("Definitions v2");
+  expect(ctx.calls.filter((c) => c.rpc.startsWith("get_perf_report")).every((c) => c.rpc === "get_perf_report_v4")).toBe(true);
+  await page.getByTestId(desktop(info) ? `perf-main-cell-${A}-visit` : `perf-main-card-cell-${A}-visit`).click();
+  await expect(page.getByTestId("perf-drill-row").first()).toContainText("On 20 Oct");
+  expect(drillCalls(ctx)[0].rpc).toBe("get_perf_report_leads_v4");
+});
+
 test("report failing: error text + Retry, the error is reported, Retry loads", async ({ page, context }, info) => {
   ctx = await openReport(context, page, { fail: true });
   await expect(page.getByTestId("perf-retry")).toHaveText("Couldn't load the report. Tap to try again.");

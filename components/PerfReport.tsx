@@ -768,7 +768,7 @@ function Drill({ d, sub, onClose, more, exportAll, allRows, reassign, canJourney
                   {reassign && x.current_owner_id && x.current_owner_id !== x.employee_id ? ` · now with ${String(x.current_owner_name ?? "someone else")}` : ""}
                 </span>
                 <span className="flex items-center justify-end gap-1 text-[13px] text-slate-600">
-                  {new Date(String(x.assigned_at)).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" })} · {stageWord(String(x.last_stage ?? "LEADS"))}
+                  {x.event_at ? "On " : ""}{new Date(String(x.event_at ?? x.assigned_at)).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" })} · {stageWord(String(x.last_stage ?? "LEADS"))}
                   {canJourney && (
                     <button type="button" onClick={() => onJourney(id, name)} data-testid="perf-drill-journey"
                       className={`min-h-11 rounded-lg px-2 font-semibold text-blue-700 hover:underline ${FOCUS}`}>Journey</button>

@@ -117,7 +117,14 @@ const giveFiles = ["components/PerfReassign.tsx", "lib/usePerfReassign.ts"];
 const give = giveFiles.map(read).join("\n");
 const rpcNames = (src) => [...new Set([...src.matchAll(/\.rpc\("([a-z0-9_]+)"/g)].map((m) => m[1]).concat([...src.matchAll(/\d: "(get_perf_report[a-z0-9_]*)"/g)].map((m) => m[1])))].sort();
 check("older-report fallback decided per request, stepping v3 -> v2 -> v1", read("lib/usePerfReport.ts").includes("while (v > 1 && missingFn(res.error))") && read("lib/usePerfReport.ts").includes("let v: Api = api.current;"));
-eq("report page: only the report RPCs (v3, v2, v1) and the journey", rpcNames(all), ["get_lead_journey", "get_perf_report", "get_perf_report_leads", "get_perf_report_leads_v2", "get_perf_report_leads_v3", "get_perf_report_v2", "get_perf_report_v3"]);
+eq("report page: only the report RPCs (v4, v3, v2, v1) and the journey", rpcNames(all), ["get_lead_journey", "get_perf_report", "get_perf_report_leads", "get_perf_report_leads_v2", "get_perf_report_leads_v3", "get_perf_report_leads_v4", "get_perf_report_v2", "get_perf_report_v3", "get_perf_report_v4"]);
+check("SQL v4: draft, additive, events dated by themselves, a copied visit lock is not a visit, definitions v2", (() => {
+  const v4 = read("supabase/sql/2026-11-25_perf_report_v4.sql");
+  const c = v4.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+  return v4.includes("DRAFT, NOT APPLIED") && !/alter table|drop |create table|delete from|update public/i.test(c) && c.includes("o.paused_until = h.paused_until")
+    && c.includes("a.created_at >= t0 and a.created_at < t1") && c.includes("v.created_at >= t0 and v.created_at < t1") && c.includes("'def_version', 2")
+    && fs.existsSync(path.join(root, "supabase/sql/2026-11-25_perf_report_v4_rollback.sql"));
+})());
 eq("give controls: only their own RPCs", rpcNames(give), ["admin_reassign_leads_from_report", "admin_report_reassign_preview", "admin_undo_report_batch", "get_lead_report_batches", "get_report_batch_outcome", "get_report_batches"]);
 const froms = [...all.matchAll(/\.from\("([a-z_]+)"\)/g)].map((m) => m[1]);
 eq("only the flag row is read directly", froms, ["lead_engine_settings"]);

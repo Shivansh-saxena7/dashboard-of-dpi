@@ -15,9 +15,10 @@ import { filtersJson, rangeProblem, type Filters, type PerfReport } from "@/lib/
 
 export const DRILL_PAGE = 200;
 export const DRILL_CSV_MAX = 20000;
-type Api = 1 | 2 | 3;
-const REPORT_RPC: Record<Api, string> = { 3: "get_perf_report_v3", 2: "get_perf_report_v2", 1: "get_perf_report" };
-const LEADS_RPC: Record<Api, string> = { 3: "get_perf_report_leads_v3", 2: "get_perf_report_leads_v2", 1: "get_perf_report_leads" };
+// v4 (2026-11-25, definitions v2): every result counted on the date it happened, for the person who had the lead then.
+type Api = 1 | 2 | 3 | 4;
+const REPORT_RPC: Record<Api, string> = { 4: "get_perf_report_v4", 3: "get_perf_report_v3", 2: "get_perf_report_v2", 1: "get_perf_report" };
+const LEADS_RPC: Record<Api, string> = { 4: "get_perf_report_leads_v4", 3: "get_perf_report_leads_v3", 2: "get_perf_report_leads_v2", 1: "get_perf_report_leads" };
 
 export interface ReportFlags { mode: "loading" | "on" | "off"; reassign: boolean }
 export function useAdminReportFlags(): ReportFlags {
@@ -70,7 +71,7 @@ export function usePerfReport(from: string, to: string, filters: Filters, enable
   const [state, setState] = useState<{ data: PerfReport | null; loading: boolean; error: boolean }>({ data: null, loading: true, error: false });
   const [drill, setDrill] = useState<DrillState | null>(null);
   const seq = useRef(0);
-  const api = useRef<Api>(3);
+  const api = useRef<Api>(4);
   const key = JSON.stringify([from, to, filters]);
   const invalid = rangeProblem(from, to);
 
