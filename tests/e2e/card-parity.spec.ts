@@ -21,12 +21,12 @@ const newCtx = (browser: Browser, info: TestInfo) => {
 };
 const json = (body: unknown, status = 200) => ({ status, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(body) });
 
-async function open(context: BrowserContext, page: Page, path: "/leads" | "/data", mode: Mode, opts: { paused?: boolean; notesMissing?: boolean } = {}) {
+async function open(context: BrowserContext, page: Page, path: "/leads" | "/data", mode: Mode, opts: { paused?: boolean; notesMissing?: boolean; live?: Record<string, unknown>[] } = {}) {
   state = await mockSupabase(context);
-  state.leads = LEAD_SCENARIOS.map(([, , l]) => structuredClone(l)) as typeof state.leads;
-  state.data = DATA_SCENARIOS.map(([, , l]) => structuredClone(l)) as typeof state.data;
+  state.leads = (opts.live ? opts.live.filter((x) => x.lead_type === "LEAD") : LEAD_SCENARIOS.map(([, , l]) => structuredClone(l))) as typeof state.leads;
+  state.data = (opts.live ? opts.live.filter((x) => x.lead_type === "DATA") : DATA_SCENARIOS.map(([, , l]) => structuredClone(l))) as typeof state.data;
   rpcs = [];
-  await page.clock.setFixedTime(T0);
+  if (!opts.live) await page.clock.setFixedTime(T0);
   await context.route(`${FAKE_SUPABASE}/rest/v1/lead_engine_settings**`, async (r) => {
     const row: Record<string, unknown> = { ...LEAD_ENGINE_SETTINGS, reassigned_journey_mode: "on" };
     if (mode === "on") row.employee_card_mode = "on";
@@ -56,8 +56,8 @@ async function open(context: BrowserContext, page: Page, path: "/leads" | "/data
   await context.route("https://wa.me/**", (r) => r.abort());
   await page.goto(path);
   await page.addStyleTag({ content: "nextjs-portal { display: none !important; pointer-events: none !important; }" }).catch(() => undefined);
-  await page.getByPlaceholder(path === "/leads" ? "Search name, mobile, or project..." : "Search name or mobile...").fill("Parity");
-  const ids = (path === "/leads" ? LEAD_SCENARIOS : DATA_SCENARIOS).map(([, , l]) => String(l.id));
+  await page.getByPlaceholder(path === "/leads" ? "Search name, mobile, or project..." : "Search name or mobile...").fill(opts.live ? "Client" : "Parity");
+  const ids = opts.live ? opts.live.filter((x) => x.lead_type === (path === "/leads" ? "LEAD" : "DATA")).map((x) => String(x.id)) : (path === "/leads" ? LEAD_SCENARIOS : DATA_SCENARIOS).map(([, , l]) => String(l.id));
   await expect(page.locator(`#${path === "/leads" ? "lead" : "data"}-card-${ids[0]}`)).toBeVisible();
   await page.waitForTimeout(1200); // flag answer, siblings, notes, entrance animation
 }
@@ -94,6 +94,8 @@ function compare(oldCard: CardInfo, newCard: CardInfo): string[] {
 
 const SCENARIO_OF = new Map([...LEAD_SCENARIOS, ...DATA_SCENARIOS].map(([s, what, l]) => [String(l.id), `${s} ${what}`]));
 const results: Record<string, string> = {};
+// Two full lists in two browsers per test: slower on WebKit than the 90 s default.
+test.describe.configure({ timeout: 240_000 });
 
 for (const path of ["/leads", "/data"] as const) {
   for (const paused of [false, true]) {
@@ -230,3 +232,32 @@ test("the comparison itself catches a missing word, a changed word and an unexpe
   expect(compare(old, { ...same, text: same.text.replace("Test Source", "") })).toContain('missing "test source"');
   expect(compare(old, { ...same, text: `${same.text}\nRecycles in 2d` })).toContain('new-only "recycles in 2d"');
 });
+
+const LIVE = process.env.LIVE_CARDS ? (JSON.parse(fs.readFileSync(process.env.LIVE_CARDS, "utf8")) as Record<string, unknown>[]) : null;
+for (const path of ["/leads", "/data"] as const) {
+  test(`live data (masked, read-only) ${path}: old vs new, same information; screenshots`, async ({ browser }, info) => {
+    test.skip(!LIVE, "set LIVE_CARDS to the masked live rows");
+    const ctxOld = await newCtx(browser, info), pOld = await ctxOld.newPage();
+    await open(ctxOld, pOld, path, "off", { live: LIVE! });
+    const ctxNew = await newCtx(browser, info), pNew = await ctxNew.newPage();
+    await open(ctxNew, pNew, path, "on", { live: LIVE! });
+    const old = await cards(pOld, path), neu = await cards(pNew, path);
+    const fails: string[] = [];
+    const dir = `${SHOTS}/live-${info.project.name}${path.replace("/", "-")}`;
+    fs.mkdirSync(dir, { recursive: true });
+    for (const [i, o] of old.entries()) {
+      const n = neu.find((c) => c.id === o.id);
+      if (!n) { fails.push(`${o.id}: missing on the new list`); continue; }
+      const p = compare(o, n);
+      if (p.length) fails.push(`${o.id}: ${p.join("; ")}`);
+      if (i < 12) {
+        await pOld.locator(`[id$="-card-${o.id}"]`).screenshot({ path: `${dir}/${String(i + 1).padStart(2, "0")}-old.png` }).catch(() => undefined);
+        await pNew.locator(`[id$="-card-${o.id}"]`).screenshot({ path: `${dir}/${String(i + 1).padStart(2, "0")}-new.png` }).catch(() => undefined);
+      }
+    }
+    fs.writeFileSync(`${SHOTS}/parity-live-${info.project.name}${path.replace("/", "-")}.json`, JSON.stringify({ cards: old.length, fails }, null, 1));
+    await ctxOld.close();
+    await ctxNew.close();
+    expect(fails).toEqual([]);
+  });
+}
