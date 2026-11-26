@@ -1040,7 +1040,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
         </div>
       ) : (
         <div className="mx-4 mt-4 space-y-3 pb-6">
-          {cardV2 !== null && cardLeads.map((cardLead, index) => (
+          {cardLeads.map((cardLead, index) => (
             <CardComponent
               key={cardLead.id}
               now={now}

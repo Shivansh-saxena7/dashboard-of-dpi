@@ -98,6 +98,14 @@ export interface MockState {
 }
 
 export async function mockSupabase(context: BrowserContext): Promise<MockState> {
+  // CARD_MODE=on/off: the browser session already remembers the card choice (as after the first load), so list specs run
+  // on that card from the first paint. The switch itself is tested in card-flag-swap.spec.ts.
+  if (process.env.CARD_MODE) {
+    const on = process.env.CARD_MODE === "on";
+    await context.addInitScript(([key, on]) => {
+      try { sessionStorage.setItem(key as string, JSON.stringify({ on, at: Date.now() })); } catch { /* ignore */ }
+    }, [`employee-card-mode:v1:${EMP}`, on] as const);
+  }
   const state: MockState = { leads: makeLeads("LEAD", 60), data: makeLeads("DATA", 40), anomalies: [], updates: [], failUpdates: 0, landThenLose: 0 };
   const employee = { id: EMP, auth_user_id: UID, name: "Test Employee", role: "employee", department: "sales", is_active: true, team_id: null };
 

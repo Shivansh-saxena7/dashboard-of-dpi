@@ -81,9 +81,11 @@ check("last note: one RPC in the POST body, 200 a call, batched, no table read, 
   && ll.includes("setTimeout(flush, LAST_LOG_BATCH_MS)") && !/\.from\(|\.in\(|setInterval\(|\.channel\(/.test(ll));
 check("last note: function missing or an error hides the panel", ll.includes("missingFn(error)") && read("components/LastLogPanel.tsx").includes('if (log === "off") return null;'));
 
+check("flag: the list never waits; a switch only before the first touch", read("lib/employeeCardMode.ts").includes("if (alive && !touched) setOn(v);") && read("lib/employeeCardMode.ts").includes('["pointerdown", "touchstart", "keydown", "wheel"]')
+  && !/cardV2 !== null/.test(read("components/LeadList.tsx") + read("components/DataList.tsx")));
 // 6) Lists and SQL.
-check("LeadList: only chooses the card", read("components/LeadList.tsx").includes("const CardComponent = cardV2 ? LeadCardV2 : LeadCard;") && read("components/LeadList.tsx").includes("{cardV2 !== null && cardLeads.map("));
-check("DataList: only chooses the card + passes assigned_at", read("components/DataList.tsx").includes("const CardComponent = cardV2 ? DataCardV2 : DataCard;") && read("components/DataList.tsx").includes("{cardV2 !== null && cardLeads.map(") && read("components/DataList.tsx").includes("assigned_at: lead.lead_history[0]?.assigned_at ?? null"));
+check("LeadList: only chooses the card", read("components/LeadList.tsx").includes("const CardComponent = cardV2 ? LeadCardV2 : LeadCard;"));
+check("DataList: only chooses the card + passes assigned_at", read("components/DataList.tsx").includes("const CardComponent = cardV2 ? DataCardV2 : DataCard;") && read("components/DataList.tsx").includes("assigned_at: lead.lead_history[0]?.assigned_at ?? null"));
 for (const f of ["2026-11-27_employee_card_mode", "2026-11-27_get_last_notes", "2026-11-27_employee_card_pilot_testing"]) {
   check(`${f}: draft with a rollback`, /DRAFT,\s*(--\s*)?NOT\s*(--\s*)?APPLIED/.test(read(`supabase/sql/${f}.sql`)) && fs.existsSync(path.join(root, `supabase/sql/${f}_rollback.sql`)));
 }

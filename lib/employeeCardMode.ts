@@ -53,25 +53,35 @@ async function readMode(employeeId: string): Promise<boolean> {
   return (await Promise.race([read, timeout])) === true;
 }
 
-// true = the redesign card (LeadCardV2 / DataCardV2), false = the old card, null = not known yet (at most 2 s; the
-// lists wait so a card never switches under the person's finger). Remembered for the session, so usually instant.
-export function useEmployeeCardMode(employeeId: string | null | undefined): boolean | null {
-  const [on, setOn] = useState<boolean | null>(() => {
-    if (!employeeId || typeof window === "undefined") return null;
+// true = the redesign card (LeadCardV2 / DataCardV2), false = the old card. The list never waits for this:
+//   * Starts with what this session remembered, otherwise the old card (flag off / missing / slow = old card at once).
+//   * When the answer arrives and differs, the card switches only if the person has not touched the page yet
+//     (pointerdown / touchstart / keydown / wheel since the list opened), so a card never changes under a tap. Touched
+//     already: this visit keeps the current card; the answer is remembered, so the next load shows the right one.
+export const CARD_SWAP_EVENTS = ["pointerdown", "touchstart", "keydown", "wheel"] as const;
+export function useEmployeeCardMode(employeeId: string | null | undefined): boolean {
+  const [on, setOn] = useState<boolean>(() => {
+    if (!employeeId || typeof window === "undefined") return false;
     try {
-      return readRememberedCardMode(sessionStorage.getItem(KEY + employeeId), Date.now());
+      return readRememberedCardMode(sessionStorage.getItem(KEY + employeeId), Date.now()) === true;
     } catch {
-      return null;
+      return false;
     }
   });
   useEffect(() => {
     if (!employeeId) return;
     let alive = true;
+    let touched = false;
+    const touch = () => {
+      touched = true;
+    };
+    for (const ev of CARD_SWAP_EVENTS) window.addEventListener(ev, touch, { capture: true, passive: true });
     void readMode(employeeId).then((v) => {
-      if (alive) setOn(v);
+      if (alive && !touched) setOn(v);
     });
     return () => {
       alive = false;
+      for (const ev of CARD_SWAP_EVENTS) window.removeEventListener(ev, touch, { capture: true });
     };
   }, [employeeId]);
   return on;
