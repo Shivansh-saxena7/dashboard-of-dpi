@@ -53,14 +53,15 @@ async function readMode(employeeId: string): Promise<boolean> {
   return (await Promise.race([read, timeout])) === true;
 }
 
-// true = the redesign card (LeadCardV2 / DataCardV2). Starts false (old card) until the flag is known.
-export function useEmployeeCardMode(employeeId: string | null | undefined): boolean {
-  const [on, setOn] = useState<boolean>(() => {
-    if (!employeeId || typeof window === "undefined") return false;
+// true = the redesign card (LeadCardV2 / DataCardV2), false = the old card, null = not known yet (at most 2 s; the
+// lists wait so a card never switches under the person's finger). Remembered for the session, so usually instant.
+export function useEmployeeCardMode(employeeId: string | null | undefined): boolean | null {
+  const [on, setOn] = useState<boolean | null>(() => {
+    if (!employeeId || typeof window === "undefined") return null;
     try {
-      return readRememberedCardMode(sessionStorage.getItem(KEY + employeeId), Date.now()) === true;
+      return readRememberedCardMode(sessionStorage.getItem(KEY + employeeId), Date.now());
     } catch {
-      return false;
+      return null;
     }
   });
   useEffect(() => {
