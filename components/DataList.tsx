@@ -8,7 +8,7 @@ import { Search, ChevronDown } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import DataCard from "./DataCard";
 import DataCardV2 from "./DataCardV2";
-import { useEmployeeCardMode } from "@/lib/employeeCardMode";
+import { CARD_GRID_CLASS, CARD_LIST_CLASS, useEmployeeCardMode } from "@/lib/employeeCardMode";
 import DataDetailModal from "./DataDetailModal";
 import QueueBar from "./QueueBar";
 import { useListQueue } from "@/lib/useListQueue";
@@ -632,7 +632,7 @@ export default function DataList({ employeeId }: DataListProps) {
               )}
             </div>
           ) : (
-            <div className="mx-4 mt-4 space-y-3 pb-6">
+            <div data-testid={cardV2 ? "card-list" : undefined} className={cardV2 ? `${CARD_LIST_CLASS} ${CARD_GRID_CLASS}${queue ? " lg:pb-40" : ""}` : CARD_LIST_CLASS}>
               {cardLeads.map((cardLead, index) => (
                 <CardComponent
                   key={cardLead.id}

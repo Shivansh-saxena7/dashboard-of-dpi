@@ -9,7 +9,7 @@ import { Search, ChevronDown } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import LeadCard from "./LeadCard";
 import LeadCardV2 from "./LeadCardV2";
-import { useEmployeeCardMode } from "@/lib/employeeCardMode";
+import { CARD_GRID_CLASS, CARD_LIST_CLASS, useEmployeeCardMode } from "@/lib/employeeCardMode";
 import LeadDetailModal from "./LeadDetailModal";
 import AddPersonalLeadModal from "./AddPersonalLeadModal";
 import QuickDialModal from "./QuickDialModal";
@@ -1119,7 +1119,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
           </p>
         </div>
       ) : (
-        <div className="mx-4 mt-4 space-y-3 pb-6">
+        <div data-testid={cardV2 ? "card-list" : undefined} className={cardV2 ? `${CARD_LIST_CLASS} ${CARD_GRID_CLASS}${queue ? " lg:pb-40" : ""}` : CARD_LIST_CLASS}>
           {cardLeads.map((cardLead, index) => (
             <CardComponent
               key={cardLead.id}

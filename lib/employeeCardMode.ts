@@ -86,3 +86,9 @@ export function useEmployeeCardMode(employeeId: string | null | undefined): bool
   }, [employeeId]);
   return on;
 }
+
+// List containers (2026-11-26 desktop grid). The old card keeps exactly the old class. The new card uses the same
+// class below 1024 px and, from 1024 px, a grid of columns at least 460 px wide (2 columns at 1024-1400 px, 3 at
+// 1440, 4 at 1920), cards at their own height; when the queue bar is open, extra room at the bottom on desktop.
+export const CARD_LIST_CLASS = "mx-4 mt-4 space-y-3 pb-6";
+export const CARD_GRID_CLASS = "lg:grid lg:grid-cols-[repeat(auto-fill,minmax(460px,1fr))] lg:items-start lg:gap-3 lg:space-y-0";

@@ -83,6 +83,13 @@ check("last note: function missing or an error hides the panel", ll.includes("mi
 
 check("flag: the list never waits; a switch only before the first touch", read("lib/employeeCardMode.ts").includes("if (alive && !touched) setOn(v);") && read("lib/employeeCardMode.ts").includes('["pointerdown", "touchstart", "keydown", "wheel"]')
   && !/cardV2 !== null/.test(read("components/LeadList.tsx") + read("components/DataList.tsx")));
+// Desktop grid (2026-11-26): the old card keeps exactly the old container; the grid only with the new card, only from lg.
+eq("grid: old container class unchanged; grid classes only from 1024 px", [m.CARD_LIST_CLASS, m.CARD_GRID_CLASS.split(" ").every((c) => c.startsWith("lg:"))], ["mx-4 mt-4 space-y-3 pb-6", true]);
+for (const f of ["components/LeadList.tsx", "components/DataList.tsx"]) {
+  const src = read(f);
+  check(`${f}: card container = old class when the flag is off, grid only for the new card, test id only for the new card`,
+    src.includes('data-testid={cardV2 ? "card-list" : undefined} className={cardV2 ? `${CARD_LIST_CLASS} ${CARD_GRID_CLASS}${queue ? " lg:pb-40" : ""}` : CARD_LIST_CLASS}'));
+}
 // 6) Lists and SQL.
 check("LeadList: only chooses the card", read("components/LeadList.tsx").includes("const CardComponent = cardV2 ? LeadCardV2 : LeadCard;"));
 check("DataList: only chooses the card + passes assigned_at", read("components/DataList.tsx").includes("const CardComponent = cardV2 ? DataCardV2 : DataCard;") && read("components/DataList.tsx").includes("assigned_at: lead.lead_history[0]?.assigned_at ?? null"));
