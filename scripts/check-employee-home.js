@@ -8,6 +8,20 @@ const ts = require("typescript");
 const root = path.join(__dirname, "..");
 const read = (p) => fs.readFileSync(path.join(root, p), "utf8");
 const problems = [];
+// One clock for the whole check (test-only, 2026-11-26): the fixtures are dated 18 Nov 2026, and the rules inside
+// (calculateSLAStatus etc.) read "now" from Date too; without this the answers drift with the real date (a lead from
+// the fixture became 8 days old on 26 Nov). Date.now() and new Date() (no arguments) both give 18 Nov 12:00 IST.
+const REAL_DATE = Date;
+const FIXED_NOW = REAL_DATE.parse("2026-11-18T06:30:00Z");
+global.Date = class FixedDate extends REAL_DATE {
+  constructor(...args) {
+    if (args.length === 0) super(FIXED_NOW);
+    else super(...args);
+  }
+  static now() {
+    return FIXED_NOW;
+  }
+};
 require.extensions[".ts"] = (m, f) =>
   m._compile(ts.transpileModule(fs.readFileSync(f, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText, f);
 const eh = require(path.join(root, "lib/employeeHome.ts"));
