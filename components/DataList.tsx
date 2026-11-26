@@ -6,6 +6,8 @@ import { motion } from "framer-motion";
 import { Search, ChevronDown } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import DataCard from "./DataCard";
+import DataCardV2 from "./DataCardV2";
+import { useEmployeeCardMode } from "@/lib/employeeCardMode";
 import DataDetailModal from "./DataDetailModal";
 import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
@@ -114,6 +116,8 @@ export default function DataList({ employeeId }: DataListProps) {
   const givenContext = useGivenLeadContext(employeeId);
   // "Previously with" + Journey (2026-11-23): one background call for the whole list, only while its flag is on.
   const journey = useReassignedJourney(employeeId);
+  // Redesign card (2026-11-26) only while employee_card_mode allows this person; otherwise the old card, unchanged.
+  const CardComponent = useEmployeeCardMode(employeeId) ? DataCardV2 : DataCard;
   const [journeyLeadId, setJourneyLeadId] = useState<string | null>(null);
   const openJourney = useCallback((id: string) => setJourneyLeadId(id), []);
   const closeJourney = useCallback(() => setJourneyLeadId(null), []);
@@ -392,7 +396,9 @@ export default function DataList({ employeeId }: DataListProps) {
         source: lead.source,
         status: lead.status,
         board_stage: lead.board_stage,
-        call_count: lead.lead_history[0]?.call_count ?? 0
+        call_count: lead.lead_history[0]?.call_count ?? 0,
+        // the redesign card shows "Assigned"; the old card ignores this field
+        assigned_at: lead.lead_history[0]?.assigned_at ?? null
       })),
     [visibleLeads]
   );
@@ -562,7 +568,7 @@ export default function DataList({ employeeId }: DataListProps) {
           ) : (
             <div className="mx-4 mt-4 space-y-3 pb-6">
               {cardLeads.map((cardLead, index) => (
-                <DataCard
+                <CardComponent
                   key={cardLead.id}
                   index={index}
                   onOpen={handleOpenLead}

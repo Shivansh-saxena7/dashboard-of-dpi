@@ -7,6 +7,8 @@ import { motion } from "framer-motion";
 import { Search, ChevronDown } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import LeadCard from "./LeadCard";
+import LeadCardV2 from "./LeadCardV2";
+import { useEmployeeCardMode } from "@/lib/employeeCardMode";
 import LeadDetailModal from "./LeadDetailModal";
 import AddPersonalLeadModal from "./AddPersonalLeadModal";
 import QuickDialModal from "./QuickDialModal";
@@ -503,6 +505,8 @@ export default function LeadList({ employeeId }: LeadListProps) {
   const givenContext = useGivenLeadContext(employeeId);
   // "Previously with" + Journey (2026-11-23): one background call for the whole list, only while its flag is on.
   const journey = useReassignedJourney(employeeId);
+  // Redesign card (2026-11-26) only while employee_card_mode allows this person; otherwise the old card, unchanged.
+  const CardComponent = useEmployeeCardMode(employeeId) ? LeadCardV2 : LeadCard;
   const [journeyLeadId, setJourneyLeadId] = useState<string | null>(null);
   const openJourney = useCallback((id: string) => setJourneyLeadId(id), []);
   const closeJourney = useCallback(() => setJourneyLeadId(null), []);
@@ -1036,7 +1040,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
       ) : (
         <div className="mx-4 mt-4 space-y-3 pb-6">
           {cardLeads.map((cardLead, index) => (
-            <LeadCard
+            <CardComponent
               key={cardLead.id}
               now={now}
               index={index}
