@@ -16,7 +16,7 @@ export default defineConfig({
     { name: "android-chrome", use: { ...devices["Pixel 7"] } },
     { name: "iphone-safari", use: { ...devices["iPhone 14"] } },
     // Admin pages (Admin Home, Performance Report): admins also use a desktop browser; only these specs run here.
-    { name: "desktop-chromium", use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 900 } }, testMatch: /(admin-home-a\d+|admin-perf-report|admin-perf-reassign|admin-perf-journey|reassigned-journey)\.spec\.ts$/ }
+    { name: "desktop-chromium", use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 900 } }, testMatch: /(admin-home-a\d+|admin-perf-report|admin-perf-reassign|admin-perf-journey|reassigned-journey|card-parity|call-return|data-realtime|lead-moved-away|login-check|result-save)\.spec\.ts$/ }
   ],
   webServer: {
     command: `npx next dev -p ${PORT}`,

@@ -81,7 +81,9 @@ export const LEAD_ENGINE_SETTINGS = {
   office_lat: 0, office_lng: 0, positive_junk_guard_mode: "enforce", reminder_hold_mode: "shadow", reminder_hold_max_days: 30,
   restore_hold_mode: "enforce", second_half_min_end_time: "18:30:00", second_half_start_window_end: "15:00:00",
   shift_day_end_time: "18:30:00", sla_first_contact_minutes: 1440, sla_office_end_time: "18:30:00",
-  sla_office_start_time: "11:00:00", sla_weekly_off_day: 2, start_shift_grace_minutes: 30, working_days_timers_enabled: true
+  sla_office_start_time: "11:00:00", sla_weekly_off_day: 2, start_shift_grace_minutes: 30, working_days_timers_enabled: true,
+  // Card port (2026-11-26): CARD_MODE=on runs every list spec on the redesign card; unset = the column is missing (old card).
+  ...(process.env.CARD_MODE ? { employee_card_mode: process.env.CARD_MODE } : {})
 };
 const HRMS_SETTINGS = { id: 1, first_half_ontime_cutoff: "10:35:00", second_half_ontime_cutoff: "13:30:00" };
 
