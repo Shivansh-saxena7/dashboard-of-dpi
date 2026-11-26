@@ -13,6 +13,8 @@ import PostsTrackingView from "@/components/PostsTrackingView";
 import ResumeCallStrip from "@/components/ResumeCallStrip";
 import { takeColdStartResume } from "@/lib/activeCall";
 import { rememberEmployeeId } from "@/lib/clientIdentity";
+import EmployeeHomeP1 from "@/components/EmployeeHomeP1";
+import { useEmployeeHomeMode } from "@/lib/useEmployeeHomeMode";
 
 export default function Page() {
 
@@ -20,6 +22,12 @@ const router = useRouter();
 
 const [employee,setEmployee]=useState<any>(null);
 const [authChecked,setAuthChecked]=useState(false);
+// Employee Home Phase 1 (2026-11-18): the old Home renders at once; the flag is read in the background
+// (lib/useEmployeeHomeMode.ts) and the new Home replaces the social posts card only when the flag is on.
+const newHome = useEmployeeHomeMode(employee?.id);
+// E4 (2026-11-19): the new Home is a lead-work screen, so only for Sales - the same isNonSales rule as Start Shift and
+// EmployeeTabBar (department set and not "sales"). Marketing, Accounts, HR, Other keep the old Home, flag or not.
+const showNewHome = newHome && !(employee?.department && employee.department !== "sales");
 
 
 // ✅ AUTH CHECK
@@ -144,12 +152,18 @@ to-blue-100
     Start Shift exactly as before, and it's hidden for every non-Sales
     department (Marketing, Other, Accounts, HR) consistently. */}
 {employee?.id && !(employee?.department && employee.department !== "sales") && (
-  <StartShiftCard employeeId={employee.id} />
+  <StartShiftCard employeeId={employee.id} compactWhenIdle={showNewHome} />
 )}
 
-<PostsTrackingView employeeId={employee?.id} employeeName={employee?.name} />
+{showNewHome && employee?.id ? (
+  <EmployeeHomeP1 employeeId={employee.id} employeeName={employee?.name} role={employee?.role} teamId={employee?.team_id} />
+) : (
+  <PostsTrackingView employeeId={employee?.id} employeeName={employee?.name} />
+)}
 
 <Footer />
+{/* Room for the new Home sticky "Start with next lead" button. */}
+{showNewHome && <div aria-hidden className="h-24" />}
 </main>
 
 );

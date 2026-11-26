@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { rememberedHomeMode } from "@/lib/useEmployeeHomeMode";
 import { PhoneCall } from "lucide-react";
 import {
   ACTIVE_CALL_CHANGE_EVENT,
@@ -47,6 +48,10 @@ export default function ResumeCallStrip({ employeeId, currentList = null, openLe
 
   if (!employeeId || !entry || entry.leadId === openLeadId) return null;
 
+  // New employee Home on (E5, remembered by the Home, no read of its own): "Drop call" instead of "Skip", so it is not
+  // mistaken for the queue's "Skip lead", and 44px buttons. Flag off: exactly as before.
+  const newHome = rememberedHomeMode(employeeId);
+
   function resume() {
     if (!entry) return;
     if (currentList === entry.listType && onResumeHere) onResumeHere(entry.leadId);
@@ -63,19 +68,20 @@ export default function ResumeCallStrip({ employeeId, currentList = null, openLe
         <p className="truncate text-sm font-semibold text-slate-800">
           Resume your call with {entry.leadName || "your last lead"}
         </p>
-        <p className="text-[11px] text-slate-500">Save the result, or skip it.</p>
+        <p className="text-[11px] text-slate-500">{newHome ? "Save the result, or drop this call." : "Save the result, or skip it."}</p>
       </div>
       <button
         onClick={resume}
-        className="h-9 shrink-0 rounded-lg bg-gradient-to-r from-yellow-400 to-amber-500 px-3 text-xs font-bold text-slate-900"
+        className={`${newHome ? "min-h-11" : "h-9"} shrink-0 rounded-lg bg-gradient-to-r from-yellow-400 to-amber-500 px-3 text-xs font-bold text-slate-900`}
       >
         Resume
       </button>
       <button
         onClick={() => clearActiveCall(employeeId, entry.leadId)}
-        className="h-9 shrink-0 rounded-lg px-2 text-xs font-semibold text-slate-500 hover:bg-amber-100"
+        data-testid="resume-call-drop"
+        className={`${newHome ? "min-h-11 text-slate-700" : "h-9 text-slate-500"} shrink-0 rounded-lg px-2 text-xs font-semibold hover:bg-amber-100`}
       >
-        Skip
+        {newHome ? "Drop call" : "Skip"}
       </button>
     </div>
   );

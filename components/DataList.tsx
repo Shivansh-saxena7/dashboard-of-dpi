@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { motion } from "framer-motion";
 import { Search, ChevronDown } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -9,11 +10,15 @@ import DataCard from "./DataCard";
 import DataCardV2 from "./DataCardV2";
 import { useEmployeeCardMode } from "@/lib/employeeCardMode";
 import DataDetailModal from "./DataDetailModal";
+import QueueBar from "./QueueBar";
+import { useListQueue } from "@/lib/useListQueue";
+import { dataQueueOrder } from "@/lib/employeeHome";
 import { LeadStatus } from "@/lib/getValidNextLeadStatuses";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
 import { consumeRecentlyCalledCardId, scrollToAndHighlightCard } from "@/lib/lastCalledLead";
 import { usePendingOutcomeSheet } from "@/lib/usePendingOutcomeSheet";
 import { useActiveCallRestore, keepActiveLeadInList } from "@/lib/useActiveCallRestore";
+import { readActiveCall } from "@/lib/activeCall";
 import ResumeCallStrip from "./ResumeCallStrip";
 import { normalizeMobile } from "@/lib/normalizeMobile";
 import { istDateStringToRangeStartUTC, istDateStringToRangeEndUTC } from "@/lib/istTime";
@@ -91,6 +96,12 @@ export default function DataList({ employeeId }: DataListProps) {
   const [leads, setLeads] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  // Data-only "Start with next lead" (2026-11-18, Home Phase 3): ?queue=1 walks lib/employeeHome.ts dataQueueOrder
+  // through this list's own modal (normal Call and result-save); Skip is local only (lib/useListQueue.ts).
+  const [queueRequested, setQueueRequested] = useState(false);
+  // E5: came from the new Home (links carry from=home): a "Back to Home" chip.
+  const [fromHomeLink, setFromHomeLink] = useState(false);
+
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -154,8 +165,18 @@ export default function DataList({ employeeId }: DataListProps) {
   useEffect(() => {
     if (loading) return;
     const openLeadId = searchParams.get("openLead");
+    const queueParam = searchParams.get("queue") === "1";
+    const fromParam = searchParams.get("from") === "home";
+    if (fromParam) {
+      setFromHomeLink(true);
+    }
+    if (queueParam) {
+      setQueueRequested(true);
+    }
     if (openLeadId) {
       setSelectedLeadId(openLeadId);
+    }
+    if (openLeadId || queueParam || fromParam) {
       router.replace("/data");
     }
   }, [loading, searchParams, router]);
@@ -218,6 +239,30 @@ export default function DataList({ employeeId }: DataListProps) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employeeId]);
+
+  const listQueue = useListQueue(
+    employeeId,
+    "DATA",
+    useMemo(() => leads.map((l: { id: string }) => l.id), [leads]),
+    setSelectedLeadId
+  );
+  const queue = listQueue.queue;
+
+  // E4: after a cold restart during a queue call, the call-return flow opens that lead; today's stored queue run
+  // comes back at that lead (only when the open lead is the one the active call is about).
+  useEffect(() => {
+    if (!selectedLeadId || queue) return;
+    const entry = readActiveCall(employeeId);
+    if (entry && entry.listType === "DATA" && entry.leadId === selectedLeadId) listQueue.resumeFor(selectedLeadId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLeadId]);
+
+  useEffect(() => {
+    if (!queueRequested || loading) return;
+    setQueueRequested(false);
+    listQueue.start(dataQueueOrder(leads));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queueRequested, loading]);
 
   async function loadLeads() {
     if (!loadedOnceRef.current) setLoading(true);
@@ -452,6 +497,26 @@ export default function DataList({ employeeId }: DataListProps) {
   return (
     <>
       <ResumeCallStrip employeeId={employeeId} currentList="DATA" openLeadId={selectedLeadId} onResumeHere={(id) => setSelectedLeadId(id)} />
+      {fromHomeLink && (
+        <div className="mx-4 mt-3 flex">
+          <Link
+            href="/"
+            data-testid="back-to-home"
+            className="flex min-h-11 items-center gap-1 rounded-full border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm"
+          >
+            <span aria-hidden>‹</span> Back to Home
+          </Link>
+        </div>
+      )}
+      {queue && !selectedLeadId && (
+        <QueueBar
+          queue={queue}
+          nameOf={(id) => leads.find((l: { id: string; name?: string | null }) => l.id === id)?.name}
+          onSkip={listQueue.skip}
+          onOpen={listQueue.open}
+          onExit={listQueue.exit}
+        />
+      )}
       {leads.length === 0 ? (
         <div className="flex flex-col items-center justify-center mt-16 text-center px-4">
           <div className="text-5xl mb-3">🗂️</div>
@@ -587,6 +652,9 @@ export default function DataList({ employeeId }: DataListProps) {
 
       {selectedLead && (
         <DataDetailModal
+          // E4: a different lead (queue Next / Skip, Resume here) gets a fresh sheet, so nothing typed carries over.
+          key={selectedLead.id}
+          onQueueSkip={queue && queue.ids[queue.index] === selectedLead.id ? listQueue.skip : undefined}
           givenContext={givenContext.byLeadId.get(selectedLead.id) ?? null}
           previousPositive={previousPositive.get(selectedLead.id) ?? null}
           lead={{
@@ -598,10 +666,16 @@ export default function DataList({ employeeId }: DataListProps) {
             boardStage: (selectedLead.board_stage as BoardStage) || "LEADS",
             callCount: selectedLead.lead_history[0]?.call_count ?? 0
           }}
-          onClose={() => setSelectedLeadId(null)}
+          onClose={() => {
+            // Queue: closed right after a saved result -> no auto-open, the bar moves on.
+            listQueue.onClosed();
+            setSelectedLeadId(null);
+          }}
           onUpdated={(updates) => {
             handleLeadUpdated(selectedLead.id, updates);
             givenContext.refresh();
+            // Queue: a saved result moves on to the next lead.
+            listQueue.onSaved(selectedLead.id);
           }}
           onBoardStageChanged={(stage) => handleBoardStageChanged(selectedLead.id, stage)}
           leadGone={goneLeadId === selectedLead.id}

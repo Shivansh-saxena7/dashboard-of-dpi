@@ -28,6 +28,10 @@ interface StartShiftCardProps {
   // common case for most of the day). The full card stays exactly as
   // it was on Posts (app/page.tsx), untouched.
   compact?: boolean;
+  // New employee Home (E5, 2026-11-19, flag employee_home_mode): the full card only while it is useful. Once the start
+  // window has closed with no shift started (or the shift has ended) it becomes the one-line strip, without a Start
+  // button. A running shift keeps the full card (End Shift lives there). Off by default: every other page unchanged.
+  compactWhenIdle?: boolean;
 }
 
 interface ShiftTimingConfig {
@@ -81,7 +85,7 @@ const WINDOW_RECHECK_INTERVAL_MS = 30000;
 // full-screen hero moments, and this is a dashboard card, not one of
 // those. Most usage is expected to be on a phone at the office, so
 // touch targets (icon badge, button) are sized generously.
-export default function StartShiftCard({ employeeId, compact = false }: StartShiftCardProps) {
+export default function StartShiftCard({ employeeId, compact = false, compactWhenIdle = false }: StartShiftCardProps) {
 
   const [checking, setChecking] = useState(true);
   const [starting, setStarting] = useState(false);
@@ -475,12 +479,16 @@ export default function StartShiftCard({ employeeId, compact = false }: StartShi
         }`
       : startWindow?.reason;
 
-  if (compact) {
+  const idleCompact =
+    compactWhenIdle && (ended || (!started && Boolean(config) && Boolean(startWindow) && (!startWindow!.allowed || nonWorkingGate.blocked)));
+
+  if (compact || idleCompact) {
     return (
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
+        data-testid={idleCompact ? "shift-compact" : undefined}
         className="mx-4 mt-4 flex items-center justify-between gap-3 rounded-xl bg-white border border-slate-100 shadow-sm px-4 py-2.5"
       >
         <div className="flex items-center gap-2 min-w-0">
@@ -497,6 +505,10 @@ export default function StartShiftCard({ employeeId, compact = false }: StartShi
                   hour: "2-digit",
                   minute: "2-digit"
                 })}`
+              : idleCompact
+              ? nonWorkingDayLabel
+                ? `${nonWorkingDayLabel} — no shift today`
+                : "Shift not started — the start window is closed"
               : "Shift not started — new leads are locked"}
           </p>
         </div>
@@ -505,7 +517,7 @@ export default function StartShiftCard({ employeeId, compact = false }: StartShi
             exclusively on the full card (Posts): it's a voluntary,
             low-priority action per the top-level comment, no need to
             surface it everywhere shift-status is glanceable. */}
-        {!started && !ended && (
+        {!started && !ended && !idleCompact && (
           <motion.button
             whileTap={canStart ? { scale: 0.96 } : undefined}
             disabled={starting || !canStart}

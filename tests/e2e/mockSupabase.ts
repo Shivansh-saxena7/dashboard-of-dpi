@@ -95,6 +95,24 @@ export interface MockState {
   // Network failure switches (result-save tests): abort the next N saves; or save, then lose the answer.
   failUpdates: number;
   landThenLose: number;
+  // The lead_engine_settings row the app reads (tests add e.g. employee_home_mode); a copy of the default per test.
+  settings: Record<string, unknown>;
+  // get_employee_work_report answer; null = the generic empty answer.
+  workReport: Record<string, unknown> | null;
+  // Delay (ms) before lead_engine_settings answers: a slow settings read must not hold the page.
+  settingsDelayMs: number;
+  // lead_notes reminders the Home / ?filter=reminders-today read (Phase 2); remindersFail = answer 500.
+  reminders: { lead_id: string; reminder_at: string }[];
+  remindersFail: boolean;
+  // The logged-in employee row (tests may set role / team_id) and leads reserved for the team (Phase 3).
+  employee: Record<string, unknown>;
+  teamPending: { id: string }[];
+  // E6: own leave rows, get_given_lead_context answer, get_call_quality_summary answer (null = "not visible" error).
+  leave: { employee_id: string; start_date: string; end_date: string | null }[];
+  given: Record<string, unknown> | null;
+  cq: Record<string, unknown> | null;
+  // E7: own tracking rows (social posts summary).
+  tracking: { ig_done: boolean; fb_done: boolean }[];
 }
 
 export async function mockSupabase(context: BrowserContext): Promise<MockState> {
@@ -106,8 +124,8 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
       try { sessionStorage.setItem(key as string, JSON.stringify({ on, at: Date.now() })); } catch { /* ignore */ }
     }, [`employee-card-mode:v1:${EMP}`, on] as const);
   }
-  const state: MockState = { leads: makeLeads("LEAD", 60), data: makeLeads("DATA", 40), anomalies: [], updates: [], failUpdates: 0, landThenLose: 0 };
-  const employee = { id: EMP, auth_user_id: UID, name: "Test Employee", role: "employee", department: "sales", is_active: true, team_id: null };
+  const employee: Record<string, unknown> = { id: EMP, auth_user_id: UID, name: "Test Employee", role: "employee", department: "sales", is_active: true, team_id: null };
+  const state: MockState = { leads: makeLeads("LEAD", 60), data: makeLeads("DATA", 40), anomalies: [], updates: [], failUpdates: 0, landThenLose: 0, settings: { ...LEAD_ENGINE_SETTINGS }, workReport: null, settingsDelayMs: 0, reminders: [], remindersFail: false, employee, teamPending: [], leave: [], given: null, cq: null, tracking: [] };
 
   const json = (route: Route, body: unknown, status = 200, headers: Record<string, string> = {}) =>
     route.fulfill({ status, contentType: "application/json", headers: { "access-control-allow-origin": "*", "content-range": "0-0/0", ...headers }, body: JSON.stringify(body) });
@@ -125,14 +143,25 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
     if (p.startsWith("/auth/v1/logout")) return json(route, {});
     if (p.startsWith("/auth/v1")) return json(route, {});
 
-    if (p === "/rest/v1/employees") return json(route, wantsObject ? employee : [employee]);
-    if (p === "/rest/v1/lead_engine_settings") return json(route, wantsObject ? LEAD_ENGINE_SETTINGS : [LEAD_ENGINE_SETTINGS]);
+    if (p === "/rest/v1/employees") return json(route, wantsObject ? state.employee : [state.employee]);
+    if (p === "/rest/v1/lead_engine_settings") {
+      if (state.settingsDelayMs > 0) await new Promise((r) => setTimeout(r, state.settingsDelayMs));
+      // The page may have moved on while the answer was held back.
+      return json(route, wantsObject ? state.settings : [state.settings]).catch(() => {});
+    }
     if (p === "/rest/v1/hrms_settings") return json(route, wantsObject ? HRMS_SETTINGS : [HRMS_SETTINGS]);
     if (p === "/rest/v1/leads" && method === "GET") {
       const type = url.searchParams.get("lead_type");
+      if (url.searchParams.get("pending_team_id")) return json(route, state.teamPending);
+      const stage = url.searchParams.get("board_stage");
+      if (type === "eq.LEAD" && stage) return json(route, state.leads.filter((l) => `eq.${l.board_stage}` === stage));
       if (type === "eq.LEAD") return json(route, state.leads);
       if (type === "eq.DATA") return json(route, state.data);
       return json(route, wantsObject ? {} : []);
+    }
+    if (p === "/rest/v1/lead_notes" && method === "GET" && (url.searchParams.get("select") || "").includes("reminder_at")) {
+      if (state.remindersFail) return json(route, { message: "fake failure" }, 500);
+      return json(route, state.reminders);
     }
     if (p === "/rest/v1/system_anomaly_log" && method === "POST") {
       try {
@@ -177,6 +206,18 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
         return route.abort("failed");
       }
       return json(route, null);
+    }
+    if (p === "/rest/v1/rpc/get_employee_work_report" && state.workReport) return json(route, state.workReport);
+    if (p === "/rest/v1/rpc/get_given_lead_context") return json(route, state.given ?? { enabled: false, leads: [] });
+    if (p === "/rest/v1/rpc/get_call_quality_summary") {
+      if (!state.cq) return json(route, { code: "P0001", message: "get_call_quality_summary: Call Quality is not visible to employees", details: null, hint: null }, 400);
+      return json(route, state.cq);
+    }
+    if (p === "/rest/v1/employee_leave_periods" && method === "GET") return json(route, state.leave);
+    if (p === "/rest/v1/tracking" && method === "GET") return json(route, state.tracking);
+    if (p === "/rest/v1/leads" && method === "HEAD" && url.searchParams.get("lead_type") === "eq.DATA") {
+      const n = state.data.length;
+      return route.fulfill({ status: 200, headers: { "access-control-allow-origin": "*", "access-control-expose-headers": "content-range", "content-range": n ? `0-0/${n}` : "*/0" } });
     }
     if (p === "/rest/v1/rpc/get_working_calendar") return json(route, { timezone: "Asia/Kolkata", weekly_off_day: 2, ranges: [], timers_enabled: true });
     if (p.startsWith("/rest/v1/rpc/")) return json(route, wantsObject ? {} : []);

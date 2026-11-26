@@ -63,6 +63,8 @@ interface LeadDetailModalProps {
   onBoardStageChanged: (boardStage: BoardStage) => void;
   // The lead was given to someone else while this was open (2026-11-15): the list drops the card.
   onLeadGone?: () => void;
+  // Home queue (E4): when given, a "Skip to next" button shows at the top of the sheet. Optional, display only.
+  onQueueSkip?: () => void;
   onPauseChanged: (pause: { pausedUntil: string | null; pauseReason: string | null; pauseNote: string | null }) => void;
 }
 
@@ -77,7 +79,7 @@ interface LeadDetailModalProps {
 // status and board_stage are deliberately independent state, per the
 // approved design — Log Update never touches board_stage, and Move
 // Lead never touches status except the one explicit case (Booking).
-export default function LeadDetailModal({ lead, givenContext, onClose, onUpdated, onBoardStageChanged, onPauseChanged, onLeadGone }: LeadDetailModalProps) {
+export default function LeadDetailModal({ lead, givenContext, onClose, onUpdated, onBoardStageChanged, onPauseChanged, onLeadGone, onQueueSkip }: LeadDetailModalProps) {
 
   const [notes, setNotes] = useState<LeadNote[]>([]);
   const [loadingNotes, setLoadingNotes] = useState(true);
@@ -531,6 +533,21 @@ export default function LeadDetailModal({ lead, givenContext, onClose, onUpdated
           >
             <X size={16} />
           </button>
+
+          {/* Home queue (2026-11-19, E4): one-tap Skip, only when the list passes onQueueSkip. Nothing else here changes. */}
+          {onQueueSkip && (
+            <div className="mb-3 flex items-center justify-between gap-3 pr-10">
+              <span className="text-xs font-semibold text-slate-500">Next lead queue</span>
+              <button
+                type="button"
+                data-testid="sheet-queue-skip"
+                onClick={onQueueSkip}
+                className="min-h-11 rounded-full border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700"
+              >
+                Skip to next
+              </button>
+            </div>
+          )}
 
           <p className="text-[10px] font-semibold tracking-[0.2em] text-amber-600 uppercase mb-2">
             Lead Detail

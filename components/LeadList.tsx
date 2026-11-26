@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 import { Search, ChevronDown } from "lucide-react";
@@ -19,17 +20,21 @@ import { normalizeMobile } from "@/lib/normalizeMobile";
 import { consumeRecentlyCalledCardId, scrollToAndHighlightCard, consumeQuickDialNumber } from "@/lib/lastCalledLead";
 import { usePendingOutcomeSheet } from "@/lib/usePendingOutcomeSheet";
 import { useActiveCallRestore, keepActiveLeadInList } from "@/lib/useActiveCallRestore";
+import { readActiveCall } from "@/lib/activeCall";
 import ResumeCallStrip from "./ResumeCallStrip";
 import { LEAD_STATUS_DISPLAY } from "@/lib/leadStatusDisplay";
 import { BOARD_STAGES, BoardStage } from "@/lib/leadBoardStageDisplay";
 import { istDateStringToRangeStartUTC, istDateStringToRangeEndUTC } from "@/lib/istTime";
 import { useLeadSiblings } from "@/lib/useLeadSiblings";
 import { leadOrigin, LeadOrigin } from "@/lib/recycleReasonDisplay";
-import { recyclingTomorrowCutoff } from "@/lib/recyclingTomorrow";
 import { useWorkingCalendar } from "@/lib/useWorkingCalendar";
 import type { WorkingCalendar } from "@/lib/workingCalendar";
 import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
 import { isUntouchedInCurrentAssignment } from "@/lib/newLeadFilter";
+import { recyclingTomorrowCutoffFor as sharedRecyclingTomorrowCutoffFor, stageCounts, tabFromParam, homeFilterFromParam, homeFilterLeads, HOME_FILTER_LABELS, type HomeFilter, queueOrder } from "@/lib/employeeHome";
+import { useListQueue } from "@/lib/useListQueue";
+import QueueBar from "./QueueBar";
+import { useTodayReminders } from "@/lib/todayReminders";
 import { useGivenLeadContext } from "@/lib/useGivenLeadContext";
 import { useReassignedJourney } from "@/lib/useReassignedJourney";
 import ReassignedJourneySheet from "./ReassignedJourneySheet";
@@ -123,25 +128,9 @@ function FilterSelect({
 // Recycling Tomorrow cutoff for a loaded lead (null = not in the filter).
 // Same lead shape the Recycling Soon filter builds for getRecycleCutoff.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+// Shared with the employee Home tiles (lib/employeeHome.ts) so the Home number and this list agree.
 function recyclingTomorrowCutoffFor(lead: any, workingCalendar: WorkingCalendar | null): Date | null {
-  const h = lead.lead_history[0];
-  return recyclingTomorrowCutoff(
-    {
-      status: lead.status,
-      sla_deadline: lead.sla_deadline,
-      recycle_count: lead.recycle_count,
-      board_stage: lead.board_stage,
-      paused_until: h?.paused_until ?? null,
-      last_activity_at: h?.last_activity_at ?? null,
-      pause_reason: h?.pause_reason ?? null,
-      assigned_at: h?.assigned_at ?? null
-    },
-    h?.outcome_at ?? null,
-    h?.call_count ?? 0,
-    Boolean(lead.is_personal_lead),
-    Date.now(),
-    workingCalendar
-  );
+  return sharedRecyclingTomorrowCutoffFor(lead, workingCalendar);
 }
 
 export default function LeadList({ employeeId }: LeadListProps) {
@@ -184,6 +173,18 @@ export default function LeadList({ employeeId }: LeadListProps) {
   // Recycling Tomorrow (2026-10-05): worth-saving leads whose recycle
   // cutoff is within 24h, any stage, soonest first. See lib/recyclingTomorrow.ts.
   const [recyclingTomorrowFilter, setRecyclingTomorrowFilter] = useState(false);
+  // Employee Home Needs attention (2026-11-18): ?filter=followup-overdue / reminders-today / visits-today, the same
+  // predicates as the Home numbers (lib/employeeHome.ts). Shown as a "From Home" chip; tap to clear.
+  const [homeFilter, setHomeFilter] = useState<HomeFilter | null>(null);
+  // "Start with next lead" (2026-11-18, Home Phase 3): ?queue=1 walks the queue (lib/employeeHome.ts queueOrder, the
+  // same order as the Home's Up next) through this list's own modal: Call and result-save are the normal ones; after a
+  // saved result the next lead opens; with the modal closed a bar offers Skip / Open / Exit. Skip is kept in this tab's
+  // sessionStorage only (nothing is written to the database).
+  const [queueRequested, setQueueRequested] = useState(false);
+  // E5: came from the new Home (links carry from=home): a "Back to Home" chip.
+  const [fromHomeLink, setFromHomeLink] = useState(false);
+
+  const todayReminders = useTodayReminders(employeeId, homeFilter === "reminders-today" || homeFilter === "reminders-missed" || queueRequested);
   const [originFilter, setOriginFilter] = useState<"" | LeadOrigin>("");
   const [priorityFilter, setPriorityFilter] = useState<"" | LeadPriority>("");
   const [addPersonalLeadOpen, setAddPersonalLeadOpen] = useState(false);
@@ -239,13 +240,37 @@ export default function LeadList({ employeeId }: LeadListProps) {
     // ?filter=recycling-tomorrow — the focus-reminder toast's "Open
     // Recycling Tomorrow" button (2026-10-05).
     const filterParam = searchParams.get("filter");
+    const fromParam = searchParams.get("from") === "home";
+    if (fromParam) {
+      setFromHomeLink(true);
+    }
     if (filterParam === "recycling-tomorrow") {
       setRecyclingTomorrowFilter(true);
+    }
+    // Employee Home tiles (2026-11-18): ?filter=new is the Status = New filter, ?tab= opens one board tab.
+    if (filterParam === "new") {
+      setStatusFilter("NEW");
+    }
+    // Home "Given to you" (E6): the existing Given by admin filter.
+    if (filterParam === "given") {
+      setStatusFilter(GIVEN_BY_ADMIN_FILTER);
+    }
+    const homeFilterParam = homeFilterFromParam(filterParam);
+    if (homeFilterParam) {
+      setHomeFilter(homeFilterParam);
+    }
+    const queueParam = searchParams.get("queue") === "1";
+    if (queueParam) {
+      setQueueRequested(true);
+    }
+    const tabParam = tabFromParam(searchParams.get("tab"));
+    if (tabParam) {
+      setActiveTab(tabParam);
     }
     if (openLeadId) {
       setSelectedLeadId(openLeadId);
     }
-    if (openLeadId || filterParam) {
+    if (openLeadId || filterParam || tabParam || queueParam || fromParam) {
       router.replace("/leads");
     }
   }, [loading, searchParams, router]);
@@ -518,16 +543,32 @@ export default function LeadList({ employeeId }: LeadListProps) {
     if (!givenContext.enabled && statusFilter === GIVEN_BY_ADMIN_FILTER) setStatusFilter("");
   }, [givenContext.enabled, statusFilter]);
 
-  const tabCounts = useMemo(() => {
-    const counts: Record<BoardStage, number> = { LEADS: 0, FOLLOW_UP: 0, VISIT: 0, BOOKING: 0 };
+  const listQueue = useListQueue(
+    employeeId,
+    "LEAD",
+    useMemo(() => leads.map((l) => l.id), [leads]),
+    setSelectedLeadId
+  );
+  const queue = listQueue.queue;
 
-    leads.forEach((lead) => {
-      const stage = (lead.board_stage as BoardStage) || "LEADS";
-      counts[stage] = (counts[stage] || 0) + 1;
-    });
+  // E4: after a cold restart during a queue call, the call-return flow opens that lead; today's stored queue run
+  // comes back at that lead (only when the open lead is the one the active call is about).
+  useEffect(() => {
+    if (!selectedLeadId || queue) return;
+    const entry = readActiveCall(employeeId);
+    if (entry && entry.listType === "LEAD" && entry.leadId === selectedLeadId) listQueue.resumeFor(selectedLeadId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLeadId]);
 
-    return counts;
-  }, [leads]);
+  useEffect(() => {
+    if (!queueRequested || loading || !todayReminders.loaded) return;
+    setQueueRequested(false);
+    listQueue.start(queueOrder(leads, { calendar: workingCalendar, reminders: todayReminders.byLead, missed: todayReminders.missed }).map((item) => item.lead.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queueRequested, loading, todayReminders.loaded]);
+
+  // Same counting as the employee Home "My leads" card (lib/employeeHome.ts).
+  const tabCounts = useMemo(() => stageCounts(leads) as Record<BoardStage, number>, [leads]);
 
   const projectOptions = useMemo(
     () => Array.from(new Set(leads.map((l) => l.project).filter(Boolean))) as string[],
@@ -584,7 +625,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
     // same bypass for the identical reason. Plain tab-browsing with no
     // search/status/personal-only filter active is completely
     // unchanged.
-    const bypassTabFilter = Boolean(searchQuery.trim()) || Boolean(statusFilter) || personalOnlyFilter || recyclingTomorrowFilter;
+    const bypassTabFilter = Boolean(searchQuery.trim()) || Boolean(statusFilter) || personalOnlyFilter || recyclingTomorrowFilter || Boolean(homeFilter);
     let result = bypassTabFilter ? leads : leads.filter((lead) => (lead.board_stage || "LEADS") === activeTab);
 
     if (personalOnlyFilter) {
@@ -593,6 +634,10 @@ export default function LeadList({ employeeId }: LeadListProps) {
 
     if (recyclingTomorrowFilter) {
       result = result.filter((lead) => recyclingTomorrowCutoffFor(lead, workingCalendar) !== null);
+    }
+
+    if (homeFilter) {
+      result = homeFilterLeads(result, homeFilter, { calendar: workingCalendar, reminders: todayReminders.byLead, missed: todayReminders.missed });
     }
 
     if (originFilter) {
@@ -732,7 +777,7 @@ export default function LeadList({ employeeId }: LeadListProps) {
 
     return result;
 
-  }, [leads, givenContext.byLeadId, needsCall, activeTab, searchQuery, projectFilter, sourceFilter, statusFilter, recyclingSoonFilter, dateRangeFilter, customStart, customEnd, sortBy, personalOnlyFilter, originFilter, priorityFilter, recyclingTomorrowFilter, workingCalendar, activeCall.activeLeadId]);
+  }, [leads, givenContext.byLeadId, needsCall, activeTab, searchQuery, projectFilter, sourceFilter, statusFilter, recyclingSoonFilter, dateRangeFilter, customStart, customEnd, sortBy, personalOnlyFilter, originFilter, priorityFilter, recyclingTomorrowFilter, workingCalendar, activeCall.activeLeadId, homeFilter, todayReminders.byLead]);
   visibleIdsRef.current = visibleLeads.map((lead: any) => lead.id);
 
   // Same fix as app/admin/leads/page.tsx's cardLeads (2026-09-18) — the
@@ -805,6 +850,41 @@ export default function LeadList({ employeeId }: LeadListProps) {
   return (
     <>
       <ResumeCallStrip employeeId={employeeId} currentList="LEAD" openLeadId={selectedLeadId} onResumeHere={(id) => setSelectedLeadId(id)} />
+      {fromHomeLink && (
+        <div className="mx-4 mt-3 flex">
+          <Link
+            href="/"
+            data-testid="back-to-home"
+            className="flex min-h-11 items-center gap-1 rounded-full border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm"
+          >
+            <span aria-hidden>‹</span> Back to Home
+          </Link>
+        </div>
+      )}
+      {queue && !selectedLeadId && (
+        <QueueBar
+          queue={queue}
+          nameOf={(id) => leads.find((l) => l.id === id)?.name}
+          onSkip={listQueue.skip}
+          onOpen={listQueue.open}
+          onExit={listQueue.exit}
+        />
+      )}
+      {homeFilter && (
+        <div className="mx-4 mt-3 flex">
+          <button
+            type="button"
+            data-testid="home-filter-chip"
+            onClick={() => setHomeFilter(null)}
+            aria-label={`Clear filter: ${HOME_FILTER_LABELS[homeFilter]}`}
+            className="flex min-h-11 items-center gap-2 rounded-full border border-amber-300 bg-amber-50 px-4 text-sm font-semibold text-amber-900"
+          >
+            From Home: {HOME_FILTER_LABELS[homeFilter]}
+            {homeFilter === "reminders-today" && !todayReminders.loaded ? " (loading)" : ` (${visibleLeads.length})`}
+            <span aria-hidden className="text-base leading-none">×</span>
+          </button>
+        </div>
+      )}
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
@@ -1059,6 +1139,9 @@ export default function LeadList({ employeeId }: LeadListProps) {
 
       {selectedLead && (
         <LeadDetailModal
+          // E4: a different lead (queue Next / Skip, Resume here) gets a fresh sheet, so nothing typed carries over.
+          key={selectedLead.id}
+          onQueueSkip={queue && queue.ids[queue.index] === selectedLead.id ? listQueue.skip : undefined}
           givenContext={givenContext.byLeadId.get(selectedLead.id) ?? null}
           lead={{
             id: selectedLead.id,
@@ -1097,12 +1180,16 @@ export default function LeadList({ employeeId }: LeadListProps) {
             // waits one paint for the modal to actually unmount and the
             // card to be back in the DOM before scrolling to it.
             const id = selectedLead.id;
+            // Queue: closed right after a saved result -> no auto-open, the bar moves on to the next lead.
+            listQueue.onClosed();
             setSelectedLeadId(null);
             requestAnimationFrame(() => scrollToAndHighlightCard(`lead-card-${id}`));
           }}
           onUpdated={(updates) => {
             handleLeadUpdated(selectedLead.id, updates);
             givenContext.refresh();
+            // Queue: a saved result moves on to the next lead (after the "Update logged." toast is seen).
+            listQueue.onSaved(selectedLead.id);
           }}
           onBoardStageChanged={(stage) => handleBoardStageChanged(selectedLead.id, stage)}
           onLeadGone={() => {
