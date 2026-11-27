@@ -268,9 +268,17 @@ test("new card: taps at least 44 px, no side scroll, no purple", async ({ contex
 
 test("flag off: the list HTML is the old card's (hash written for the main comparison)", async ({ context, page }, info) => {
   await open(context, page, "/admin/leads", "admin", "off");
-  await page.waitForTimeout(1500);
-  const html = await page.locator(GRID).first().evaluate((g) => g.outerHTML);
+  await page.waitForLoadState("networkidle");
+  // Wait until the list stops changing (late badges such as siblings), so the hash does not depend on timing.
+  let html = "";
+  for (let i = 0; i < 20; i++) {
+    await page.waitForTimeout(1000);
+    const next = await page.locator(GRID).first().evaluate((g) => g.outerHTML);
+    if (next === html) break;
+    html = next;
+  }
   expect(html).not.toContain('data-card="v2"');
+  if (process.env.ADMIN_HTML_DUMP) fs.writeFileSync(`${process.env.ADMIN_HTML_DUMP}_${info.project.name}.html`, html);
   if (process.env.ADMIN_HTML_OUT) fs.appendFileSync(process.env.ADMIN_HTML_OUT, `${info.project.name} ${crypto.createHash("sha256").update(html).digest("hex")}\n`);
 });
 
