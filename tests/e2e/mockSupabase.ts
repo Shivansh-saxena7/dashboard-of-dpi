@@ -235,7 +235,8 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
       return json(route, rows);
     }
     if (p === "/rest/v1/rpc/get_call_quality_summary" && state.cqAll) return json(route, state.cqAll);
-    if (method === "GET" && p === "/rest/v1/leads" && (url.searchParams.get("current_owner_id") || "").startsWith("in.")) return json(route, state.workloadLeads);
+    // Admin Home workload read (admin login only): a team leader's Home also reads leads by current_owner_id=in.(team) and must reach the lead rows below.
+    if (method === "GET" && p === "/rest/v1/leads" && ["admin", "super_admin"].includes(String(state.employee.role)) && (url.searchParams.get("current_owner_id") || "").startsWith("in.")) return json(route, state.workloadLeads);
     if (p === "/rest/v1/employees") {
       if (wantsObject || url.searchParams.get("auth_user_id") || !state.staff) return json(route, wantsObject ? state.employee : [state.employee]);
       return json(route, state.staff);
