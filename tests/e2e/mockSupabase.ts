@@ -113,6 +113,34 @@ export interface MockState {
   cq: Record<string, unknown> | null;
   // E7: own tracking rows (social posts summary).
   tracking: { ig_done: boolean; fb_done: boolean }[];
+  // Admin Home A1: the settings row and the logged-in employee (tests may change role), the staff list returned to
+  // list reads of employees, and the Admin Home tables. fail = tables that answer 500.
+  staff: Record<string, unknown>[] | null;
+  heartbeats: { function_name: string; max_silence_minutes: number; last_succeeded_at: string | null }[];
+  backups: { run_at: string; status: string }[];
+  anomalyRows: { source: string; severity: string }[];
+  transfers: { id: string }[];
+  empRequests: { id: string }[];
+  attendanceRows: { employee_id: string; date: string }[] | null;
+  joins: { employee_id: string; date_of_joining: string | null }[];
+  fail: Set<string>;
+  // Admin Home A2: rows behind the count-only reads, today's attendance by date, the all-employee Call Quality summary
+  // and the workload rows (leads of the team with their assignments).
+  clicks: { clicked_at: string; click_type: string }[];
+  activities: { created_at: string; activity_type: string }[];
+  bookings: { board_stage_changed_at: string }[];
+  attendanceByDate: { employee_id: string; date: string; shift_start_at: string | null; shift_end_at: string | null; attendance_type: string | null }[] | null;
+  cqAll: Record<string, unknown> | null;
+  workloadLeads: Record<string, unknown>[];
+  // Admin Home A3: system recycles (assigned_at), guard events, restore log rows, the positive-junk RPC answer.
+  recycles: string[];
+  guardEvents: { created_at: string; source: string; action: string }[];
+  restoreRows: { protected_until: string; restored_at: string | null; undone_at: string | null }[];
+  positiveJunk: { rows: unknown[] } | null;
+  positiveJunkCalls: number;
+  // Admin Home A4: site visit events and LEAD_JUNKED notifications (per recipient) behind the count-only reads.
+  visits: { created_at: string; event_type: string }[];
+  junkNotes: { created_at: string; employee_id: string }[];
 }
 
 export async function mockSupabase(context: BrowserContext): Promise<MockState> {
@@ -125,7 +153,11 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
     }, [`employee-card-mode:v1:${EMP}`, on] as const);
   }
   const employee: Record<string, unknown> = { id: EMP, auth_user_id: UID, name: "Test Employee", role: "employee", department: "sales", is_active: true, team_id: null };
-  const state: MockState = { leads: makeLeads("LEAD", 60), data: makeLeads("DATA", 40), anomalies: [], updates: [], failUpdates: 0, landThenLose: 0, settings: { ...LEAD_ENGINE_SETTINGS }, workReport: null, settingsDelayMs: 0, reminders: [], remindersFail: false, employee, teamPending: [], leave: [], given: null, cq: null, tracking: [] };
+  const state: MockState = { leads: makeLeads("LEAD", 60), data: makeLeads("DATA", 40), anomalies: [], updates: [], failUpdates: 0, landThenLose: 0, settings: { ...LEAD_ENGINE_SETTINGS }, workReport: null, settingsDelayMs: 0, reminders: [], remindersFail: false, employee, teamPending: [], leave: [], given: null, cq: null, tracking: [],
+    staff: null, heartbeats: [], backups: [], anomalyRows: [], transfers: [], empRequests: [], attendanceRows: null, joins: [], fail: new Set(),
+    clicks: [], activities: [], bookings: [], attendanceByDate: null, cqAll: null, workloadLeads: [],
+    recycles: [], guardEvents: [], restoreRows: [], positiveJunk: null, positiveJunkCalls: 0, visits: [], junkNotes: []
+  };
 
   const json = (route: Route, body: unknown, status = 200, headers: Record<string, string> = {}) =>
     route.fulfill({ status, contentType: "application/json", headers: { "access-control-allow-origin": "*", "content-range": "0-0/0", ...headers }, body: JSON.stringify(body) });
@@ -143,12 +175,84 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
     if (p.startsWith("/auth/v1/logout")) return json(route, {});
     if (p.startsWith("/auth/v1")) return json(route, {});
 
-    if (p === "/rest/v1/employees") return json(route, wantsObject ? state.employee : [state.employee]);
+    const table = p.startsWith("/rest/v1/") ? p.slice("/rest/v1/".length) : "";
+    if ((method === "GET" || method === "HEAD") && state.fail.has(table)) return json(route, { message: "fake failure" }, 500);
+    // A2 count-only reads: count the rows whose time column is in [gte, lt).
+    const between = (col: string) => {
+      const vals = url.searchParams.getAll(col);
+      const gte = vals.find((v) => v.startsWith("gte."))?.slice(4);
+      const lt = vals.find((v) => v.startsWith("lt."))?.slice(3);
+      return (t: string) => (!gte || Date.parse(t) >= Date.parse(gte)) && (!lt || Date.parse(t) < Date.parse(lt));
+    };
+    const headCount = (n: number) =>
+      route.fulfill({ status: 200, headers: { "access-control-allow-origin": "*", "access-control-expose-headers": "content-range", "content-range": n ? `0-0/${n}` : "*/0" } });
+    if (method === "HEAD" && p === "/rest/v1/lead_history" && url.searchParams.get("assigned_by_type") === "eq.SYSTEM") {
+      const inWin = between("assigned_at");
+      return headCount(state.recycles.filter((t) => inWin(t)).length);
+    }
+    if (method === "HEAD" && p === "/rest/v1/site_visits") {
+      const inWin = between("created_at");
+      const type = (url.searchParams.get("event_type") || "").replace(/^eq./, "");
+      return headCount(state.visits.filter((v) => v.event_type === type && inWin(v.created_at)).length);
+    }
+    if (method === "HEAD" && p === "/rest/v1/notification" && url.searchParams.get("type") === "eq.LEAD_JUNKED") {
+      const inWin = between("created_at");
+      const me = (url.searchParams.get("employee_id") || "").replace(/^eq./, "");
+      return headCount(state.junkNotes.filter((n) => n.employee_id === me && inWin(n.created_at)).length);
+    }
+    if (method === "HEAD" && p === "/rest/v1/lead_guard_events") {
+      const inWin = between("created_at");
+      const src = (url.searchParams.get("source") || "").replace(/^eq./, "");
+      return headCount(state.guardEvents.filter((g) => g.source === src && inWin(g.created_at)).length);
+    }
+    if (method === "GET" && p === "/rest/v1/lead_guard_events") {
+      const inWin = between("created_at");
+      return json(route, state.guardEvents.filter((g) => inWin(g.created_at)).map((g) => ({ source: g.source, action: g.action })));
+    }
+    if (method === "GET" && p === "/rest/v1/lead_restore_log") return json(route, state.restoreRows);
+    if (p === "/rest/v1/rpc/get_positive_junk_leads") {
+      state.positiveJunkCalls += 1;
+      if (state.fail.has("rpc/get_positive_junk_leads")) return json(route, { message: "fake failure" }, 500);
+      return json(route, state.positiveJunk ?? { rows: [], employees: [], max_batch: 25, protection_days: 14 });
+    }
+    if (method === "HEAD" && p === "/rest/v1/contact_click_log") {
+      const inWin = between("clicked_at");
+      return headCount(state.clicks.filter((c) => c.click_type === "CALL" && inWin(c.clicked_at)).length);
+    }
+    if (method === "HEAD" && p === "/rest/v1/lead_activity_log") {
+      const inWin = between("created_at");
+      return headCount(state.activities.filter((a) => a.activity_type === "STATUS_UPDATE" && inWin(a.created_at)).length);
+    }
+    if (method === "HEAD" && p === "/rest/v1/leads" && url.searchParams.get("board_stage") === "eq.BOOKING") {
+      const inWin = between("board_stage_changed_at");
+      return headCount(state.bookings.filter((b) => inWin(b.board_stage_changed_at)).length);
+    }
+    if (method === "GET" && p === "/rest/v1/attendance" && state.attendanceByDate && !wantsObject) {
+      const d = url.searchParams.get("date") || "";
+      const dates = d.startsWith("in.(") ? d.slice(4, -1).split(",") : d.startsWith("eq.") ? [d.slice(3)] : null;
+      let rows = state.attendanceByDate.filter((r) => !dates || dates.includes(r.date));
+      if (url.searchParams.get("shift_start_at") === "not.is.null") rows = rows.filter((r) => r.shift_start_at);
+      return json(route, rows);
+    }
+    if (p === "/rest/v1/rpc/get_call_quality_summary" && state.cqAll) return json(route, state.cqAll);
+    if (method === "GET" && p === "/rest/v1/leads" && (url.searchParams.get("current_owner_id") || "").startsWith("in.")) return json(route, state.workloadLeads);
+    if (p === "/rest/v1/employees") {
+      if (wantsObject || url.searchParams.get("auth_user_id") || !state.staff) return json(route, wantsObject ? state.employee : [state.employee]);
+      return json(route, state.staff);
+    }
     if (p === "/rest/v1/lead_engine_settings") {
       if (state.settingsDelayMs > 0) await new Promise((r) => setTimeout(r, state.settingsDelayMs));
       // The page may have moved on while the answer was held back.
       return json(route, wantsObject ? state.settings : [state.settings]).catch(() => {});
     }
+    if (method === "GET" && p === "/rest/v1/cron_heartbeats") return json(route, state.heartbeats);
+    if (method === "GET" && p === "/rest/v1/backup_run_log") return json(route, state.backups);
+    if (method === "GET" && p === "/rest/v1/system_anomaly_log") return json(route, state.anomalyRows);
+    if (method === "GET" && p === "/rest/v1/lead_transfer_requests") return json(route, state.transfers);
+    if (method === "GET" && p === "/rest/v1/employee_creation_requests") return json(route, state.empRequests);
+    if (method === "GET" && p === "/rest/v1/employee_payroll_details") return json(route, state.joins);
+    if (method === "GET" && p === "/rest/v1/employee_leave_periods" && !wantsObject) return json(route, state.leave);
+    if (method === "GET" && p === "/rest/v1/attendance" && state.attendanceRows && !wantsObject) return json(route, state.attendanceRows);
     if (p === "/rest/v1/hrms_settings") return json(route, wantsObject ? HRMS_SETTINGS : [HRMS_SETTINGS]);
     if (p === "/rest/v1/leads" && method === "GET") {
       const type = url.searchParams.get("lead_type");
