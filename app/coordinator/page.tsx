@@ -6,6 +6,8 @@ import toast from "react-hot-toast";
 import { Search, ChevronDown, CheckCircle2, XCircle, Clock, FileSpreadsheet, FileText, Table2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import AdminLeadCard from "@/components/AdminLeadCard";
+import AdminLeadCardV2 from "@/components/AdminLeadCardV2";
+import { useAdminCardMode } from "@/lib/adminCardMode";
 import { useLeadSiblings } from "@/lib/useLeadSiblings";
 import { leadOrigin, LeadOrigin } from "@/lib/recycleReasonDisplay";
 import { LEAD_PRIORITY_DISPLAY, LeadPriority } from "@/lib/leadPriorityDisplay";
@@ -697,6 +699,7 @@ export default function CoordinatorDashboard() {
     () =>
       visibleLeads.map((lead: any) => ({
         id: lead.id,
+        leadHistoryId: lead.lead_history?.[0]?.id ?? null,
         name: lead.name,
         mobile: lead.mobile,
         project: lead.project,
@@ -748,6 +751,10 @@ export default function CoordinatorDashboard() {
     () => pagedCardLeads.map((l) => ({ ...l, siblings: siblingsByLeadId[l.id] })),
     [pagedCardLeads, siblingsByLeadId]
   );
+
+  // Admin card port (2026-11-27): which card (lead_engine_settings.admin_card_mode). The list never waits for it.
+  const adminCardV2 = useAdminCardMode(viewerEmployeeId);
+  const CoordinatorCard = adminCardV2 ? AdminLeadCardV2 : AdminLeadCard;
 
   const leadsReportMeta = useMemo(() => {
     const employeeLabel = employeeFilter
@@ -1472,7 +1479,7 @@ export default function CoordinatorDashboard() {
             <>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {pagedCardLeadsWithSiblings.map((cardLead, index) => (
-                  <AdminLeadCard
+                  <CoordinatorCard
                     key={cardLead.id}
                     index={index}
                     teams={[]}

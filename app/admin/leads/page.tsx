@@ -7,6 +7,8 @@ import Link from "next/link";
 import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
 import AdminLeadCard from "@/components/AdminLeadCard";
+import AdminLeadCardV2 from "@/components/AdminLeadCardV2";
+import { useAdminCardMode } from "@/lib/adminCardMode";
 import ExportPreviewTable from "@/components/ExportPreviewTable";
 import ManualLeadEntryModal from "@/components/ManualLeadEntryModal";
 import ManualBookingEntryModal from "@/components/ManualBookingEntryModal";
@@ -323,7 +325,7 @@ export default function AdminLeadsPage() {
         employees ( name ),
         pending_team:teams ( name ),
         lead_history!inner (
-          assigned_at, is_active, first_call_at, first_whatsapp_at, assigned_by_type, call_count,
+          id, assigned_at, is_active, first_call_at, first_whatsapp_at, assigned_by_type, call_count,
           last_activity_at, paused_until, pause_reason, pause_note, outcome_at, recycle_reason, recycled_from_status, recycled_from_stage,
           assigned_by:employees!lead_history_assigned_by_employee_id_fkey(name)
         )
@@ -815,6 +817,7 @@ export default function AdminLeadsPage() {
     () =>
       recyclingFilteredLeads.map((lead: any) => ({
         id: lead.id,
+        leadHistoryId: lead.lead_history?.[0]?.id ?? null,
         name: lead.name,
         mobile: lead.mobile,
         project: lead.project,
@@ -845,6 +848,10 @@ export default function AdminLeadsPage() {
   );
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+
+  // Admin card port (2026-11-27): which card (lead_engine_settings.admin_card_mode). The list never waits for it.
+  const adminCardV2 = useAdminCardMode(adminEmployeeId);
+  const LeadCardComponent = adminCardV2 ? AdminLeadCardV2 : AdminLeadCard;
 
   // Toggle, not just "add all" — lets Admin flip a full filtered batch
   // back off in one click too. Not useCallback-wrapped: unlike
@@ -1278,7 +1285,7 @@ export default function AdminLeadsPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {cardLeads.map((cardLead, index) => (
-            <AdminLeadCard
+            <LeadCardComponent
               key={cardLead.id}
               index={index}
               teams={teams}
