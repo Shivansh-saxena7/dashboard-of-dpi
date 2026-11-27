@@ -138,6 +138,8 @@ export interface MockState {
   restoreRows: { protected_until: string; restored_at: string | null; undone_at: string | null }[];
   positiveJunk: { rows: unknown[] } | null;
   positiveJunkCalls: number;
+  guardRpcCalls: number;
+  guardTableReads: number;
   // Admin Home A4: site visit events and LEAD_JUNKED notifications (per recipient) behind the count-only reads.
   visits: { created_at: string; event_type: string }[];
   junkNotes: { created_at: string; employee_id: string }[];
@@ -156,7 +158,7 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
   const state: MockState = { leads: makeLeads("LEAD", 60), data: makeLeads("DATA", 40), anomalies: [], updates: [], failUpdates: 0, landThenLose: 0, settings: { ...LEAD_ENGINE_SETTINGS }, workReport: null, settingsDelayMs: 0, reminders: [], remindersFail: false, employee, teamPending: [], leave: [], given: null, cq: null, tracking: [],
     staff: null, heartbeats: [], backups: [], anomalyRows: [], transfers: [], empRequests: [], attendanceRows: null, joins: [], fail: new Set(),
     clicks: [], activities: [], bookings: [], attendanceByDate: null, cqAll: null, workloadLeads: [],
-    recycles: [], guardEvents: [], restoreRows: [], positiveJunk: null, positiveJunkCalls: 0, visits: [], junkNotes: []
+    recycles: [], guardEvents: [], restoreRows: [], positiveJunk: null, positiveJunkCalls: 0, guardRpcCalls: 0, guardTableReads: 0, visits: [], junkNotes: []
   };
 
   const json = (route: Route, body: unknown, status = 200, headers: Record<string, string> = {}) =>
@@ -200,14 +202,28 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
       const me = (url.searchParams.get("employee_id") || "").replace(/^eq./, "");
       return headCount(state.junkNotes.filter((n) => n.employee_id === me && inWin(n.created_at)).length);
     }
-    if (method === "HEAD" && p === "/rest/v1/lead_guard_events") {
-      const inWin = between("created_at");
-      const src = (url.searchParams.get("source") || "").replace(/^eq./, "");
-      return headCount(state.guardEvents.filter((g) => g.source === src && inWin(g.created_at)).length);
+    // Live: lead_guard_events has no client grant, so a direct read is refused (42501), exactly like production.
+    if (p === "/rest/v1/lead_guard_events") {
+      state.guardTableReads += 1;
+      return json(route, { code: "42501", message: "permission denied for table lead_guard_events", details: null, hint: null }, 403);
     }
-    if (method === "GET" && p === "/rest/v1/lead_guard_events") {
-      const inWin = between("created_at");
-      return json(route, state.guardEvents.filter((g) => inWin(g.created_at)).map((g) => ({ source: g.source, action: g.action })));
+    // 2026-11-28: admins read guard counts through get_admin_guard_event_counts(p_from, p_to) (is_admin() inside).
+    if (p === "/rest/v1/rpc/get_admin_guard_event_counts") {
+      state.guardRpcCalls += 1;
+      if (state.fail.has("rpc/get_admin_guard_event_counts")) return json(route, { code: "42501", message: "not allowed", details: null, hint: null }, 403);
+      const body = (req.postDataJSON() || {}) as { p_from?: string; p_to?: string };
+      const from = Date.parse(String(body.p_from)), to = Date.parse(String(body.p_to));
+      if (!(to > from) || to - from > 3 * 86400e3) return json(route, { code: "22023", message: "window must be set, start before end, at most 3 days" }, 400);
+      const counts = new Map<string, { source: string; action: string; n: number }>();
+      for (const g of state.guardEvents) {
+        const t = Date.parse(g.created_at);
+        if (t < from || t >= to) continue;
+        const k = g.source + "/" + g.action;
+        const c = counts.get(k) ?? { source: g.source, action: g.action, n: 0 };
+        c.n += 1;
+        counts.set(k, c);
+      }
+      return json(route, [...counts.values()]);
     }
     if (method === "GET" && p === "/rest/v1/lead_restore_log") return json(route, state.restoreRows);
     if (p === "/rest/v1/rpc/get_positive_junk_leads") {

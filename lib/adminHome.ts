@@ -426,6 +426,32 @@ export function groupGuardEvents(today: GuardEventLite[] | null | undefined, yes
   return [...map.values()].filter((g) => g.today > 0).sort((a, b) => b.today - a.today || a.key.localeCompare(b.key));
 }
 
+// get_admin_guard_event_counts rows: one per (source, action) in the window, already counted in the database.
+export interface GuardCountRow {
+  source: string;
+  action: string;
+  n: number | string;
+}
+// Same groups as groupGuardEvents, from counted rows (no 500-row cap).
+export function groupGuardCounts(today: GuardCountRow[] | null | undefined, yesterday: GuardCountRow[] | null | undefined): GuardGroup[] {
+  const map = new Map<string, GuardGroup>();
+  const add = (rows: GuardCountRow[] | null | undefined, field: "today" | "yesterday") => {
+    for (const r of rows ?? []) {
+      const key = `${r.source}/${r.action}`;
+      const g = map.get(key) ?? { key, label: GUARD_LABELS[key] ?? key.replace(/_/g, " ").toLowerCase(), today: 0, yesterday: 0 };
+      g[field] += Number(r.n) || 0;
+      map.set(key, g);
+    }
+  };
+  add(today, "today");
+  add(yesterday, "yesterday");
+  return [...map.values()].filter((g) => g.today > 0).sort((a, b) => b.today - a.today || a.key.localeCompare(b.key));
+}
+// Admin junk events in a window (source admin_junk, any action), from counted rows.
+export function adminJunkCount(rows: GuardCountRow[] | null | undefined): number {
+  return (rows ?? []).filter((r) => r.source === "admin_junk").reduce((s, r) => s + (Number(r.n) || 0), 0);
+}
+
 export interface RestoreRow {
   protected_until: string;
   restored_at?: string | null;

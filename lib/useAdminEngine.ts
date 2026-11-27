@@ -1,18 +1,19 @@
 "use client";
 // Admin Home A3 (2026-11-19): Lead engine today + positive-history junk. Read-only, bounded, no polling, no channel.
 //   * Recycled today: count-only (HEAD) on lead_history (SYSTEM + recycle_reason), today vs yesterday at this time.
-//   * Guard / hold events: lead_guard_events for the two windows (limit 500 each), grouped in the browser.
+//   * Guard / hold events (2026-11-28): get_admin_guard_event_counts RPC, per (source, action) counts for the two windows
+//     (lead_guard_events itself has no client grant; the old direct read failed with 42501 for every admin).
 //   * Restore protections: lead_restore_log rows that could be open now or 24 h ago (limit 200), counted at both times.
 //   * Positive-history junk: get_positive_junk_leads() returns the whole list (it scans every Junk lead), so it never
 //     runs on load or Refresh: only on "Check", once; the count (the page's "All") is remembered for the tab, 30 min.
 //   * Junk today (A4): no junk timestamp exists, so count-only on the viewer's own LEAD_JUNKED notifications (one per
-//     junked lead per active admin, sent by mark_lead_junk_atomic) and on lead_guard_events admin_junk; sweep = the rest.
+//     junked lead per active admin, sent by mark_lead_junk_atomic) and on the admin_junk guard count; sweep = the rest.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { reportClientError } from "@/lib/reportClientError";
-import { groupGuardEvents, junkToday, openProtections, positiveJunkCount, todayWindows, type GuardEventLite, type GuardGroup, type RestoreRow } from "@/lib/adminHome";
+import { adminJunkCount, groupGuardCounts, junkToday, openProtections, positiveJunkCount, todayWindows, type GuardCountRow, type GuardGroup, type RestoreRow } from "@/lib/adminHome";
 
-export const ENGINE_LIMITS = { guard: 500, restore: 200 };
+export const ENGINE_LIMITS = { restore: 200 };
 const FOCUS_REFRESH_MS = 60_000;
 const PJ_KEY = "admin-home-positive-junk:v1";
 const PJ_REMEMBER_MS = 30 * 60 * 1000;
@@ -54,8 +55,8 @@ export function useAdminEngine(employeeId: string | null = null) {
         .gte("assigned_at", from)
         .lt("assigned_at", to)
         .limit(1);
-    const guards = (from: string, to: string) =>
-      supabase.from("lead_guard_events").select("source, action").gte("created_at", from).lt("created_at", to).limit(ENGINE_LIMITS.guard);
+    // lead_guard_events has no client grant: admins read counts through the read-only RPC (is_admin() inside, window <= 3 days).
+    const guards = (from: string, to: string) => supabase.rpc("get_admin_guard_event_counts", { p_from: from, p_to: to });
     const junkNotes = (from: string, to: string) =>
       employeeId
         ? supabase
@@ -67,9 +68,7 @@ export function useAdminEngine(employeeId: string | null = null) {
             .lt("created_at", to)
             .limit(1)
         : Promise.resolve({ count: null, error: null });
-    const adminJunk = (from: string, to: string) =>
-      supabase.from("lead_guard_events").select("id", { count: "exact", head: true }).eq("source", "admin_junk").gte("created_at", from).lt("created_at", to).limit(1);
-    const [rt, ry, gt, gy, rs, nt, ny, at, ay] = await Promise.all([
+    const [rt, ry, gt, gy, rs, nt, ny] = await Promise.all([
       recycled(w.today.from, w.today.to),
       recycled(w.yesterday.from, w.yesterday.to),
       guards(w.today.from, w.today.to),
@@ -77,11 +76,9 @@ export function useAdminEngine(employeeId: string | null = null) {
       // Any protection that was still running 24 h ago (or is now): enough to count open ones at both moments.
       supabase.from("lead_restore_log").select("protected_until, restored_at, undone_at").gt("protected_until", w.yesterday.to).limit(ENGINE_LIMITS.restore),
       junkNotes(w.today.from, w.today.to),
-      junkNotes(w.yesterday.from, w.yesterday.to),
-      adminJunk(w.today.from, w.today.to),
-      adminJunk(w.yesterday.from, w.yesterday.to)
+      junkNotes(w.yesterday.from, w.yesterday.to)
     ]);
-    const err = rt.error || ry.error || gt.error || gy.error || rs.error || nt.error || ny.error || at.error || ay.error;
+    const err = rt.error || ry.error || gt.error || gy.error || rs.error || nt.error || ny.error;
     if (err) {
       reportClientError("admin-home:engine", err.message, "warning");
       setEngine({ data: null, error: true, loading: false });
@@ -92,12 +89,12 @@ export function useAdminEngine(employeeId: string | null = null) {
     setEngine({
       data: {
         recycled: [rt.count ?? 0, ry.count ?? 0],
-        groups: groupGuardEvents(gt.data as GuardEventLite[], gy.data as GuardEventLite[]),
+        groups: groupGuardCounts(gt.data as GuardCountRow[], gy.data as GuardCountRow[]),
         protections: { now: nowOpen.count, yesterday: thenOpen.count, earliestEnd: nowOpen.earliestEnd },
         junk: employeeId
           ? (() => {
-              const t = junkToday(nt.count ?? 0, at.count ?? 0);
-              const y = junkToday(ny.count ?? 0, ay.count ?? 0);
+              const t = junkToday(nt.count ?? 0, adminJunkCount(gt.data as GuardCountRow[]));
+              const y = junkToday(ny.count ?? 0, adminJunkCount(gy.data as GuardCountRow[]));
               return { sweep: [t.sweep, y.sweep], admin: [t.admin, y.admin] };
             })()
           : null

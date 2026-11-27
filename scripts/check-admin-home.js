@@ -204,10 +204,11 @@ eq("positive junk row: amber, hidden at 0 and before the check", [
 
 const eng = read("lib/useAdminEngine.ts");
 const engRpcs = eng.match(/\.rpc\("([a-z_]+)"/g) || [];
-if (engRpcs.length !== 1 || !eng.includes('rpc("get_positive_junk_leads")')) problems.push("useAdminEngine: the only RPC is get_positive_junk_leads");
+if (engRpcs.length !== 2 || !eng.includes('rpc("get_positive_junk_leads")') || !eng.includes('rpc("get_admin_guard_event_counts"')) problems.push("useAdminEngine: RPCs are get_positive_junk_leads (Check) and get_admin_guard_event_counts (load) only");
+if (/from("lead_guard_events")/.test(eng)) problems.push("useAdminEngine: lead_guard_events has no client grant; read it only through get_admin_guard_event_counts");
 const loadEngineBody = eng.slice(eng.indexOf("const loadEngine = useCallback"), eng.indexOf("const checkPositiveJunk = useCallback"));
 const refreshBody = eng.slice(eng.indexOf("const refresh = useCallback"), eng.indexOf("return { engine, pj"));
-if (loadEngineBody.includes(".rpc(") || refreshBody.includes("checkPositiveJunk")) problems.push("useAdminEngine: positive junk only on Check, never on load / Refresh");
+if (loadEngineBody.includes('rpc("get_positive_junk_leads")') || refreshBody.includes("checkPositiveJunk")) problems.push("useAdminEngine: positive junk only on Check, never on load / Refresh");
 if (/setInterval\(|\.channel\(|\.(insert|update|upsert|delete)\(/.test(eng)) problems.push("useAdminEngine: read-only, no polling, no channel");
 const engFrom = (eng.match(/\.from\(/g) || []).length;
 const engLimit = (eng.match(/\.limit\(/g) || []).length;
@@ -243,7 +244,7 @@ const sales = read("lib/useAdminSales.ts");
 if (/\.rpc\(|setInterval\(|\.channel\(|\.(insert|update|upsert|delete)\(/.test(sales)) problems.push("useAdminSales: read-only, no RPC, no polling, no channel");
 if ((sales.match(/\.from\(/g) || []).length !== 2 || !sales.includes('.eq("id", 1).maybeSingle()') || !sales.includes("head: true")) problems.push("useAdminSales: one settings row + count-only reads");
 const engA4 = read("lib/useAdminEngine.ts");
-if (!engA4.includes('.eq("type", "LEAD_JUNKED")') || !engA4.includes('.eq("employee_id", employeeId)') || !engA4.includes('.eq("source", "admin_junk")')) problems.push("useAdminEngine: junk today = own LEAD_JUNKED notifications + admin_junk events");
+if (!engA4.includes('.eq("type", "LEAD_JUNKED")') || !engA4.includes('.eq("employee_id", employeeId)') || !engA4.includes("adminJunkCount(gt.data") || !engA4.includes("adminJunkCount(gy.data")) problems.push("useAdminEngine: junk today = own LEAD_JUNKED notifications + admin_junk guard counts");
 const salesCard = read("components/AdminSalesCards.tsx");
 if (/onChange=|<input|<select|purple|violet|fuchsia|opacity-80/i.test(salesCard)) problems.push("AdminSalesCards: display only (no switches), no purple, no faded labels");
 
@@ -260,8 +261,21 @@ const shell = read("components/AdminHomeA1.tsx");
 if (!shell.includes('aria-live="polite"')) problems.push("Needs action: aria-live");
 if (!shell.includes("aria-busy={busy}")) problems.push("Refresh: busy state");
 
+// 2026-11-28 engine RPC: count helpers (known answers) and the SQL draft shape.
+{
+  const rows = [{ source: "admin_junk", action: "JUNK", n: "3" }, { source: "owner_leave", action: "OWNER_ON_LEAVE", n: 2 }];
+  const g = ah.groupGuardCounts(rows, [{ source: "owner_leave", action: "OWNER_ON_LEAVE", n: 5 }]);
+  if (JSON.stringify(g.map((x) => [x.key, x.today, x.yesterday])) !== JSON.stringify([["admin_junk/JUNK", 3, 0], ["owner_leave/OWNER_ON_LEAVE", 2, 5]])) problems.push("groupGuardCounts: counts per source/action, today first");
+  if (ah.adminJunkCount(rows) !== 3 || ah.adminJunkCount(null) !== 0) problems.push("adminJunkCount: sums admin_junk only");
+  const sql = read("supabase/sql/2026-11-28_admin_guard_event_counts.sql");
+  for (const need of ["security definer", "set search_path = public", "public.is_admin()", "errcode = '42501'", "interval '3 days'", "from public;", "from anon;", "to authenticated;"])
+    if (!sql.includes(need)) problems.push("guard counts SQL draft: missing " + need);
+  if (/grant[^;]*ons+(tables+)?public.lead_guard_events|alters+tables+public.lead_guard_events|policy/i.test(sql.replace(/^--.*$/gm, ""))) problems.push("guard counts SQL draft: lead_guard_events grants / policies must not change");
+}
+
 if (problems.length) {
   console.error("check-admin-home FAILED:\n  " + problems.join("\n  "));
   process.exit(1);
 }
 console.log("check-admin-home: OK");
+

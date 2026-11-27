@@ -108,13 +108,13 @@ test("zero: no positive junk -> row hidden, grey 0; no recycles -> grey 0", asyn
 
 test("one card fails: Lead engine says so + Retry, Team today still shows; a failed Check can be tried again", async ({ page, context }) => {
   await setup(context, page);
-  state.fail.add("lead_guard_events");
+  state.fail.add("rpc/get_admin_guard_event_counts");
   state.fail.add("rpc/get_positive_junk_leads");
   await page.goto("/admin");
   await expect(page.getByTestId("admin-retry-engine")).toHaveText("Couldn't load the lead engine numbers. Tap to try again.");
   await expect(page.getByTestId("admin-team")).toBeVisible();
   await expect.poll(() => state.anomalies.some((a) => a.message.startsWith("admin-home:engine:"))).toBe(true);
-  state.fail.delete("lead_guard_events");
+  state.fail.delete("rpc/get_admin_guard_event_counts");
   await page.getByTestId("admin-retry-engine").click();
   await expect(page.getByTestId("admin-engine-recycled")).toBeVisible();
   await page.getByTestId("admin-check-positive-junk").click();

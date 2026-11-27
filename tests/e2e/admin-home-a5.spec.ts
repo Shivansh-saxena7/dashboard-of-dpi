@@ -109,7 +109,7 @@ for (const role of ["admin", "super_admin"] as const) {
 
 test("errors: each failed card says what failed + Retry; the rest still shows", async ({ page, context }, info) => {
   await setup(context, page);
-  for (const t of ["cron_heartbeats", "contact_click_log", "lead_guard_events", "site_visits"]) state.fail.add(t);
+  for (const t of ["cron_heartbeats", "contact_click_log", "rpc/get_admin_guard_event_counts", "site_visits"]) state.fail.add(t);
   await page.goto("/admin");
   for (const id of ["admin-retry-system", "admin-retry-today", "admin-retry-engine", "admin-retry-sales"]) await expect(page.getByTestId(id)).toBeVisible();
   await expect(page.getByTestId("admin-partial")).toBeVisible();
