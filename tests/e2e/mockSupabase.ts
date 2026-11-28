@@ -140,6 +140,8 @@ export interface MockState {
   positiveJunkCalls: number;
   guardRpcCalls: number;
   guardTableReads: number;
+  restoreRpcCalls: number;
+  restoreTableReads: number;
   // Admin Home A4: site visit events and LEAD_JUNKED notifications (per recipient) behind the count-only reads.
   visits: { created_at: string; event_type: string }[];
   junkNotes: { created_at: string; employee_id: string }[];
@@ -158,7 +160,7 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
   const state: MockState = { leads: makeLeads("LEAD", 60), data: makeLeads("DATA", 40), anomalies: [], updates: [], failUpdates: 0, landThenLose: 0, settings: { ...LEAD_ENGINE_SETTINGS }, workReport: null, settingsDelayMs: 0, reminders: [], remindersFail: false, employee, teamPending: [], leave: [], given: null, cq: null, tracking: [],
     staff: null, heartbeats: [], backups: [], anomalyRows: [], transfers: [], empRequests: [], attendanceRows: null, joins: [], fail: new Set(),
     clicks: [], activities: [], bookings: [], attendanceByDate: null, cqAll: null, workloadLeads: [],
-    recycles: [], guardEvents: [], restoreRows: [], positiveJunk: null, positiveJunkCalls: 0, guardRpcCalls: 0, guardTableReads: 0, visits: [], junkNotes: []
+    recycles: [], guardEvents: [], restoreRows: [], positiveJunk: null, positiveJunkCalls: 0, guardRpcCalls: 0, guardTableReads: 0, restoreRpcCalls: 0, restoreTableReads: 0, visits: [], junkNotes: []
   };
 
   const json = (route: Route, body: unknown, status = 200, headers: Record<string, string> = {}) =>
@@ -225,7 +227,23 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
       }
       return json(route, [...counts.values()]);
     }
-    if (method === "GET" && p === "/rest/v1/lead_restore_log") return json(route, state.restoreRows);
+    // Live: lead_restore_log has no client grant, so a direct read is refused (42501), exactly like production.
+    if (p === "/rest/v1/lead_restore_log") {
+      state.restoreTableReads += 1;
+      return json(route, { code: "42501", message: "permission denied for table lead_restore_log", details: null, hint: null }, 403);
+    }
+    // 2026-11-29: admins read open restore protections through get_admin_restore_protection_counts(p_at).
+    if (p === "/rest/v1/rpc/get_admin_restore_protection_counts") {
+      state.restoreRpcCalls += 1;
+      if (state.fail.has("rpc/get_admin_restore_protection_counts")) return json(route, { code: "42501", message: "not allowed", details: null, hint: null }, 403);
+      const at = Date.parse(String(((req.postDataJSON() || {}) as { p_at?: string }).p_at));
+      if (!Number.isFinite(at)) return json(route, { code: "22023", message: "p_at must be set and within the last 2 days" }, 400);
+      const openAt = (t: number) =>
+        state.restoreRows.filter((r) => Date.parse(r.protected_until) > t && (!r.restored_at || Date.parse(r.restored_at) <= t) && (!r.undone_at || Date.parse(r.undone_at) > t));
+      const now = openAt(at);
+      const earliest = now.map((r) => r.protected_until).sort()[0] ?? null;
+      return json(route, [{ open_now: now.length, open_day_before: openAt(at - 86400e3).length, earliest_end: earliest }]);
+    }
     if (p === "/rest/v1/rpc/get_positive_junk_leads") {
       state.positiveJunkCalls += 1;
       if (state.fail.has("rpc/get_positive_junk_leads")) return json(route, { message: "fake failure" }, 500);

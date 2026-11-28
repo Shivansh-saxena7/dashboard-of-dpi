@@ -204,7 +204,8 @@ eq("positive junk row: amber, hidden at 0 and before the check", [
 
 const eng = read("lib/useAdminEngine.ts");
 const engRpcs = eng.match(/\.rpc\("([a-z_]+)"/g) || [];
-if (engRpcs.length !== 2 || !eng.includes('rpc("get_positive_junk_leads")') || !eng.includes('rpc("get_admin_guard_event_counts"')) problems.push("useAdminEngine: RPCs are get_positive_junk_leads (Check) and get_admin_guard_event_counts (load) only");
+if (engRpcs.length !== 3 || !eng.includes('rpc("get_positive_junk_leads")') || !eng.includes('rpc("get_admin_guard_event_counts"') || !eng.includes('rpc("get_admin_restore_protection_counts"')) problems.push("useAdminEngine: RPCs are get_positive_junk_leads (Check), get_admin_guard_event_counts and get_admin_restore_protection_counts (load) only");
+if (/from("lead_restore_log")/.test(eng)) problems.push("useAdminEngine: lead_restore_log has no client grant; read it only through get_admin_restore_protection_counts");
 if (/from("lead_guard_events")/.test(eng)) problems.push("useAdminEngine: lead_guard_events has no client grant; read it only through get_admin_guard_event_counts");
 const loadEngineBody = eng.slice(eng.indexOf("const loadEngine = useCallback"), eng.indexOf("const checkPositiveJunk = useCallback"));
 const refreshBody = eng.slice(eng.indexOf("const refresh = useCallback"), eng.indexOf("return { engine, pj"));
@@ -271,6 +272,17 @@ if (!shell.includes("aria-busy={busy}")) problems.push("Refresh: busy state");
   for (const need of ["security definer", "set search_path = public", "public.is_admin()", "errcode = '42501'", "interval '3 days'", "from public;", "from anon;", "to authenticated;"])
     if (!sql.includes(need)) problems.push("guard counts SQL draft: missing " + need);
   if (/grant[^;]*ons+(tables+)?public.lead_guard_events|alters+tables+public.lead_guard_events|policy/i.test(sql.replace(/^--.*$/gm, ""))) problems.push("guard counts SQL draft: lead_guard_events grants / policies must not change");
+}
+
+// 2026-11-29 restore RPC: helper (known answers) and the SQL draft shape.
+{
+  const p = ah.restoreProtections([{ open_now: "2", open_day_before: 3, earliest_end: "2026-11-25T00:00:00+00:00" }]);
+  if (JSON.stringify(p) !== JSON.stringify({ now: 2, yesterday: 3, earliestEnd: "2026-11-25T00:00:00+00:00" })) problems.push("restoreProtections: reads the one counted row");
+  if (JSON.stringify(ah.restoreProtections(null)) !== JSON.stringify({ now: 0, yesterday: 0, earliestEnd: null })) problems.push("restoreProtections: empty answer is 0 / 0 / none");
+  const sql = read("supabase/sql/2026-11-29_admin_restore_protection_counts.sql");
+  for (const need of ["security definer", "set search_path = public", "public.is_admin()", "errcode = '42501'", "interval '2 days'", "from public;", "from anon;", "to authenticated;"])
+    if (!sql.includes(need)) problems.push("restore counts SQL draft: missing " + need);
+  if (/grant[^;]*ons+(tables+)?public.lead_restore_log|alters+tables+public.lead_restore_log|policy/i.test(sql.replace(/^--.*$/gm, ""))) problems.push("restore counts SQL draft: lead_restore_log grants / policies must not change");
 }
 
 if (problems.length) {

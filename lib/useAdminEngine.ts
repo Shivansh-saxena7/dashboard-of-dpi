@@ -3,7 +3,8 @@
 //   * Recycled today: count-only (HEAD) on lead_history (SYSTEM + recycle_reason), today vs yesterday at this time.
 //   * Guard / hold events (2026-11-28): get_admin_guard_event_counts RPC, per (source, action) counts for the two windows
 //     (lead_guard_events itself has no client grant; the old direct read failed with 42501 for every admin).
-//   * Restore protections: lead_restore_log rows that could be open now or 24 h ago (limit 200), counted at both times.
+//   * Restore protections (2026-11-29): get_admin_restore_protection_counts RPC, open now / 24 h ago + earliest end
+//     (lead_restore_log itself has no client grant; the old direct read failed with 42501 for every admin).
 //   * Positive-history junk: get_positive_junk_leads() returns the whole list (it scans every Junk lead), so it never
 //     runs on load or Refresh: only on "Check", once; the count (the page's "All") is remembered for the tab, 30 min.
 //   * Junk today (A4): no junk timestamp exists, so count-only on the viewer's own LEAD_JUNKED notifications (one per
@@ -11,9 +12,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { reportClientError } from "@/lib/reportClientError";
-import { adminJunkCount, groupGuardCounts, junkToday, openProtections, positiveJunkCount, todayWindows, type GuardCountRow, type GuardGroup, type RestoreRow } from "@/lib/adminHome";
+import { adminJunkCount, groupGuardCounts, junkToday, positiveJunkCount, restoreProtections, todayWindows, type GuardCountRow, type GuardGroup, type RestoreCountRow } from "@/lib/adminHome";
 
-export const ENGINE_LIMITS = { restore: 200 };
 const FOCUS_REFRESH_MS = 60_000;
 const PJ_KEY = "admin-home-positive-junk:v1";
 const PJ_REMEMBER_MS = 30 * 60 * 1000;
@@ -73,8 +73,8 @@ export function useAdminEngine(employeeId: string | null = null) {
       recycled(w.yesterday.from, w.yesterday.to),
       guards(w.today.from, w.today.to),
       guards(w.yesterday.from, w.yesterday.to),
-      // Any protection that was still running 24 h ago (or is now): enough to count open ones at both moments.
-      supabase.from("lead_restore_log").select("protected_until, restored_at, undone_at").gt("protected_until", w.yesterday.to).limit(ENGINE_LIMITS.restore),
+      // Open restore protections now and 24 h ago, counted in the database (no 200-row cap, no lead ids).
+      supabase.rpc("get_admin_restore_protection_counts", { p_at: new Date(now).toISOString() }),
       junkNotes(w.today.from, w.today.to),
       junkNotes(w.yesterday.from, w.yesterday.to)
     ]);
@@ -84,13 +84,12 @@ export function useAdminEngine(employeeId: string | null = null) {
       setEngine({ data: null, error: true, loading: false });
       return;
     }
-    const nowOpen = openProtections(rs.data as RestoreRow[], now);
-    const thenOpen = openProtections(rs.data as RestoreRow[], now - 86400e3);
+    const prot = restoreProtections(rs.data as RestoreCountRow[] | RestoreCountRow | null);
     setEngine({
       data: {
         recycled: [rt.count ?? 0, ry.count ?? 0],
         groups: groupGuardCounts(gt.data as GuardCountRow[], gy.data as GuardCountRow[]),
-        protections: { now: nowOpen.count, yesterday: thenOpen.count, earliestEnd: nowOpen.earliestEnd },
+        protections: prot,
         junk: employeeId
           ? (() => {
               const t = junkToday(nt.count ?? 0, adminJunkCount(gt.data as GuardCountRow[]));

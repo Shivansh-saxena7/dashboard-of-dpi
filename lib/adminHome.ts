@@ -469,6 +469,17 @@ export function openProtections(rows: RestoreRow[] | null | undefined, atMs: num
   return { count: open.length, earliestEnd: earliest };
 }
 
+// get_admin_restore_protection_counts row (one row): the same open rule as openProtections, counted in the database.
+export interface RestoreCountRow {
+  open_now: number | string | null;
+  open_day_before: number | string | null;
+  earliest_end: string | null;
+}
+export function restoreProtections(data: RestoreCountRow[] | RestoreCountRow | null | undefined): { now: number; yesterday: number; earliestEnd: string | null } {
+  const r = Array.isArray(data) ? data[0] : data;
+  return { now: Number(r?.open_now) || 0, yesterday: Number(r?.open_day_before) || 0, earliestEnd: r?.earliest_end ?? null };
+}
+
 // The Positive-history Junk page shows data.rows.length as "All": the Home uses the same number from the same RPC.
 export function positiveJunkCount(data: { rows?: unknown[] } | null | undefined): number {
   return Array.isArray(data?.rows) ? data!.rows!.length : 0;
