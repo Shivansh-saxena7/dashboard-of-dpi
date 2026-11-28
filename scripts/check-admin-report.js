@@ -238,7 +238,10 @@ check("SQL give and v3: drafts, flag default off", v3.includes("DRAFT, NOT APPLI
     jf.includes("if (enabled) void load();") && jf.includes("if (my !== seq.current) return;") && read("lib/usePerfJourney.ts").includes("if (rangeProblem(f, t)) return;")
     && read("components/PerfReport.tsx").includes('usePerfReport(range.from, range.to, filters, tab === "report")') && read("components/PerfReport.tsx").includes('usePerfJourney(range.from, range.to, filters, tab === "journey")'));
   check("journey: fairness note, approx label, low sample label, % of leads given", jf.includes('FAIR_NOTE = "A signal, not a verdict."') && jf.includes("{FAIR_NOTE}") && jf.includes("(approx)") && jf.includes(">Low sample</Pill>") && jf.includes("% of leads given"));
-  check("journey: no client name or number on the page (Excel only, admin-only, marked)", !/lead_name|mobile|phone/i.test(read("components/PerfJourney.tsx")) && read("components/PerfJourney.tsx").includes("r.lead_short") && jf.includes('CUSTOMER_DATA_NOTE = "Contains customer data: do not share"') && read("lib/perfJourneyExcel.ts").includes("ws.getCell(\"A1\").value = CUSTOMER_DATA_NOTE;"));
+  // 2026-11-29 (owner's request): name + number may show next to the short id, but only through LeadContactLine /
+  // useLeadContacts (get_admin_lead_contacts, admin only, POST body); never from the journey rows themselves.
+  const pjSrc = read("components/PerfJourney.tsx");
+  check("journey: client name / number only through the admin contact lookup (Excel stays marked)", !/lead_name|r.mobile|phone/i.test(pjSrc) && pjSrc.includes("useLeadContacts(rows.map((r) => r.lead_id)") && pjSrc.includes("<LeadContactLine") && pjSrc.includes("r.lead_short") && jf.includes('CUSTOMER_DATA_NOTE = "Contains customer data: do not share"') && read("lib/perfJourneyExcel.ts").includes("ws.getCell(\"A1\").value = CUSTOMER_DATA_NOTE;"));
   check("journey Excel: landscape, fit to width, header repeats, Page X of N, definitions sheet", jf.includes('orientation: "landscape"') && jf.includes("fitToWidth: 1") && jf.includes("printTitlesRow") && jf.includes("Page &P of &N") && jf.includes('sheet(wb, "Definitions"') && (jf.match(/filterOn\(/g) || []).length >= 4
     && jf.includes('"Missed by me", MISSED_HEAD') && jf.includes('"Won from others", WON_HEAD') && jf.includes('"Assists", ASSIST_HEAD') && jf.includes('"All journeys"'));
   check("journey errors are reported", (jf.match(/reportClientError\(/g) || []).length >= 3);
@@ -254,6 +257,20 @@ check("SQL give and v3: drafts, flag default off", v3.includes("DRAFT, NOT APPLI
   check("SQL journey: merged leads included (Leads given = the main report)", !/where not s\.lead_merged/.test(ljc));
 }
 
+// 2026-11-29: the contact lookup is used only on the two admin cross-check tabs, never on Admin Home or anywhere else.
+{
+  const pathM = require("path");
+  const walk = (d) => fs.readdirSync(pathM.join(root, d), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(pathM.join(d, e.name)) : /\.(ts|tsx)$/.test(e.name) ? [pathM.join(d, e.name).split(pathM.sep).join("/")] : []));
+  const files = ["app", "components", "lib"].flatMap(walk);
+  const users = files.filter((x) => /useLeadContacts|LeadContactLine/.test(read(x)) && x !== "components/LeadContactLine.tsx" && x !== "lib/leadContacts.ts").sort();
+  check("contact lookup only on Positive-history junk and Lead Journey", JSON.stringify(users) === JSON.stringify(["components/PerfJourney.tsx", "components/PositiveJunkBrowser.tsx"]));
+  const rpcUsers = files.filter((x) => read(x).includes("get_admin_lead_contacts"));
+  check("get_admin_lead_contacts called only from lib/leadContacts.ts", JSON.stringify(rpcUsers) === JSON.stringify(["lib/leadContacts.ts"]));
+  const lc = read("lib/leadContacts.ts");
+  check("contact lookup: chunks of 200 in the RPC body, failure logs the code only", lc.includes("CONTACT_CHUNK = 200") && lc.includes("{ p_lead_ids: chunk }") && lc.includes("lookup failed (${error.code") && !lc.includes("error.message"));
+  const sql = read("supabase/sql/2026-11-29_admin_lead_contacts.sql");
+  check("contact SQL draft: admin only, bounded, revoke anon/PUBLIC", ["security definer", "set search_path = public", "public.is_admin()", "errcode = '42501'", "> 200", "from public;", "from anon;", "to authenticated;"].every((n) => sql.includes(n)));
+}
 if (problems.length) {
   console.error("check-admin-report FAILED:\n  " + problems.join("\n  "));
   process.exit(1);

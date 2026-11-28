@@ -1,5 +1,11 @@
 import type { BrowserContext, Route } from "@playwright/test";
 
+// Fake contact for a lead id (tests only): "Fake Lead <short id>" and a 10-digit number derived from the id.
+export function fakeContact(id: string) {
+  const n = parseInt(id.replace(/-/g, "").slice(-7), 16) % 1e9;
+  return { lead_id: id, name: `Fake Lead ${id.slice(0, 8)}`, mobile: `9${String(n).padStart(9, "0")}` };
+}
+
 // A fake Supabase for the call-return tests. Answers every request to https://fake-supabase.test (the URL the test
 // server is started with), so the real database is never touched. Keeps a little state: the call tap marks the lead
 // as called (so the "New" filter would drop it) and saved results / anomaly rows are recorded for the asserts.
@@ -142,6 +148,7 @@ export interface MockState {
   guardTableReads: number;
   restoreRpcCalls: number;
   restoreTableReads: number;
+  contactCalls: { ids: string[]; url: string }[];
   // Admin Home A4: site visit events and LEAD_JUNKED notifications (per recipient) behind the count-only reads.
   visits: { created_at: string; event_type: string }[];
   junkNotes: { created_at: string; employee_id: string }[];
@@ -160,7 +167,7 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
   const state: MockState = { leads: makeLeads("LEAD", 60), data: makeLeads("DATA", 40), anomalies: [], updates: [], failUpdates: 0, landThenLose: 0, settings: { ...LEAD_ENGINE_SETTINGS }, workReport: null, settingsDelayMs: 0, reminders: [], remindersFail: false, employee, teamPending: [], leave: [], given: null, cq: null, tracking: [],
     staff: null, heartbeats: [], backups: [], anomalyRows: [], transfers: [], empRequests: [], attendanceRows: null, joins: [], fail: new Set(),
     clicks: [], activities: [], bookings: [], attendanceByDate: null, cqAll: null, workloadLeads: [],
-    recycles: [], guardEvents: [], restoreRows: [], positiveJunk: null, positiveJunkCalls: 0, guardRpcCalls: 0, guardTableReads: 0, restoreRpcCalls: 0, restoreTableReads: 0, visits: [], junkNotes: []
+    recycles: [], guardEvents: [], restoreRows: [], positiveJunk: null, positiveJunkCalls: 0, guardRpcCalls: 0, guardTableReads: 0, restoreRpcCalls: 0, restoreTableReads: 0, contactCalls: [], visits: [], junkNotes: []
   };
 
   const json = (route: Route, body: unknown, status = 200, headers: Record<string, string> = {}) =>
@@ -243,6 +250,15 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
       const now = openAt(at);
       const earliest = now.map((r) => r.protected_until).sort()[0] ?? null;
       return json(route, [{ open_now: now.length, open_day_before: openAt(at - 86400e3).length, earliest_end: earliest }]);
+    }
+    // 2026-11-29: admin contact lookup (name + mobile for up to 200 lead ids in the body; admin roles only).
+    if (p === "/rest/v1/rpc/get_admin_lead_contacts") {
+      const ids = (((req.postDataJSON() || {}) as { p_lead_ids?: string[] }).p_lead_ids ?? []) as string[];
+      state.contactCalls.push({ ids, url: url.toString() });
+      if (state.fail.has("rpc/get_admin_lead_contacts")) return json(route, { code: "42501", message: "not allowed", details: null, hint: null }, 403);
+      if (state.employee.role !== "admin" && state.employee.role !== "super_admin") return json(route, { code: "42501", message: "not allowed", details: null, hint: null }, 403);
+      if (ids.length < 1 || ids.length > 200) return json(route, { code: "22023", message: "send 1 to 200 lead ids" }, 400);
+      return json(route, ids.map(fakeContact));
     }
     if (p === "/rest/v1/rpc/get_positive_junk_leads") {
       state.positiveJunkCalls += 1;

@@ -2,8 +2,11 @@
 // Lead Journey tab of the Performance Report (2026-11-26, definitions v3): per employee, who got a lead first, who
 // worked it, who made it positive. Employee summary (Missed by me / Won from others / Assists with % of leads given and
 // the team average), the journeys (owners in order), a drill-down on every number, and the Excel file. Admin only
-// (page + RPC). English, 44px taps, blue accents, light only. No client name or number anywhere (lead short id only).
+// (page + RPC). English, 44px taps, blue accents, light only. Lead short id, plus name + number from the admin contact
+// lookup (lib/leadContacts.ts, 2026-11-29); the journey rows themselves carry no client name or number.
 import { useMemo, useState } from "react";
+import LeadContactLine from "@/components/LeadContactLine";
+import { useLeadContacts } from "@/lib/leadContacts";
 import { Banner, BTN, CARD, CHIP, FOCUS, InfoButton, Pill, PRIMARY, Sheet, Skeleton } from "@/components/perfUi";
 import {
   COUNT_DEF, COUNT_LABEL, COUNT_VIEW, EFFORT_NOTE, FAIR_NOTE, VIEWS, dayCount, excusedWord, gotByText, hoursText, jPct, lowSample, moveWord,
@@ -249,6 +252,8 @@ function Step({ s }: { s: JourneyStep }) {
 
 // Journeys: a table on wide screens, cards (steps wrap, no side scroll) on small screens and in the drill-down sheet.
 function JourneyList({ rows, stacked = false }: { rows: JourneyRow[]; stacked?: boolean }) {
+  // Name + mobile next to the id (admin cross-check), for the rows on screen, in chunks of 200 (POST body).
+  const { contacts } = useLeadContacts(rows.map((r) => r.lead_id), "lead-journey");
   if (!rows.length) return <p className="mt-2 text-[15px] text-slate-700" data-testid="lj-none">No leads here.</p>;
   return (
     <>
@@ -263,7 +268,10 @@ function JourneyList({ rows, stacked = false }: { rows: JourneyRow[]; stacked?: 
             <tbody>
               {rows.map((r) => (
                 <tr key={r.lead_id} className="border-b border-slate-100 align-top" data-testid={`lj-jrow-${r.lead_short}`}>
-                  <td className="px-1 py-2 font-mono">{r.lead_short}</td>
+                  <td className="px-1 py-2">
+                    <span className="font-mono">{r.lead_short}</span>
+                    <LeadContactLine contact={contacts.get(r.lead_id)} testId={`lj-contact-${r.lead_short}`} />
+                  </td>
                   <td className="px-1 py-2">{r.source ?? "–"}</td>
                   <td className="px-1 py-2">{typeWord(r.lead_type)}</td>
                   {[0, 1, 2].map((i) => <td key={i} className="px-1 py-2">{r.steps[i] ? <Step s={r.steps[i]} /> : "–"}</td>)}
@@ -283,6 +291,7 @@ function JourneyList({ rows, stacked = false }: { rows: JourneyRow[]; stacked?: 
               <span className="font-mono font-semibold text-slate-900">{r.lead_short}</span>
               <span className="text-slate-600">{r.source ?? "–"} · {typeWord(r.lead_type)}</span>
             </div>
+            <LeadContactLine contact={contacts.get(r.lead_id)} testId={`lj-card-contact-${r.lead_short}`} />
             <div className="mt-1 flex flex-wrap items-center gap-1">
               {r.steps.map((s, i) => (
                 <span key={s.seq} className="flex min-w-0 max-w-full items-center gap-1">

@@ -1,5 +1,5 @@
 import { expect, type BrowserContext, type Page } from "@playwright/test";
-import { EMP, FAKE_SUPABASE, UID, mockSupabase, type MockState } from "./mockSupabase";
+import { EMP, FAKE_SUPABASE, UID, mockSupabase, type MockState, fakeContact } from "./mockSupabase";
 import { journeyAnswer, type JourneyMode } from "./perfJourneyFixture";
 
 // Shared fake data for the Performance Report specs (admin-perf-report, admin-perf-reassign). Fake Supabase answers the
@@ -79,6 +79,7 @@ export function report(filters: Row, api: 1 | 2 | 3 | 4) {
 
 export interface Ctx { state: MockState; calls: { rpc: string; body: Row; url: string }[] }
 export interface OpenOpts {
+  contactsFail?: boolean;
   flag?: "on" | "off" | "missing"; reassign?: "on" | "off"; role?: "admin" | "super_admin"; fail?: boolean; api?: 1 | 2 | 3 | 4; goto?: string;
   receiverProblem?: string | null; oldBatch?: boolean; journeyFail?: boolean; journey?: JourneyMode; journeyExportFailAt?: number;
 }
@@ -162,6 +163,12 @@ export async function openReport(context: BrowserContext, page: Page, opts: Open
         before: { leads: 9, followup: 0, visit: 0, connected: 1, converted: 0, no_result: 8 }, after: { leads: 9, followup: 3, visit: 2, connected: 6, converted: 1, no_result: 2 }, leads: [] }));
     if (rpc === "admin_undo_report_batch")
       return r.fulfill(json({ batch_id: "u0000001-0000-4000-8000-000000000000", undo_of: body.p_batch_id, requested: 9, moved: 4, skipped: 5, skipped_breakdown: { "the new owner already worked on it": 5 } }));
+    if (rpc === "get_admin_lead_contacts") {
+      const ids = (body.p_lead_ids ?? []) as string[];
+      if (opts.contactsFail) return r.fulfill(json({ code: "42501", message: "not allowed", details: null, hint: null }, 403));
+      if (ids.length < 1 || ids.length > 200) return r.fulfill(json({ code: "22023", message: "send 1 to 200 lead ids" }, 400));
+      return r.fulfill(json(ids.map(fakeContact)));
+    }
     if (rpc === "get_perf_journey" || rpc === "get_perf_journey_rows" || rpc === "get_perf_journey_export") {
       if (opts.journeyFail || (rpc === "get_perf_journey_export" && opts.journeyExportFailAt != null && Number(body.p_offset) >= opts.journeyExportFailAt)) return r.fulfill(json({ message: "boom" }, 500));
       const ans = journeyAnswer(rpc, body, opts.journey);
