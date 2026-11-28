@@ -313,8 +313,17 @@ if (/\b(insert|update|delete|alter|drop|create|grant|revoke|truncate)\b/i.test(l
   if (!/rememberCalledCard\(lead\.id\);\s*if \(historyId\) logCallClick\(historyId, lead\.id\);/.test(v3) || !v3.includes("href={`tel:${lead.mobile}`}") || !v3.includes("registerActiveCallContext({")) problems.push("Home v3: Call keeps the existing flow (call-return)");
   if (/setInterval\(|\.(update|insert|upsert|delete)\(|purple|violet|fuchsia|dark:/.test(v3 + read("lib/homeV3.ts") + read("components/EmployeeHomeGate.tsx"))) problems.push("Home v3: read-only, no polling, no purple, light only");
   if (!v3.includes("useReducedMotion")) problems.push("Home v3: motion respects reduced motion");
-  if (!/if \(data\) \{[\s\S]{0,200}<EmployeeHomeP1 /.test(v3)) problems.push("Home v3: data-only employees keep the previous Home");
-  if (!/const teamLeader = props\.role === "team_leader" && Boolean\(props\.teamId\);/.test(read("components/EmployeeHomeGate.tsx"))) problems.push("Home gate: team leaders keep the previous Home (My team today)");
+  // Full v3 (2026-11-29): every Sales role gets v3; the previous Home only on preview / local ?home=p1.
+  const gateSrc = read("components/EmployeeHomeGate.tsx");
+  if (/team_leader|isDataOnly|data\)/.test(gateSrc) || !/if \(variant === "p1"\) \{/.test(gateSrc)) problems.push("Home gate: all Sales roles on v3 (no role / data rule in the gate)");
+  if (v3.includes("<EmployeeHomeP1")) problems.push("Home v3: no fallback to the previous Home inside v3");
+  if (!v3.includes("useTeamToday(teamId, true)") || !v3.includes('role === "team_leader" && Boolean(teamId)')) problems.push("Home v3: My team today for team leaders (existing useTeamToday)");
+  if (!v3.includes("dataPlanModel(data)") || !v3.includes('fromHome("/data?queue=1")')) problems.push("Home v3: DATA-only plan from the DATA counts, /data queue");
+  if (!v3.includes("useHomeLeave(employeeId, !loading)") || /useHomeContext\(/.test(v3)) problems.push("Home v3: leave strip from the light, non-blocking read (never the call-quality hook)");
+  const extras = read("lib/useHomeV3Extras.ts");
+  if (!/abortSignal\(ctrl\.signal\)/.test(extras) || !/LEAVE_TIMEOUT_MS = 5000/.test(extras) || /get_call_quality_summary[\s\S]*useEffect|useEffect\([^)]*check/.test(extras.split("export function useCallQualityOnDemand")[1] || "")) problems.push("Home v3 extras: leave read times out at 5 s; call quality only on tap (no effect)");
+  if (/\.rpc\("get_call_quality_summary"/.test(extras.split("export function useCallQualityOnDemand")[0])) problems.push("Home v3 extras: the leave read never calls the call-quality RPC");
+  if (!v3.includes("<SocialPosts employeeId={employeeId}") || !v3.includes("<PostsTrackingView")) problems.push("Home v3: social posts kept (collapsed, existing component)");
   if (!/!showNewHome && \(\s*<StartShiftCard employeeId=\{employee\.id\} compactWhenIdle=\{showNewHome\} \/>/.test(read("app/page.tsx"))) problems.push("app/page.tsx: with the new Home on, the gate renders the shift block");
   if (!/from "@\/lib\/leadCardLook"/.test(v3) || /#[0-9a-fA-F]{6}/.test(v3.replace(/#(FFFDF8|F3ECDA|D4AF37|FBF9F4|9c7a1f|fff8f5|fbd5d5|b42318|fff3dc|fbe3b6|92400e|16a34a|eef2f7|e6d9bb)\b/g, ""))) problems.push("Home v3: colours only from the existing palette (leadCardLook + Header / lead modal hexes)");
   const hv = require(path.join(root, "lib/homeV3.ts"));

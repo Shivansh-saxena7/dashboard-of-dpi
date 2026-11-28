@@ -134,6 +134,16 @@ export function homeModel(queue: QItem[], reminderAt: Map<string, number> | null
   return { steps, current, left: order.reduce((n, k) => n + counts[k], 0), late, today, lateBuckets, spotlight, visits, newCount };
 }
 
+// DATA-only employees (no LEAD leads, some DATA leads): the plan from their DATA counts (same useEmployeeHome data).
+export type DataStepKey = "untouched" | "lastAttempt" | "atRisk";
+export const DATA_STEP_LABELS: Record<DataStepKey, string> = { untouched: "Untouched data", lastAttempt: "Last attempt left", atRisk: "Still to call" };
+export function dataPlanModel(d: { untouched: number; lastAttempt: number; atRisk: number }): { steps: { key: DataStepKey; count: number; state: "done" | "current" | "later" }[]; current: DataStepKey | null; left: number } {
+  const order: DataStepKey[] = ["untouched", "lastAttempt", "atRisk"];
+  const counts: Record<DataStepKey, number> = { untouched: d.untouched, lastAttempt: d.lastAttempt, atRisk: d.atRisk };
+  const current = order.find((k) => counts[k] > 0) ?? null;
+  return { steps: order.map((key) => ({ key, count: counts[key], state: counts[key] === 0 ? "done" : key === current ? "current" : "later" })), current, left: d.atRisk };
+}
+
 export function followUpWhen(f: FollowUp, now: number = Date.now()): string {
   if (f.why === "TODAY") return f.at ? (f.at <= now ? `Due now (${istClock(f.at)})` : `Due ${istClock(f.at)}`) : "Due today";
   if (f.why === "MISSED") return f.daysLate <= 1 ? "Missed yesterday" : `Missed ${f.daysLate} days ago`;

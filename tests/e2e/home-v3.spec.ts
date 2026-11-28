@@ -65,6 +65,15 @@ test.beforeEach(async ({ context }) => {
 // The tiles sit in the hero on desktop and at the end on a phone: read the visible one.
 const num = async (page: Page, id: string) => Number(((await page.locator(`[data-testid="${id}"]:visible`).first().textContent()) ?? "").match(/\d+/)?.[0] ?? NaN);
 const noSideScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
+async function roleShots(page: Page, project: string, role: string) {
+  if (project !== "desktop-chromium") return page.screenshot({ path: `${SHOTS}/${role}-${project}.png`, fullPage: true });
+  for (const [w, hh] of [[1366, 768], [1920, 1080]] as const) {
+    await page.setViewportSize({ width: w, height: hh });
+    await page.waitForTimeout(400);
+    expect(await noSideScroll(page)).toBe(true);
+    await page.screenshot({ path: `${SHOTS}/${role}-${w}x${hh}.png` });
+  }
+}
 
 test("Home v3: plan stepper, spotlight, follow-ups (full list), recycle, visits, tiles; one number source; 44px", async ({ page }, info) => {
   state.settings.employee_home_mode = "on";
@@ -133,10 +142,10 @@ test("Home v3: plan stepper, spotlight, follow-ups (full list), recycle, visits,
       const fu = (await home.getByTestId("home3-followups").boundingBox())!;
       expect(fu.x).toBeGreaterThan(plan.x + plan.width - 1); // right column
       expect(await noSideScroll(page)).toBe(true);
-      await page.screenshot({ path: `${SHOTS}/new-${w}x${h}.png` });
+      await page.screenshot({ path: `${SHOTS}/employee-${w}x${h}.png` });
     }
   } else {
-    await page.screenshot({ path: `${SHOTS}/new-${info.project.name}.png`, fullPage: true });
+    await page.screenshot({ path: `${SHOTS}/employee-${info.project.name}.png`, fullPage: true });
   }
 });
 
@@ -166,13 +175,81 @@ test("Home v3: leads fail to load -> friendly Retry", async ({ page }) => {
   await expect(page.getByTestId("home3-plan")).toBeVisible();
 });
 
-test("Home v3: a team leader keeps the previous Home (My team today)", async ({ page }) => {
+test("Home v3: a team leader gets v3 with My team today (after the follow-ups)", async ({ page }, info) => {
   state.settings.employee_home_mode = "on";
+  shape(state);
   state.employee.role = "team_leader";
-  (state.employee as Record<string, unknown>).team_id = "00000000-0000-4000-8000-0000000000aa";
+  (state.employee as Record<string, unknown>).team_id = "team-1";
+  state.teamPending = [{ id: "p1" }, { id: "p2" }];
   await page.goto("/");
-  await page.waitForTimeout(2500);
-  await expect(page.getByTestId("home3")).toHaveCount(0);
+  await expect(page.getByTestId("home3-plan")).toBeVisible();
+  const team = page.getByTestId("home3-team");
+  await expect(team).toContainText("My team today");
+  await expect(team.getByTestId("team-waiting")).toContainText("2");
+  const fu = (await page.getByTestId("home3-followups").boundingBox())!;
+  const tb = (await team.boundingBox())!;
+  expect(tb.y).toBeGreaterThan(fu.y); // below the follow-ups (same column on desktop, after them on a phone)
+  await page.waitForTimeout(800);
+  await roleShots(page, info.project.name, "team-leader");
+});
+
+test("Home v3: a DATA-only employee gets v3 with a DATA plan (lead-only parts hidden)", async ({ page }, info) => {
+  state.settings.employee_home_mode = "on";
+  state.leads = [];
+  state.data[0].lead_history[0].call_count = 3; // last attempt
+  state.data[1].lead_history[0].call_count = 1;
+  await page.goto("/");
+  const home = page.getByTestId("home3");
+  await expect(home).toHaveAttribute("data-variant", "data");
+  await expect(home.getByTestId("home3-plan")).toHaveAttribute("data-variant", "data");
+  const steps = await home.locator('[data-testid^="home3-step-"][data-state]').evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")!.replace("home3-step-", "")));
+  expect(steps).toEqual(["untouched", "lastAttempt", "atRisk"]);
+  expect(await num(page, "home3-step-untouched-count")).toBe(await num(page, "home3-tile-data-untouched"));
+  expect(await num(page, "home3-step-lastAttempt-count")).toBe(await num(page, "home3-tile-data-last"));
+  await expect(home.getByTestId("home3-start")).toHaveAttribute("href", /\/data\?queue=1/);
+  for (const id of ["home3-followups", "home3-spotlight", "home3-recycle", "home3-visits", "home3-stages"]) await expect(home.getByTestId(id)).toHaveCount(0);
+  await expect(home.getByTestId("home3-social")).toBeVisible();
+  expect(await noSideScroll(page)).toBe(true);
+  await page.waitForTimeout(800);
+  await roleShots(page, info.project.name, "data-only");
+});
+
+test("Home v3: leave strip from the light read; when that read fails the Home still works; no call-quality call on load", async ({ page }) => {
+  state.settings.employee_home_mode = "on";
+  shape(state);
+  const cqCalls: string[] = [];
+  page.on("request", (r) => r.url().includes("get_call_quality_summary") && cqCalls.push(r.url()));
+  const ist = new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
+  state.leave = [{ employee_id: String(state.employee.id), start_date: ist, end_date: ist }];
+  await page.goto("/");
+  await expect(page.getByTestId("home3-leave")).toBeVisible();
+  await page.waitForTimeout(1500);
+  expect(cqCalls).toEqual([]);
+  // call quality only on tap
+  state.cq = { enforced: false, estimated: false, employees: [{ by_card_type: { LEAD: { dial_clicks: 40, genuine_score: 86 } } }] };
+  await page.getByTestId("home3-cq-check").click();
+  await expect(page.getByTestId("home3-cq-line").first()).toBeVisible();
+  expect(cqCalls.length).toBe(1);
+  // the leave read failing never breaks the Home
+  await page.evaluate(() => sessionStorage.clear());
+  state.fail.add("employee_leave_periods");
+  await page.goto("/");
+  await expect(page.getByTestId("home3-plan")).toBeVisible();
+  await page.waitForTimeout(1500);
+  await expect(page.getByTestId("home3-leave")).toHaveCount(0);
+  await expect(page.getByTestId("home3-error")).toHaveCount(0);
+});
+
+test("Home v3: social posts kept at the bottom (collapsed, opens the posts view)", async ({ page }) => {
+  state.settings.employee_home_mode = "on";
+  shape(state);
+  await page.goto("/");
+  const social = page.getByTestId("home3-social");
+  await expect(social).toBeVisible();
+  const toggle = social.getByTestId("home3-social-toggle");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
 });
 
 test("Home v3: flag off -> the old Home exactly (no v3)", async ({ page }) => {

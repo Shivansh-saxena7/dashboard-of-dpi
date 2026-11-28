@@ -1,8 +1,7 @@
 "use client";
 // Which flag-on Home to show (2026-11-29). employee_home_mode still decides new vs old (app/page.tsx: flag off or an
-// error = the old Posts Home). With the flag on:
-//   * team leaders (role team_leader with a team) keep the previous Home: it has "My team today", which v3 does not;
-//   * everyone else gets v3 (a data-only employee is sent back to the previous Home inside v3 once the data is known).
+// error = the old Posts Home). With the flag on, every Sales role gets v3 (team leaders and data-only employees
+// included: v3 has their parts).
 // Each branch renders its own shift block: the previous Home with the same compact Start Shift card as before, v3 with
 // the shift status inside its hero band. Preview / local only (never the live domain): ?home=p1 / ?home=v3 to compare.
 import { useEffect, useState } from "react";
@@ -31,8 +30,7 @@ export default function EmployeeHomeGate(props: { employeeId: string; employeeNa
     }
     setVariant(v);
   }, []);
-  const teamLeader = props.role === "team_leader" && Boolean(props.teamId);
-  if (variant === "p1" || teamLeader) {
+  if (variant === "p1") {
     return (
       <>
         <StartShiftCard employeeId={props.employeeId} compactWhenIdle />
