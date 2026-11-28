@@ -64,6 +64,8 @@ export interface EmployeeHomeData {
   remindersError: boolean;
   loading: boolean;
   reload: () => void;
+  // Home v3 (2026-11-29, additive): the whole queue and today's / yesterday's reminder times (lead id -> ms), same data.
+  queue?: UpNextItem[]; reminderAt?: Map<string, number> | null; missedAt?: Map<string, number> | null;
 }
 
 const HOME_LEAD_COLUMNS = `
@@ -301,5 +303,5 @@ export function useEmployeeHome(employeeId: string | null | undefined): Employee
 
   const dataQueueLength = useMemo(() => (data && dataLeads ? dataQueueOrder(dataLeads).length : 0), [data, dataLeads]);
 
-  return { counts, attention, upNext: next, queueLength: queue.length, queueUrgent: summary.urgent, pendingIds, given, dataTotal, data, dataQueueLength, today, leadsError, todayError, remindersError, loading, reload: load };
+  return { counts, attention, upNext: next, queueLength: queue.length, queueUrgent: summary.urgent, pendingIds, given, dataTotal, data, dataQueueLength, today, leadsError, todayError, remindersError, loading, reload: load, queue, reminderAt: reminders, missedAt: missed };
 }

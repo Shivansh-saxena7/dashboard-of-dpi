@@ -284,27 +284,58 @@ eq("social summary", [ss.socialSummaryText(ss.socialSummary([{ ig_done: true, fb
 const liveSql = read("scripts/home-parity-live.sql").replace(/--.*$/gm, "");
 if (/\b(insert|update|delete|alter|drop|create|grant|revoke|truncate)\b/i.test(liveSql)) problems.push("scripts/home-parity-live.sql must stay read-only (select only)");
 
-// ---- Home v3 (2026-11-29) ----
+// ---- Home v3 (2026-11-29, final) ----
 {
   const crypto = require("crypto");
-  const sha = (p) => crypto.createHash("sha256").update(read(p).replace(/\r\n/g, "\n")).digest("hex").slice(0, 16);
+  const hash = (text) => crypto.createHash("sha256").update(text.replace(/\r\n/g, "\n")).digest("hex").slice(0, 16);
+  const sha = (p) => hash(read(p));
   // The previous Home and its data code stay byte for byte (v3 only reads through them).
-  const same = { "components/EmployeeHomeP1.tsx": "c5c4767eb86c4fad", "lib/useEmployeeHome.ts": "34794797f2cc9359", "lib/employeeHome.ts": "29e115c972de8702",
-    "lib/useEmployeeHomeMode.ts": "99bfca5402deb202", "lib/todayReminders.ts": "c12c3440faf80ad1", "lib/useLastLog.ts": "103e2e391f621694", "components/PostsTrackingView.tsx": "fa2be7f16115df37" };
-  for (const [p, h] of Object.entries(same)) if (sha(p) !== h) problems.push(`${p}: must stay byte for byte (Home v3 is additive)`);
+  const same = { "components/EmployeeHomeP1.tsx": "c5c4767eb86c4fad", "lib/employeeHome.ts": "29e115c972de8702", "lib/useEmployeeHomeMode.ts": "99bfca5402deb202",
+    "lib/todayReminders.ts": "c12c3440faf80ad1", "lib/useLastLog.ts": "103e2e391f621694", "components/PostsTrackingView.tsx": "fa2be7f16115df37" };
+  for (const [p, h] of Object.entries(same)) if (sha(p) !== h) problems.push(p + ": must stay byte for byte (Home v3 is additive)");
+  // Two owner-approved additive changes: with the additive part taken out, each file is byte for byte the old one.
+  const ueh = read("lib/useEmployeeHome.ts").replace(/\r\n/g, "\n")
+    .replace("  // Home v3 (2026-11-29, additive): the whole queue and today's / yesterday's reminder times (lead id -> ms), same data.\n  queue?: UpNextItem[]; reminderAt?: Map<string, number> | null; missedAt?: Map<string, number> | null;\n", "")
+    .replace("reload: load, queue, reminderAt: reminders, missedAt: missed };", "reload: load };");
+  if (hash(ueh) !== "34794797f2cc9359") problems.push("lib/useEmployeeHome.ts: only the owner-approved additive queue / reminder fields may change");
+  let ssc2 = read("components/StartShiftCard.tsx").replace(/\r\n/g, "\n");
+  const heroStart = ssc2.indexOf("  if (hero) {\n");
+  const heroEnd = ssc2.indexOf("  if (compact || idleCompact) {");
+  if (heroStart > 0 && heroEnd > heroStart) ssc2 = ssc2.slice(0, heroStart) + ssc2.slice(heroEnd);
+  ssc2 = ssc2.replace("  // Home v3 (2026-11-29, additive): a small status block for the Home's hero band (start time, Start / End Shift with\n  // the same handlers, windows and messages). Off by default: every other render branch is unchanged.\n  hero?: boolean;\n", "")
+    .replace("compactWhenIdle = false, hero = false }", "compactWhenIdle = false }");
+  if (hash(ssc2) !== "adad3f0f30b6bf8d") problems.push("components/StartShiftCard.tsx: only the additive hero branch may change");
+  const sscNow = read("components/StartShiftCard.tsx");
+  if (!/disabled=\{ending \|\| !canEnd\} onClick=\{endShift\}/.test(sscNow) || !/onClick=\{startShift\}/.test(sscNow)) problems.push("StartShiftCard hero: same Start / End Shift handlers");
   const v3 = read("components/EmployeeHomeV3.tsx");
-  if (!v3.includes("useEmployeeHome(employeeId)") || /supabase\.(from|rpc)|\.from\(|\.rpc\(/.test(v3)) problems.push("Home v3: numbers only from useEmployeeHome, no own database read");
+  if (!v3.includes("useEmployeeHome(employeeId)") || /\.from\(|\.rpc\(/.test(v3)) problems.push("Home v3: numbers only from useEmployeeHome, no own database read");
+  if (!v3.includes("homeModel(queue, home.reminderAt, home.missedAt, calendar)")) problems.push("Home v3: one model from the hook's queue + reminder times");
   if (!/rememberCalledCard\(lead\.id\);\s*if \(historyId\) logCallClick\(historyId, lead\.id\);/.test(v3) || !v3.includes("href={`tel:${lead.mobile}`}") || !v3.includes("registerActiveCallContext({")) problems.push("Home v3: Call keeps the existing flow (call-return)");
   if (/setInterval\(|\.(update|insert|upsert|delete)\(|purple|violet|fuchsia|dark:/.test(v3 + read("lib/homeV3.ts") + read("components/EmployeeHomeGate.tsx"))) problems.push("Home v3: read-only, no polling, no purple, light only");
   if (!v3.includes("useReducedMotion")) problems.push("Home v3: motion respects reduced motion");
-  if (!/if \(data\) return <EmployeeHomeP1 /.test(v3)) problems.push("Home v3: data-only employees keep the previous Home");
+  if (!/if \(data\) \{[\s\S]{0,200}<EmployeeHomeP1 /.test(v3)) problems.push("Home v3: data-only employees keep the previous Home");
+  if (!/const teamLeader = props\.role === "team_leader" && Boolean\(props\.teamId\);/.test(read("components/EmployeeHomeGate.tsx"))) problems.push("Home gate: team leaders keep the previous Home (My team today)");
+  if (!/!showNewHome && \(\s*<StartShiftCard employeeId=\{employee\.id\} compactWhenIdle=\{showNewHome\} \/>/.test(read("app/page.tsx"))) problems.push("app/page.tsx: with the new Home on, the gate renders the shift block");
+  if (!/from "@\/lib\/leadCardLook"/.test(v3) || /#[0-9a-fA-F]{6}/.test(v3.replace(/#(FFFDF8|F3ECDA|D4AF37|FBF9F4|9c7a1f|fff8f5|fbd5d5|b42318|fff3dc|fbe3b6|92400e|16a34a|eef2f7|e6d9bb)\b/g, ""))) problems.push("Home v3: colours only from the existing palette (leadCardLook + Header / lead modal hexes)");
   const hv = require(path.join(root, "lib/homeV3.ts"));
   if (new Set(hv.DAILY_LINES).size < 30) problems.push("Home v3: at least 30 different daily lines");
   if (hv.greeting(Date.parse("2026-11-29T03:30:00Z")) !== "Good morning" || hv.greeting(Date.parse("2026-11-29T08:30:00Z")) !== "Good afternoon" || hv.greeting(Date.parse("2026-11-29T13:30:00Z")) !== "Good evening") problems.push("Home v3: greeting by IST time");
-  const att = { "pending-result": 0, "reminders-missed": 1, "followup-overdue": 2, "reminders-today": 4, "visits-today": 0, "snooze-ends-today": 0 };
-  const h = hv.heroModel(att, 5, 12);
-  if (h.count !== 3 || h.state !== "work") problems.push("Home v3: Do this now = late follow-ups first, with the same count as the follow-up badge");
-  if (hv.followUpCount(att).total !== 7 || hv.heroModel(att, 0, 0).state !== "clear") problems.push("Home v3: follow-up count and the all-caught-up state");
+  // Known answers for the one model: steps in order, the first open step is current, counts match the lists.
+  const NOW = Date.parse("2026-11-18T06:30:00Z");
+  const L = (id, stage, h = {}) => ({ id, name: id, mobile: "9", status: "CONNECTED", board_stage: stage, lead_history: [{ id: "h" + id, call_count: 1, assigned_at: "2026-11-01T05:00:00Z", last_activity_at: new Date(NOW - 3600e3).toISOString(), ...h }] });
+  const q = [
+    { lead: L("p", "LEADS", { last_call_click_at: new Date(NOW - 600e3).toISOString(), outcome_at: null }), reason: "PENDING" },
+    { lead: L("m", "FOLLOW_UP", { last_activity_at: new Date(NOW - 3 * 86400e3).toISOString() }), reason: "MISSED" },
+    { lead: L("r1", "FOLLOW_UP"), reason: "REMINDER" },
+    { lead: L("r2", "LEADS"), reason: "REMINDER" },
+    { lead: { id: "n", status: "NEW", board_stage: "LEADS", lead_history: [{ id: "hn", call_count: 0, assigned_at: new Date(NOW - 600e3).toISOString() }] }, reason: "NEW" }
+  ];
+  const md = hv.homeModel(q, new Map([["r1", NOW - 60e3], ["r2", NOW + 3600e3]]), new Map([["m", NOW - 86400e3 * 1.2]]), null, NOW);
+  const got = md.steps.map((s) => s.key + ":" + s.count + ":" + s.state).join(",");
+  if (got !== "results:1:current,callbacks:1:later,new:1:later,late:1:later") problems.push("Home v3 model: steps " + got);
+  if (md.left !== 4 || md.late.length !== md.steps[3].count || md.today.length !== 2 || md.spotlight?.item.lead.id !== "m") problems.push("Home v3 model: counts match the lists; spotlight = late Follow-up first");
+  const done = hv.homeModel([], new Map(), new Map(), null, NOW);
+  if (done.current !== null || done.left !== 0 || hv.progressModel(5, 0).finished !== true) problems.push("Home v3 model: all caught up");
   if (hv.homeVariantFromUrl("?home=p1", "dashboard.divyapadma.com") !== "v3" || hv.homeVariantFromUrl("?home=p1", "x-team.vercel.app") !== "p1") problems.push("Home v3: ?home=p1 only on preview / local");
   if (!/\{ href: "\/", label: "Home", icon: HomeIcon \}/.test(read("components/EmployeeTabBar.tsx")) || /label: "Posts"/.test(read("components/EmployeeTabBar.tsx"))) problems.push("Tab bar: the Home tab says Home (not Posts)");
 }

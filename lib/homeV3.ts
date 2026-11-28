@@ -1,8 +1,8 @@
 // Employee Home v3 (2026-11-29): pure helpers for the new look. Every number comes from useEmployeeHome (the same
 // source as the old Home); these functions only pick and word them, so "Do this now", progress and follow-ups can never
 // show two different numbers for the same thing.
-import type { AttentionCounts, UpNextItem } from "@/lib/employeeHome";
-import type { HomeToday } from "@/lib/useEmployeeHome";
+import type { WorkingCalendar } from "./workingCalendar.ts";
+import { isFollowUpOverdue, isMissedReminder, isPendingResult, isVisitDueToday, type UpNextItem as QItem } from "./employeeHome.ts";
 
 const IST_OFFSET_MS = 5.5 * 3600e3;
 
@@ -65,70 +65,88 @@ export function messageOfTheDay(now: number = Date.now(), lines: string[] = DAIL
   return lines[((day % lines.length) + lines.length) % lines.length];
 }
 
-// "Do this now": the first thing to do, in the queue's own order of urgency, with its count. One main action.
-export interface HeroModel {
-  state: "work" | "clear" | "empty";
-  title: string;
-  detail: string;
-  count: number;
+// ---- v3 final (2026-11-29): one model for the whole Home, built from useEmployeeHome's full queue + reminder times.
+// Every Home number (plan steps, spotlight, follow-ups, chips, visits) comes from here, so no two places can differ.
+
+export type StepKey = "results" | "callbacks" | "new" | "late";
+export const STEP_LABELS: Record<StepKey, string> = {
+  results: "Save results for calls you made",
+  callbacks: "Callbacks due now",
+  new: "New leads (SLA)",
+  late: "Late follow-ups"
+};
+export interface FollowUp {
+  item: QItem;
+  kind: "late" | "today";
+  at: number | null;
+  daysLate: number;
+  why: "MISSED" | "OVERDUE" | "TODAY";
 }
-export function heroModel(attention: AttentionCounts | null, newCount: number, queueLength: number): HeroModel {
-  if (!attention) return { state: "empty", title: "", detail: "", count: 0 };
-  const late = attention["reminders-missed"] + attention["followup-overdue"];
-  const pick: [number, string, string][] = [
-    [attention["pending-result"], "Save results for calls you made", "Called, no result yet"],
-    [late, "Call your late follow-ups", "Overdue callbacks"],
-    [attention["reminders-today"], "Call today's callbacks", "Callbacks due today"],
-    [attention["visits-today"], "Confirm today's site visits", "Visits due today"],
-    [newCount, "Call your new leads", "New leads waiting"]
-  ];
-  const first = pick.find(([n]) => n > 0);
-  if (!first || queueLength === 0) return { state: "clear", title: "All caught up", detail: "Nothing is due right now. Nice work!", count: 0 };
-  return { state: "work", title: first[1], detail: first[2], count: first[0] };
+export interface HomeModel {
+  steps: { key: StepKey; count: number; state: "done" | "current" | "later" }[];
+  current: StepKey | null;
+  left: number;
+  late: FollowUp[];
+  today: FollowUp[];
+  lateBuckets: { d1: number; d2to3: number; d4plus: number };
+  spotlight: FollowUp | null;
+  visits: { item: QItem; at: number | null }[];
+  newCount: number;
 }
 
-// Today's progress: done = results saved today; left = what is still due now in the queue (not plain New leads).
-export function progressModel(today: HomeToday | null, dueNow: number): { done: number; left: number; pct: number; finished: boolean } {
-  const done = today?.results_saved ?? 0;
-  const left = Math.max(dueNow, 0);
-  const total = done + left;
-  return { done, left, pct: total === 0 ? 0 : Math.round((done / total) * 100), finished: left === 0 && done > 0 };
-}
-
-// Today's follow-ups: callbacks and follow-ups that are late or due today, late first, then today's by time.
-export type FollowUpWhen = { kind: "late" | "today"; at: number | null };
-export function followUpItems(items: UpNextItem[], todayAt: Map<string, number>, missedAt: Map<string, number>): (UpNextItem & { when: FollowUpWhen })[] {
-  const out: (UpNextItem & { when: FollowUpWhen })[] = [];
-  for (const it of items) {
-    if (it.reason === "MISSED") out.push({ ...it, when: { kind: "late", at: missedAt.get(it.lead.id) ?? null } });
-    else if (it.reason === "OVERDUE") out.push({ ...it, when: { kind: "late", at: lastTouch(it) } });
-    else if (it.reason === "REMINDER") out.push({ ...it, when: { kind: "today", at: todayAt.get(it.lead.id) ?? null } });
+const DAY = 86400e3;
+// Whole IST calendar days (a reminder yesterday at noon is 1 day late, whatever the time now).
+const istDayIndex = (ms: number) => Math.floor((ms + IST_OFFSET_MS) / DAY);
+export function homeModel(queue: QItem[], reminderAt: Map<string, number> | null | undefined, missedAt: Map<string, number> | null | undefined, calendar: WorkingCalendar | null, now: number = Date.now()): HomeModel {
+  const late: FollowUp[] = [];
+  const today: FollowUp[] = [];
+  for (const it of queue) {
+    const lead = it.lead;
+    if (isMissedReminder(lead, missedAt)) {
+      const at = missedAt?.get(lead.id) ?? null;
+      late.push({ item: it, kind: "late", at, why: "MISSED", daysLate: at ? Math.max(1, istDayIndex(now) - istDayIndex(at)) : 1 });
+    } else if (isFollowUpOverdue(lead, calendar)) {
+      const v = lead.lead_history?.[0]?.last_activity_at;
+      const at = v ? Date.parse(v) : NaN;
+      late.push({ item: it, kind: "late", at: Number.isFinite(at) ? at : null, why: "OVERDUE", daysLate: Number.isFinite(at) ? Math.max(1, Math.floor((now - at) / DAY)) : 1 });
+    } else if (reminderAt?.has(lead.id)) {
+      today.push({ item: it, kind: "today", at: reminderAt.get(lead.id) ?? null, why: "TODAY", daysLate: 0 });
+    }
   }
-  const t = (x: { when: FollowUpWhen }) => x.when.at ?? Number.POSITIVE_INFINITY;
-  return out.sort((a, b) => (a.when.kind === b.when.kind ? t(a) - t(b) : a.when.kind === "late" ? -1 : 1));
-}
-function lastTouch(it: UpNextItem): number | null {
-  const v = it.lead.lead_history?.[0]?.last_activity_at;
-  const n = v ? Date.parse(v) : NaN;
-  return Number.isFinite(n) ? n : null;
+  late.sort((x, y) => y.daysLate - x.daysLate || (x.at ?? 0) - (y.at ?? 0));
+  today.sort((x, y) => (x.at ?? Infinity) - (y.at ?? Infinity));
+  const results = queue.filter((it) => isPendingResult(it.lead)).length;
+  const callbacksDue = today.filter((f) => f.at !== null && f.at <= now).length;
+  const newCount = queue.filter((it) => it.reason === "NEW").length;
+  const counts: Record<StepKey, number> = { results, callbacks: callbacksDue, new: newCount, late: late.length };
+  const order: StepKey[] = ["results", "callbacks", "new", "late"];
+  const current = order.find((k) => counts[k] > 0) ?? null;
+  const steps = order.map((key) => ({ key, count: counts[key], state: (counts[key] === 0 ? "done" : key === current ? "current" : "later") as "done" | "current" | "later" }));
+  const lateBuckets = { d1: late.filter((f) => f.daysLate <= 1).length, d2to3: late.filter((f) => f.daysLate >= 2 && f.daysLate <= 3).length, d4plus: late.filter((f) => f.daysLate >= 4).length };
+  // Next best lead: due now or late, Follow-up stage first, then the most urgent.
+  const candidates = [...late, ...today.filter((f) => f.at !== null && f.at <= now)];
+  const spotlight = candidates.find((f) => f.item.lead.board_stage === "FOLLOW_UP") ?? candidates[0] ?? null;
+  const visits = queue.filter((it) => isVisitDueToday(it.lead, now)).map((item) => {
+    const v = item.lead.lead_history?.[0]?.paused_until;
+    const at = v ? Date.parse(v) : NaN;
+    return { item, at: Number.isFinite(at) ? at : null };
+  }).sort((x, y) => (x.at ?? Infinity) - (y.at ?? Infinity));
+  return { steps, current, left: order.reduce((n, k) => n + counts[k], 0), late, today, lateBuckets, spotlight, visits, newCount };
 }
 
-export function followUpCount(attention: AttentionCounts | null): { late: number; today: number; total: number } {
-  if (!attention) return { late: 0, today: 0, total: 0 };
-  const late = attention["reminders-missed"] + attention["followup-overdue"];
-  return { late, today: attention["reminders-today"], total: late + attention["reminders-today"] };
+export function followUpWhen(f: FollowUp, now: number = Date.now()): string {
+  if (f.why === "TODAY") return f.at ? (f.at <= now ? `Due now (${istClock(f.at)})` : `Due ${istClock(f.at)}`) : "Due today";
+  if (f.why === "MISSED") return f.daysLate <= 1 ? "Missed yesterday" : `Missed ${f.daysLate} days ago`;
+  return `${f.daysLate} day${f.daysLate === 1 ? "" : "s"} late`;
+}
+
+export function progressModel(resultsSaved: number, left: number): { done: number; left: number; pct: number; finished: boolean } {
+  const total = resultsSaved + left;
+  return { done: resultsSaved, left, pct: total === 0 ? 100 : Math.round((resultsSaved / total) * 100), finished: left === 0 };
 }
 
 export function istClock(ms: number): string {
   return new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" });
-}
-
-export function whenText(w: FollowUpWhen, reason: UpNextItem["reason"], now: number = Date.now()): string {
-  if (w.kind === "today") return w.at ? `Due ${istClock(w.at)}` : "Due today";
-  if (reason === "MISSED") return w.at ? `Missed yesterday ${istClock(w.at)}` : "Missed yesterday";
-  if (!w.at) return "Overdue";
-  const days = Math.max(1, Math.floor((now - w.at) / 86400e3));
-  return `Overdue · no update for ${days} day${days === 1 ? "" : "s"}`;
 }
 
 export const STAGE_WORD: Record<string, string> = { LEADS: "Leads", FOLLOW_UP: "Follow-up", VISIT: "Visit", BOOKING: "Booking" };

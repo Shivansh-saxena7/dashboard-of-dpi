@@ -32,6 +32,9 @@ interface StartShiftCardProps {
   // window has closed with no shift started (or the shift has ended) it becomes the one-line strip, without a Start
   // button. A running shift keeps the full card (End Shift lives there). Off by default: every other page unchanged.
   compactWhenIdle?: boolean;
+  // Home v3 (2026-11-29, additive): a small status block for the Home's hero band (start time, Start / End Shift with
+  // the same handlers, windows and messages). Off by default: every other render branch is unchanged.
+  hero?: boolean;
 }
 
 interface ShiftTimingConfig {
@@ -85,7 +88,7 @@ const WINDOW_RECHECK_INTERVAL_MS = 30000;
 // full-screen hero moments, and this is a dashboard card, not one of
 // those. Most usage is expected to be on a phone at the office, so
 // touch targets (icon badge, button) are sized generously.
-export default function StartShiftCard({ employeeId, compact = false, compactWhenIdle = false }: StartShiftCardProps) {
+export default function StartShiftCard({ employeeId, compact = false, compactWhenIdle = false, hero = false }: StartShiftCardProps) {
 
   const [checking, setChecking] = useState(true);
   const [starting, setStarting] = useState(false);
@@ -481,6 +484,39 @@ export default function StartShiftCard({ employeeId, compact = false, compactWhe
 
   const idleCompact =
     compactWhenIdle && (ended || (!started && Boolean(config) && Boolean(startWindow) && (!startWindow!.allowed || nonWorkingGate.blocked)));
+
+  if (hero) {
+    return (
+      <div data-testid="shift-hero" className="flex flex-wrap items-center gap-2 text-[13px]">
+        <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${ended ? "bg-slate-400" : started ? "bg-emerald-500" : "bg-amber-400"}`} aria-hidden />
+        <span className="font-semibold text-[#475569]">
+          {ended
+            ? "Shift ended"
+            : started
+            ? `Shift since ${new Date(shiftStartAt!).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+            : nonWorkingDayLabel
+            ? `${nonWorkingDayLabel} — no shift today`
+            : canStart
+            ? "Shift not started — new leads are locked"
+            : "Shift not started"}
+        </span>
+        {started && !ended && (
+          <button type="button" disabled={ending || !canEnd} onClick={endShift} title={!canEnd ? endWindow?.reason : undefined}
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-[#e8edf3] bg-white/80 px-3 text-[13px] font-semibold text-[#475569] hover:bg-white disabled:opacity-60">
+            {ending ? <Loader2 className="animate-spin" size={13} /> : null}
+            {ending ? "Ending..." : "End Shift"}
+          </button>
+        )}
+        {!started && !ended && canStart && (
+          <button type="button" disabled={starting} onClick={startShift}
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-gradient-to-r from-yellow-400 to-amber-500 px-3 text-[13px] font-bold text-slate-900 disabled:opacity-60">
+            {starting ? <Loader2 className="animate-spin" size={13} /> : <MapPin size={13} />}
+            {starting ? "Starting..." : "Start Shift"}
+          </button>
+        )}
+      </div>
+    );
+  }
 
   if (compact || idleCompact) {
     return (

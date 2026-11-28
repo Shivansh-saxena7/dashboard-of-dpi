@@ -151,7 +151,9 @@ to-blue-100
     pre-existing employees with no department value set keep seeing
     Start Shift exactly as before, and it's hidden for every non-Sales
     department (Marketing, Other, Accounts, HR) consistently. */}
-{employee?.id && !(employee?.department && employee.department !== "sales") && (
+{/* Home v3 (2026-11-29): with the new Home on, EmployeeHomeGate renders the shift block itself (the same compact card
+    for the previous Home, the hero status for v3), so it is not repeated here. */}
+{employee?.id && !(employee?.department && employee.department !== "sales") && !showNewHome && (
   <StartShiftCard employeeId={employee.id} compactWhenIdle={showNewHome} />
 )}
 
