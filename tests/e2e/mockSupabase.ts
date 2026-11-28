@@ -149,6 +149,8 @@ export interface MockState {
   restoreRpcCalls: number;
   restoreTableReads: number;
   contactCalls: { ids: string[]; url: string }[];
+  fullJourneys: Record<string, unknown> | null;
+  fullJourneyCalls: { id: string; url: string }[];
   // Admin Home A4: site visit events and LEAD_JUNKED notifications (per recipient) behind the count-only reads.
   visits: { created_at: string; event_type: string }[];
   junkNotes: { created_at: string; employee_id: string }[];
@@ -167,7 +169,7 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
   const state: MockState = { leads: makeLeads("LEAD", 60), data: makeLeads("DATA", 40), anomalies: [], updates: [], failUpdates: 0, landThenLose: 0, settings: { ...LEAD_ENGINE_SETTINGS }, workReport: null, settingsDelayMs: 0, reminders: [], remindersFail: false, employee, teamPending: [], leave: [], given: null, cq: null, tracking: [],
     staff: null, heartbeats: [], backups: [], anomalyRows: [], transfers: [], empRequests: [], attendanceRows: null, joins: [], fail: new Set(),
     clicks: [], activities: [], bookings: [], attendanceByDate: null, cqAll: null, workloadLeads: [],
-    recycles: [], guardEvents: [], restoreRows: [], positiveJunk: null, positiveJunkCalls: 0, guardRpcCalls: 0, guardTableReads: 0, restoreRpcCalls: 0, restoreTableReads: 0, contactCalls: [], visits: [], junkNotes: []
+    recycles: [], guardEvents: [], restoreRows: [], positiveJunk: null, positiveJunkCalls: 0, guardRpcCalls: 0, guardTableReads: 0, restoreRpcCalls: 0, restoreTableReads: 0, contactCalls: [], fullJourneys: null, fullJourneyCalls: [], visits: [], junkNotes: []
   };
 
   const json = (route: Route, body: unknown, status = 200, headers: Record<string, string> = {}) =>
@@ -250,6 +252,15 @@ export async function mockSupabase(context: BrowserContext): Promise<MockState> 
       const now = openAt(at);
       const earliest = now.map((r) => r.protected_until).sort()[0] ?? null;
       return json(route, [{ open_now: now.length, open_day_before: openAt(at - 86400e3).length, earliest_end: earliest }]);
+    }
+    // 2026-11-29: full lead history (admin only). Not on the server (PGRST202) unless a test sets state.fullJourneys.
+    if (p === "/rest/v1/rpc/get_admin_lead_full_journey") {
+      const id = String(((req.postDataJSON() || {}) as { p_lead_id?: string }).p_lead_id ?? "");
+      state.fullJourneyCalls.push({ id, url: url.toString() });
+      if (!state.fullJourneys) return json(route, { code: "PGRST202", message: "Could not find the function public.get_admin_lead_full_journey" }, 404);
+      if (state.fail.has("rpc/get_admin_lead_full_journey")) return json(route, { code: "42501", message: "not allowed", details: null, hint: null }, 403);
+      if (state.employee.role !== "admin" && state.employee.role !== "super_admin") return json(route, { code: "42501", message: "not allowed", details: null, hint: null }, 403);
+      return json(route, state.fullJourneys[id] ?? { found: false, lead_id: id });
     }
     // 2026-11-29: admin contact lookup (name + mobile for up to 200 lead ids in the body; admin roles only).
     if (p === "/rest/v1/rpc/get_admin_lead_contacts") {

@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import LeadFullJourneyModal from "./LeadFullJourneyModal";
+import { isAdminRole, viewerRole } from "@/lib/viewerRole";
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 import { X, User, Bookmark, Share2, Phone, MessageCircle, StickyNote, MapPin, Moon, ArrowRightCircle, TrendingUp } from "lucide-react";
@@ -169,7 +171,7 @@ type TimelineEntry =
 // the point where the {historyOpen && ...} conditional actually is —
 // portals change DOM output, not React parent/unmount timing, so
 // AnimatePresence still needs to sit there to see the removal coming.
-export default function AdminLeadHistoryModal({ leadId, leadName, leadType, leadStatus, leadBoardStage, catcherName, onClose }: AdminLeadHistoryModalProps) {
+function LegacyLeadHistoryModal({ leadId, leadName, leadType, leadStatus, leadBoardStage, catcherName, onClose }: AdminLeadHistoryModalProps) {
 
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -659,4 +661,21 @@ export default function AdminLeadHistoryModal({ leadId, leadName, leadType, lead
     </>,
     document.body
   );
+}
+
+// 2026-11-29: admins (admin / super_admin) get the FULL journey of the lead, start to end, junk or not
+// (get_admin_lead_full_journey). Everyone else who can open this (sales coordinator) keeps the timeline above. If the
+// function is not on the server yet, admins fall back to the timeline above too.
+export default function AdminLeadHistoryModal(props: AdminLeadHistoryModalProps) {
+  const [mode, setMode] = useState<"checking" | "full" | "legacy">("checking");
+  useEffect(() => {
+    let alive = true;
+    viewerRole().then((r) => alive && setMode(isAdminRole(r) ? "full" : "legacy"));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  if (mode === "checking") return null;
+  if (mode === "full") return <LeadFullJourneyModal leadId={props.leadId} onClose={props.onClose} onMissing={() => setMode("legacy")} />;
+  return <LegacyLeadHistoryModal {...props} />;
 }

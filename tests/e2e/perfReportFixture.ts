@@ -80,6 +80,7 @@ export function report(filters: Row, api: 1 | 2 | 3 | 4) {
 export interface Ctx { state: MockState; calls: { rpc: string; body: Row; url: string }[] }
 export interface OpenOpts {
   contactsFail?: boolean;
+  fullJourneys?: Record<string, unknown>;
   flag?: "on" | "off" | "missing"; reassign?: "on" | "off"; role?: "admin" | "super_admin"; fail?: boolean; api?: 1 | 2 | 3 | 4; goto?: string;
   receiverProblem?: string | null; oldBatch?: boolean; journeyFail?: boolean; journey?: JourneyMode; journeyExportFailAt?: number;
 }
@@ -163,6 +164,11 @@ export async function openReport(context: BrowserContext, page: Page, opts: Open
         before: { leads: 9, followup: 0, visit: 0, connected: 1, converted: 0, no_result: 8 }, after: { leads: 9, followup: 3, visit: 2, connected: 6, converted: 1, no_result: 2 }, leads: [] }));
     if (rpc === "admin_undo_report_batch")
       return r.fulfill(json({ batch_id: "u0000001-0000-4000-8000-000000000000", undo_of: body.p_batch_id, requested: 9, moved: 4, skipped: 5, skipped_breakdown: { "the new owner already worked on it": 5 } }));
+    if (rpc === "get_admin_lead_full_journey") {
+      const id = String(body.p_lead_id ?? "");
+      if (!opts.fullJourneys) return r.fulfill(json({ code: "PGRST202", message: "Could not find the function" }, 404));
+      return r.fulfill(json(opts.fullJourneys[id] ?? { found: false, lead_id: id }));
+    }
     if (rpc === "get_admin_lead_contacts") {
       const ids = (body.p_lead_ids ?? []) as string[];
       if (opts.contactsFail) return r.fulfill(json({ code: "42501", message: "not allowed", details: null, hint: null }, 403));

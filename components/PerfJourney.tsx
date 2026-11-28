@@ -6,6 +6,7 @@
 // lookup (lib/leadContacts.ts, 2026-11-29); the journey rows themselves carry no client name or number.
 import { useMemo, useState } from "react";
 import LeadContactLine from "@/components/LeadContactLine";
+import AdminLeadHistoryModal from "@/components/AdminLeadHistoryModal";
 import { useLeadContacts } from "@/lib/leadContacts";
 import { Banner, BTN, CARD, CHIP, FOCUS, InfoButton, Pill, PRIMARY, Sheet, Skeleton } from "@/components/perfUi";
 import {
@@ -254,6 +255,8 @@ function Step({ s }: { s: JourneyStep }) {
 function JourneyList({ rows, stacked = false }: { rows: JourneyRow[]; stacked?: boolean }) {
   // Name + mobile next to the id (admin cross-check), for the rows on screen, in chunks of 200 (POST body).
   const { contacts } = useLeadContacts(rows.map((r) => r.lead_id), "lead-journey");
+  // History (2026-11-29): the same full-journey modal as everywhere else.
+  const [historyFor, setHistoryFor] = useState<string | null>(null);
   if (!rows.length) return <p className="mt-2 text-[15px] text-slate-700" data-testid="lj-none">No leads here.</p>;
   return (
     <>
@@ -271,6 +274,7 @@ function JourneyList({ rows, stacked = false }: { rows: JourneyRow[]; stacked?: 
                   <td className="px-1 py-2">
                     <span className="font-mono">{r.lead_short}</span>
                     <LeadContactLine contact={contacts.get(r.lead_id)} testId={`lj-contact-${r.lead_short}`} />
+                    <button type="button" onClick={() => setHistoryFor(r.lead_id)} data-testid={`lj-history-${r.lead_short}`} className="mt-1 inline-flex min-h-11 items-center rounded-lg border border-slate-200 bg-white px-3 text-[13px] font-semibold text-blue-700 hover:bg-blue-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600">History</button>
                   </td>
                   <td className="px-1 py-2">{r.source ?? "–"}</td>
                   <td className="px-1 py-2">{typeWord(r.lead_type)}</td>
@@ -291,7 +295,10 @@ function JourneyList({ rows, stacked = false }: { rows: JourneyRow[]; stacked?: 
               <span className="font-mono font-semibold text-slate-900">{r.lead_short}</span>
               <span className="text-slate-600">{r.source ?? "–"} · {typeWord(r.lead_type)}</span>
             </div>
-            <LeadContactLine contact={contacts.get(r.lead_id)} testId={`lj-card-contact-${r.lead_short}`} />
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <LeadContactLine contact={contacts.get(r.lead_id)} testId={`lj-card-contact-${r.lead_short}`} />
+              <button type="button" onClick={() => setHistoryFor(r.lead_id)} data-testid={`lj-card-history-${r.lead_short}`} className="mt-1 inline-flex min-h-11 items-center rounded-lg border border-slate-200 bg-white px-3 text-[13px] font-semibold text-blue-700 hover:bg-blue-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600">History</button>
+            </div>
             <div className="mt-1 flex flex-wrap items-center gap-1">
               {r.steps.map((s, i) => (
                 <span key={s.seq} className="flex min-w-0 max-w-full items-center gap-1">
@@ -305,6 +312,7 @@ function JourneyList({ rows, stacked = false }: { rows: JourneyRow[]; stacked?: 
           </li>
         ))}
       </ul>
+      {historyFor && <AdminLeadHistoryModal leadId={historyFor} leadName="" onClose={() => setHistoryFor(null)} />}
     </>
   );
 }

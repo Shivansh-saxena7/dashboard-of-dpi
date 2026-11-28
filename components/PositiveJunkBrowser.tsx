@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import LeadContactLine from "@/components/LeadContactLine";
+import AdminLeadHistoryModal from "@/components/AdminLeadHistoryModal";
 import { useLeadContacts, type LeadContact } from "@/lib/leadContacts";
 import { RefreshCw, RotateCcw, X } from "lucide-react";
 import toast from "react-hot-toast";
@@ -36,6 +37,8 @@ export default function PositiveJunkBrowser({ data, onReload }: { data: Positive
   // Name + mobile next to the id (admin cross-check), looked up for every loaded row in chunks of 200 (POST body).
   const allIds = useMemo(() => data.rows.map((r) => r.lead_id), [data]);
   const { contacts } = useLeadContacts(allIds, "positive-junk");
+  // History (2026-11-29): the same full-journey modal as everywhere else.
+  const [historyFor, setHistoryFor] = useState<PositiveJunkRow | null>(null);
   const options = useMemo(() => buildOptions(data.rows), [data]);
   const maxBatch = data.max_batch;
   const set = (patch: Partial<PositiveJunkFilters>) => setFilters((f) => ({ ...f, ...patch }));
@@ -110,10 +113,14 @@ export default function PositiveJunkBrowser({ data, onReload }: { data: Positive
             </div>
           </div>
 
+          {historyFor && (
+            <AdminLeadHistoryModal leadId={historyFor.lead_id} leadName="" leadType={historyFor.card_type} leadStatus="JUNK" onClose={() => setHistoryFor(null)} />
+          )}
+
           {/* Phone: cards */}
           <div className="sm:hidden space-y-2">
             {rows.map((r) => (
-              <RowCard key={r.lead_id} row={r} now={now} checked={selected.includes(r.lead_id)} onToggle={() => toggle(r)} contact={contacts.get(r.lead_id)} />
+              <RowCard key={r.lead_id} row={r} now={now} checked={selected.includes(r.lead_id)} onToggle={() => toggle(r)} contact={contacts.get(r.lead_id)} onHistory={() => setHistoryFor(r)} />
             ))}
           </div>
 
@@ -143,7 +150,10 @@ export default function PositiveJunkBrowser({ data, onReload }: { data: Positive
                       </td>
                       <td className="p-2">
                         <p className="font-mono font-semibold text-slate-800">{r.lead_id8}</p>
-                        <div onClick={(e) => e.stopPropagation()}><LeadContactLine contact={contacts.get(r.lead_id)} testId={`pj-contact-${r.lead_id8}`} /></div>
+                        <div onClick={(e) => e.stopPropagation()}>
+                          <LeadContactLine contact={contacts.get(r.lead_id)} testId={`pj-contact-${r.lead_id8}`} />
+                          <button type="button" onClick={() => setHistoryFor(r)} data-testid={`pj-history-${r.lead_id8}`} className="mt-1 inline-flex min-h-11 items-center rounded-lg border border-slate-200 bg-white px-3 text-[13px] font-semibold text-blue-700 hover:bg-blue-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600">History</button>
+                        </div>
                         <p className="text-xs text-slate-400">{r.card_type === "DATA" ? "Data" : "Lead"} · {r.project ?? "—"} · at {label(r.stage_at_junk)}</p>
                         {r.is_data_copy && <p className="text-xs text-slate-500">Data copy of a lead — never restored</p>}
                       </td>
@@ -267,7 +277,7 @@ function PositiveChip({ kind }: { kind: string }) {
   return <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${CHIP[kind] ?? CHIP.CONNECTED}`}>{label(kind)}</span>;
 }
 
-function RowCard({ row: r, now, checked, onToggle, contact }: { row: PositiveJunkRow; now: number; checked: boolean; onToggle: () => void; contact?: LeadContact }) {
+function RowCard({ row: r, now, checked, onToggle, contact, onHistory }: { row: PositiveJunkRow; now: number; checked: boolean; onToggle: () => void; contact?: LeadContact; onHistory: () => void }) {
   return (
     <div className="space-y-1">
     <button
@@ -296,7 +306,10 @@ function RowCard({ row: r, now, checked, onToggle, contact }: { row: PositiveJun
       <p className="text-sm text-emerald-700 mt-0.5">Comes back as {restoreTarget(r.restore_status, r.restore_stage)}</p>
     </button>
     {/* Outside the card button (a button cannot hold another button): name + tap-to-copy number. */}
-    <div className="px-3"><LeadContactLine contact={contact} testId={`pj-card-contact-${r.lead_id8}`} /></div>
+    <div className="flex flex-wrap items-center justify-between gap-2 px-3">
+      <LeadContactLine contact={contact} testId={`pj-card-contact-${r.lead_id8}`} />
+      <button type="button" onClick={onHistory} data-testid={`pj-card-history-${r.lead_id8}`} className="mt-1 inline-flex min-h-11 items-center rounded-lg border border-slate-200 bg-white px-3 text-[13px] font-semibold text-blue-700 hover:bg-blue-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600">History</button>
+    </div>
     </div>
   );
 }

@@ -263,7 +263,7 @@ check("SQL give and v3: drafts, flag default off", v3.includes("DRAFT, NOT APPLI
   const walk = (d) => fs.readdirSync(pathM.join(root, d), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(pathM.join(d, e.name)) : /\.(ts|tsx)$/.test(e.name) ? [pathM.join(d, e.name).split(pathM.sep).join("/")] : []));
   const files = ["app", "components", "lib"].flatMap(walk);
   const users = files.filter((x) => /useLeadContacts|LeadContactLine/.test(read(x)) && x !== "components/LeadContactLine.tsx" && x !== "lib/leadContacts.ts").sort();
-  check("contact lookup only on Positive-history junk and Lead Journey", JSON.stringify(users) === JSON.stringify(["components/PerfJourney.tsx", "components/PositiveJunkBrowser.tsx"]));
+  check("contact lookup only on Positive-history junk, Lead Journey and the admin full history", JSON.stringify(users) === JSON.stringify(["components/LeadFullJourneyModal.tsx", "components/PerfJourney.tsx", "components/PositiveJunkBrowser.tsx"]));
   const rpcUsers = files.filter((x) => read(x).includes("get_admin_lead_contacts"));
   check("get_admin_lead_contacts called only from lib/leadContacts.ts", JSON.stringify(rpcUsers) === JSON.stringify(["lib/leadContacts.ts"]));
   const lc = read("lib/leadContacts.ts");
@@ -271,6 +271,18 @@ check("SQL give and v3: drafts, flag default off", v3.includes("DRAFT, NOT APPLI
   const sql = read("supabase/sql/2026-11-29_admin_lead_contacts.sql");
   check("contact SQL draft: admin only, bounded, revoke anon/PUBLIC", ["security definer", "set search_path = public", "public.is_admin()", "errcode = '42501'", "> 200", "from public;", "from anon;", "to authenticated;"].every((n) => sql.includes(n)));
 }
+// 2026-11-29 full lead history: one admin-only RPC, the same modal from every History button, the old timeline kept
+// for non-admins (sales coordinator) and as the fallback before the SQL is applied.
+{
+  const sql = read("supabase/sql/2026-11-29_admin_lead_full_journey.sql");
+  check("full journey SQL draft: admin only, one lead, revoke anon/PUBLIC, built on get_lead_journey", ["security definer", "set search_path = public", "public.is_admin()", "errcode = '42501'", "errcode = '22023'", "public.get_lead_journey(p_lead_id)", "public.get_lead_report_batches(p_lead_id)", "from public;", "from anon;", "to authenticated;"].every((n) => sql.includes(n)) && !/l.(name|mobile)/.test(sql));
+  const m = read("components/AdminLeadHistoryModal.tsx");
+  check("History modal: admins get the full journey, others the old timeline, fallback when the RPC is missing", m.includes("isAdminRole(r) ? \"full\" : \"legacy\"") && m.includes("onMissing={() => setMode(\"legacy\")}") && m.includes("function LegacyLeadHistoryModal("));
+  const fj = read("components/LeadFullJourneyModal.tsx");
+  check("full journey modal: one RPC, error logs the code only", fj.includes('rpc("get_admin_lead_full_journey", { p_lead_id: leadId })') && fj.includes("load failed (${error.code") && !fj.includes("error.message"));
+  check("History button on Positive-history junk and Lead Journey opens the same modal", read("components/PositiveJunkBrowser.tsx").includes("<AdminLeadHistoryModal") && read("components/PerfJourney.tsx").includes("<AdminLeadHistoryModal"));
+}
+
 if (problems.length) {
   console.error("check-admin-report FAILED:\n  " + problems.join("\n  "));
   process.exit(1);
