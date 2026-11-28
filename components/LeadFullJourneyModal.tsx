@@ -97,7 +97,7 @@ export default function LeadFullJourneyModal({ leadId, onClose, onMissing }: { l
                     return (
                       <li key={s.stint_id} className={`rounded-xl border p-3 text-[14px] ${s.active ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-white"}`} data-testid={`lfj-owner-${i + 1}`}>
                         <p className="font-semibold text-slate-900">{i + 1}. {s.employee_name ?? "Unknown employee"} <span className="font-normal text-slate-600">· {word(s.origin)}</span></p>
-                        <p className="text-slate-700">{istTime(s.assigned_at)} → {s.active ? "now" : istTime(s.ended_at)}</p>
+                        <p className="text-slate-700">{istTime(s.assigned_at)} → {s.active ? "now" : s.ended_at ? istTime(s.ended_at) : "closed"}</p>
                         <p className="text-slate-700">{c.calls} call{c.calls === 1 ? "" : "s"} · {c.notes} note{c.notes === 1 ? "" : "s"} · {c.moves} update{c.moves === 1 ? "" : "s"}{s.result ? ` · last result ${word(s.result)}` : ""}</p>
                         <p className="text-slate-600">{endedText(s)}</p>
                         <p className="text-[13px] text-slate-600">Employee saw: {s.employee_sees}</p>
