@@ -41,20 +41,29 @@ function journey(id: string) {
 
 async function checkModal(page: Page, info: { project: { name: string } }, shotName: string) {
   const m = page.getByTestId("lfj");
-  await expect(m.getByTestId("lfj-owner-1")).toContainText("Fake Owner K");
-  await expect(m.getByTestId("lfj-owners").locator("li")).toHaveCount(4);
-  await expect(m.getByTestId("lfj-owner-3")).toContainText("Admin reason (admins only): Fake batch · Fake admin reason");
-  await expect(m.getByTestId("lfj-owner-1")).toContainText("Employee saw: New lead");
-  await expect(m.getByTestId("lfj-now")).toContainText("Now: Junk");
-  await expect(m.getByTestId("lfj-ev-NOTE")).toContainText("Fake note from K");
-  await expect(m.getByTestId("lfj-ev-VISIT")).toContainText("Visit (denied)");
-  await expect(m.getByTestId("lfj-ev-GUARD")).toContainText("Recycle stopped");
-  await expect(m.getByTestId("lfj-chip-calls")).toHaveText("Calls (2)");
-  await m.getByTestId("lfj-chip-calls").click();
-  await expect(m.getByTestId("lfj-events").locator("li")).toHaveCount(2);
+  const tl = m.getByTestId("lfj-timeline");
+  await expect(tl.locator("li").first()).toBeVisible();
+  const titles = await tl.locator("li p.font-bold").allTextContents();
+  // one list, oldest first: K gets it first, the owner changes sit in the same list
+  expect(titles[0]).toBe("Fake Owner K got the lead (fresh)");
+  expect(titles.filter((t) => / got the lead /.test(t))).toEqual(["Fake Owner K got the lead (fresh)", "Fake Owner 2 got the lead (recycled)", "Fake Owner 3 got the lead (recycled)", "Fake Owner 4 got the lead (recycled)"]);
+  expect(titles.filter((t) => /lost the lead|lead closed/.test(t)).length).toBe(4);
+  expect(titles.indexOf("Fake Owner K lost the lead")).toBeLessThan(titles.indexOf("Fake Owner 2 got the lead (recycled)"));
+  expect(titles).toContain("Status: New → Connected");
+  expect(titles).toContain("Status: Connected → Not connected");
+  await expect(tl).toContainText("Fake note from K");
+  await expect(tl).toContainText("Visit (denied)");
+  await expect(tl).toContainText("Reason: Fake deny");
+  await expect(tl).toContainText("Recycle stopped");
+  await expect(m.getByTestId("lfj-admin-reason")).toHaveText("Admin reason (admins only): Fake batch · Fake admin reason");
+  await expect(m.getByTestId("lfj-now")).toHaveText("Now: Junk · Leads · no owner");
+  await expect(m.locator('[data-testid^="lfj-chip-"], [data-testid="lfj-owners"]')).toHaveCount(0);
+  const times = await tl.getByTestId("lfj-when").allTextContents();
+  expect(times.length).toBe(titles.length);
   for (const b of await m.getByRole("button").all()) if (await b.isVisible()) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
-  await page.screenshot({ path: `${SHOTS}/${shotName}-${info.project.name}.png` });
+  expect(await m.evaluate((el) => /purple|violet/.test(el.innerHTML))).toBe(false);
+  await page.screenshot({ path: `${SHOTS}/new-${shotName}-${info.project.name}.png` });
   await m.getByTestId("lfj-close").click();
   await expect(m).toHaveCount(0);
 }
@@ -91,11 +100,23 @@ test("Admin Leads: View History on a junk lead shows the whole journey (first ow
   for (const c of state.fullJourneyCalls) expect(c.url).not.toContain(lead.id);
 });
 
-test("Admin Leads before the SQL is applied: admins fall back to the old timeline (nothing breaks)", async ({ page, context }) => {
+test("Admin Leads before the SQL is applied: admins fall back to the old timeline (nothing breaks)", async ({ page, context }, info) => {
   await openAdminLeads(context, page, "admin", false);
+  // The same fake journey in the old modal's own shape, for the old vs new screenshot.
+  const j = journey("x");
+  const hist = j.stints.map((s) => ({ id: s.stint_id, employee_id: s.employee_id, assigned_at: s.assigned_at, is_active: false, ended_reason: s.ended_reason, reassign_note: null, outcome: s.outcome,
+    call_count: s.call_count, assigned_by_type: "SYSTEM", assigned_by_employee_id: null, employees: { name: s.employee_name }, assigned_by: null }));
+  await context.route(`${FAKE_SUPABASE}/rest/v1/lead_history?**`, (route) => route.fulfill(json(hist)));
+  await context.route(`${FAKE_SUPABASE}/rest/v1/lead_notes?**`, (route) => route.fulfill(json([{ id: "n1", note: "Fake note from K", created_at: j.events[3].at, employees: { name: "Fake Owner K" } }])));
+  await context.route(`${FAKE_SUPABASE}/rest/v1/rpc/get_lead_activity_log_atomic`, (route) => route.fulfill(json({
+    callClicks: j.events.filter((e) => e.kind === "CALL").map((e, i) => ({ id: `c${i}`, clickType: "CALL", clickedAt: e.at, employeeId: e.employee_id, employeeName: e.employee_name })),
+    activityLog: j.events.filter((e) => e.kind === "STATUS").map((e, i) => ({ id: `a${i}`, activityType: "STATUS_UPDATE", detail: e.detail, createdAt: e.at, employeeId: e.employee_id, employeeName: e.employee_name }))
+  })));
   await page.getByRole("button", { name: /View History/ }).first().click();
   await expect(page.getByTestId("lfj")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: /Admin Lead 11/ })).toBeVisible();
+  await page.waitForTimeout(800);
+  await page.screenshot({ path: `${SHOTS}/old-admin-leads-${info.project.name}.png` });
 });
 
 test("Coordinator: the old timeline, the admin journey is never asked", async ({ page, context }) => {
@@ -144,5 +165,5 @@ test("RPC error: Couldn't load + Retry, the log has the code only", async ({ pag
   await expect.poll(() => state.anomalies.some((a) => a.message.includes("load failed (42501)"))).toBe(true);
   state.fail.delete("rpc/get_admin_lead_full_journey");
   await page.getByTestId("lfj-retry").click();
-  await expect(page.getByTestId("lfj-owner-1")).toContainText("Fake Owner K");
+  await expect(page.getByTestId("lfj-timeline")).toContainText("Fake Owner K got the lead (fresh)");
 });

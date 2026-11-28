@@ -126,3 +126,113 @@ export function stintCounts(j: FullJourney, stintId: string): { calls: number; n
   const ev = j.events.filter((e) => e.stint_id === stintId);
   return { calls: ev.filter((e) => e.kind === "CALL" || e.kind === "WHATSAPP").length, notes: ev.filter((e) => e.kind === "NOTE").length, moves: ev.filter((e) => e.kind === "STATUS" || e.kind === "STAGE").length };
 }
+
+// ---- Single timeline (2026-11-29 v2, owner's request): one vertical list, oldest first, like the old History modal.
+// Owner changes are events in the same list ("got the lead" / "lost the lead"); no separate owners section.
+export type TimelineTone = "owner" | "ownerOut" | "status" | "stage" | "call" | "note" | "visit" | "snooze" | "admin" | "guard" | "transfer" | "leave";
+export type TimelineIcon = "user" | "userMinus" | "status" | "stage" | "phone" | "whatsapp" | "note" | "visit" | "snooze" | "restore" | "guard" | "transfer" | "reserve" | "leave";
+
+export interface TimelineItem {
+  key: string;
+  at: string;
+  tone: TimelineTone;
+  icon: TimelineIcon;
+  title: string;
+  who: string;
+  lines: string[];
+  text: string | null;
+  adminLine: string | null;
+}
+
+const gapText = (s: unknown) => {
+  const n = Number(s);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n < 60 ? `${Math.round(n)} sec` : n < 3600 ? `${Math.round(n / 60)} min` : `${Math.round(n / 3600)} h`;
+};
+const str = (v: unknown) => (v == null ? "" : String(v));
+
+export function buildTimeline(j: FullJourney): TimelineItem[] {
+  const items: (TimelineItem & { order: number })[] = [];
+  j.stints.forEach((s, i) => {
+    const name = s.employee_name ?? "Unknown employee";
+    const how =
+      s.origin === "RESTORED" ? "given back by admin" : s.origin === "ADMIN_GIVEN" ? "given by admin" : s.origin === "SELF" ? "own lead" : s.origin === "FRESH" ? "fresh" : s.origin === "RECYCLED" ? "recycled" : "assigned";
+    const lines: string[] = [];
+    if (s.recycled_from_status || s.recycled_from_stage) lines.push(`Came back from ${word(s.recycled_from_status)} at ${word(s.recycled_from_stage)}`);
+    lines.push(`Employee saw: ${s.employee_sees}`);
+    if (s.restore?.protected_until) lines.push(`Protected until ${istTime(s.restore.protected_until)}${s.restore.undone_at ? ` · undone ${istTime(s.restore.undone_at)}` : ""}`);
+    if (s.pause_reason) lines.push(`Paused (${word(s.pause_reason)}) until ${istTime(s.paused_until)}`);
+    const by = s.assigned_by_name ?? (s.assigned_by_type === "SYSTEM" ? "System" : s.assigned_by_type === "SELF" ? name : word(s.assigned_by_type));
+    items.push({ key: `in-${s.stint_id}`, at: s.assigned_at, order: 0, tone: "owner", icon: "user", title: `${name} got the lead (${how})`, who: by, lines, text: null, adminLine: adminReason(s) });
+    if (!s.active) {
+      const c = stintCounts(j, s.stint_id);
+      const endAt = s.ended_at ?? j.stints[i + 1]?.assigned_at ?? null;
+      const out = [endedText(s), `${c.calls} call${c.calls === 1 ? "" : "s"} · ${c.notes} note${c.notes === 1 ? "" : "s"} while with them${s.result ? ` · last result ${word(s.result)}` : ""}`];
+      items.push({ key: `out-${s.stint_id}`, at: endAt ?? s.assigned_at, order: endAt ? -1 : 9, tone: "ownerOut", icon: "userMinus", title: endAt ? `${name} lost the lead` : `${name}: lead closed`, who: "System", lines: out, text: null, adminLine: null });
+    }
+  });
+  let status = "NEW";
+  let stage = "LEADS";
+  const ev = [...j.events].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  ev.forEach((e, n) => {
+    const x = e.extra ?? {};
+    const base = { key: `ev-${n}-${e.kind}`, at: e.at, order: 1, who: e.employee_name ?? (e.kind === "GUARD" ? "System" : "Unknown"), text: null as string | null, adminLine: null as string | null };
+    if (e.kind === "STATUS") {
+      items.push({ ...base, tone: "status", icon: "status", title: `Status: ${word(status)} → ${word(e.detail)}`, lines: [] });
+      status = e.detail ?? status;
+    } else if (e.kind === "STAGE") {
+      items.push({ ...base, tone: "stage", icon: "stage", title: `Moved from ${word(stage)} to ${word(e.detail)}`, lines: [] });
+      stage = e.detail ?? stage;
+    } else if (e.kind === "CALL" || e.kind === "WHATSAPP") {
+      const lines: string[] = [];
+      if (e.detail) lines.push(`Result: ${word(e.detail)}`);
+      const gap = gapText(x.gap_seconds);
+      if (gap) lines.push(`Result saved ${gap} after the tap`);
+      items.push({ ...base, tone: "call", icon: e.kind === "WHATSAPP" ? "whatsapp" : "phone", title: e.kind === "WHATSAPP" ? "WhatsApp opened" : "Call", lines });
+    } else if (e.kind === "NOTE") {
+      items.push({ ...base, tone: "note", icon: "note", title: x.reminder_at ? `Note · reminder ${istTime(str(x.reminder_at))}` : "Note", lines: [], text: e.text });
+    } else if (e.kind === "VISIT" || e.kind === "BOOKING") {
+      const lines: string[] = [];
+      if (x.verified_at) lines.push(`Verified ${istTime(str(x.verified_at))}${x.verified_by ? ` by ${str(x.verified_by)}` : ""}`);
+      if (x.denied_at) lines.push(`Denied ${istTime(str(x.denied_at))}${x.denied_by ? ` by ${str(x.denied_by)}` : ""}${x.deny_reason ? ` · Reason: ${str(x.deny_reason)}` : ""}`);
+      items.push({ ...base, tone: "visit", icon: "visit", title: eventTitle(e), lines, text: e.text });
+    } else if (e.kind === "SNOOZE") {
+      const lines = [`Until ${istTime(x.until ? str(x.until) : null)}`];
+      if (e.detail) lines.push(`Reason: ${e.detail}`);
+      if (x.cancelled_at) lines.push(`Cancelled ${istTime(str(x.cancelled_at))}${x.cancelled_by ? ` by ${str(x.cancelled_by)}` : ""}`);
+      items.push({ ...base, tone: "snooze", icon: "snooze", title: eventTitle(e), lines });
+    } else if (e.kind === "RESTORE") {
+      const lines: string[] = [];
+      if (x.to_name) lines.push(`To ${str(x.to_name)}`);
+      lines.push(`Comes back as ${word(str(x.restored_status))} · ${word(str(x.restored_stage))}`);
+      if (x.undone_at) lines.push(`Undone ${istTime(str(x.undone_at))}${x.undone_note ? ` · ${str(x.undone_note)}` : ""}`);
+      items.push({ ...base, tone: "admin", icon: "restore", title: eventTitle(e), lines, adminLine: e.text });
+    } else if (e.kind === "ADMIN_REASSIGN" || e.kind === "ADMIN_RESTORE") {
+      items.push({ ...base, tone: "admin", icon: "restore", title: eventTitle(e), lines: e.detail ? [e.detail] : [] });
+    } else if (e.kind === "GUARD") {
+      const lines: string[] = [];
+      if (x.holder_owner) lines.push(`Same number is with ${str(x.holder_owner)}${x.holder_lead8 ? ` (lead ${str(x.holder_lead8)})` : ""}`);
+      if (x.mode) lines.push(`Mode: ${word(str(x.mode))}`);
+      items.push({ ...base, tone: "guard", icon: "guard", title: guardText(e.detail), lines });
+    } else if (e.kind === "TRANSFER_REQUEST") {
+      const lines: string[] = [];
+      if (x.to_name) lines.push(`To ${str(x.to_name)}`);
+      if (x.reviewed_at) lines.push(`Reviewed ${istTime(str(x.reviewed_at))}${x.reviewed_by ? ` by ${str(x.reviewed_by)}` : ""}`);
+      items.push({ ...base, tone: "transfer", icon: "transfer", title: eventTitle(e), lines, text: e.text });
+    } else if (e.kind === "TEAM_RESERVATION") {
+      items.push({ ...base, tone: "transfer", icon: "reserve", title: eventTitle(e), lines: [] });
+    } else if (e.kind === "LEAVE") {
+      items.push({ ...base, tone: "leave", icon: "leave", title: "Owner on leave", lines: [`${str(x.start_date)} to ${x.end_date ? str(x.end_date) : "open"}${e.detail ? ` · ${e.detail}` : ""}`] });
+    } else {
+      items.push({ ...base, tone: "leave", icon: "status", title: eventTitle(e), lines: e.detail ? [e.detail] : [] });
+    }
+  });
+  // Oldest first. At the same moment: the old owner leaves, then the new one gets it, then what they did.
+  return items.sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.order - b.order).map(({ order: _order, ...t }) => t);
+}
+
+export function nowLine(j: FullJourney): string {
+  if (!j.lead) return "";
+  const owner = j.lead.current_owner_name ? `with ${j.lead.current_owner_name}` : j.lead.pending_team_name ? `reserved for ${j.lead.pending_team_name}` : "no owner";
+  return `Now: ${word(j.lead.status)} · ${word(j.lead.board_stage ?? "LEADS")} · ${owner}`;
+}
