@@ -42,7 +42,7 @@ test.beforeEach(async ({ context }) => {
 });
 
 async function openHome(page: Page) {
-  await page.goto("/");
+  await page.goto("/?home=p1");
   await expect(page.getByTestId("employee-home-p1")).toBeVisible();
   await expect(page.getByTestId("tile-calls")).toBeVisible();
 }
@@ -78,7 +78,7 @@ test("Start Shift: full card while the window is open, one line after it closes 
 test("flag off: the full Start Shift card stays after the window, Resume strip says Skip", async ({ page }) => {
   state.settings.employee_home_mode = "off";
   await page.clock.setFixedTime(new Date("2026-11-19T16:00:00+05:30"));
-  await page.goto("/");
+  await page.goto("/?home=p1");
   await expect(page.getByText("Today's Shift").first()).toBeVisible();
   await expect(page.getByTestId("shift-compact")).toHaveCount(0);
 });
@@ -123,7 +123,7 @@ test("errors: each card says what failed and the failure is reported", async ({ 
     if (url.searchParams.get("lead_type") === "eq.LEAD") return route.fulfill({ status: 500, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: '{"message":"fake failure"}' });
     return route.fallback();
   });
-  await page.goto("/");
+  await page.goto("/?home=p1");
   await expect(page.getByTestId("retry-leads")).toHaveText("Couldn't load your leads. Tap to try again.");
   await expect(page.getByTestId("retry-attention")).toHaveText("Couldn't load what needs your attention. Tap to try again.");
   await expect(page.getByTestId("retry-up-next")).toHaveText("Couldn't load your next leads. Tap to try again.");

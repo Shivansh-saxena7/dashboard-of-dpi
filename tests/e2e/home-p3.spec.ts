@@ -48,7 +48,7 @@ test.beforeEach(async ({ context }) => {
 });
 
 async function openHome(page: Page) {
-  await page.goto("/");
+  await page.goto("/?home=p1");
   // E5: after the start window closes the new Home shows the one-line shift strip instead of the full card.
   await expect(page.getByText("Today's Shift").or(page.getByTestId("shift-compact")).first()).toBeVisible();
 }

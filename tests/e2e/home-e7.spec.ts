@@ -70,7 +70,7 @@ async function setup(context: BrowserContext) {
 }
 
 async function openHome(page: Page) {
-  await page.goto("/");
+  await page.goto("/?home=p1");
   await expect(page.getByTestId("employee-home-p1")).toBeVisible();
   await expect(page.getByTestId("tile-calls")).toBeVisible();
 }

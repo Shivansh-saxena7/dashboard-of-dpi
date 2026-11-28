@@ -100,7 +100,7 @@ const value = (page: Page, id: string) => page.getByTestId(id).locator("span").f
 const homeTopic = `realtime:employee-home-${EMP}`;
 
 async function openHome(page: Page) {
-  await page.goto("/");
+  await page.goto("/?home=p1");
   // E5: after the start window closes the new Home shows the one-line shift strip instead of the full card.
   await expect(page.getByText("Today's Shift").or(page.getByTestId("shift-compact")).first()).toBeVisible();
 }
@@ -174,14 +174,14 @@ test("parity: Home numbers equal the /leads tabs and filters they open", async (
   expect(Number(recyclingText.match(/\((\d+)\)/)?.[1] ?? 0)).toBe(recycling);
 
   // New tile -> Status = New over every tab.
-  await page.goto("/");
+  await page.goto("/?home=p1");
   await page.getByTestId("tile-new").click();
   await expect(page).toHaveURL(/\/leads$/);
   await expect(page.locator('[id^="lead-card-"]')).toHaveCount(EXPECTED.newCount);
   await expect(page.locator("#lead-card-lead-09")).toHaveCount(1);
 
   // Visit tile -> the Visit tab.
-  await page.goto("/");
+  await page.goto("/?home=p1");
   await page.getByTestId("stage-VISIT").click();
   await expect(page).toHaveURL(/\/leads$/);
   await expect(page.locator('[id^="lead-card-"]')).toHaveCount(EXPECTED.VISIT);

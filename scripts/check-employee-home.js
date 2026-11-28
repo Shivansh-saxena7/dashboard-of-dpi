@@ -61,7 +61,9 @@ if (!/sharedRecyclingTomorrowCutoffFor\(lead, workingCalendar\)/.test(list)) pro
 if (!list.replace(/\s+/g, " ").includes("if (openLeadId) { setSelectedLeadId(openLeadId); }")) problems.push("LeadList must still open ?openLead= (result-save, call-return, moved-away)");
 if (!/filterParam === "new"/.test(list) || !/tabFromParam\(searchParams\.get\("tab"\)\)/.test(list)) problems.push("LeadList must read ?filter=new and ?tab=");
 const page = read("app/page.tsx");
-if (!/showNewHome && employee\?\.id \? \(\s*<EmployeeHomeP1[\s\S]*?\) : \(\s*<PostsTrackingView/.test(page)) problems.push("app/page.tsx: flag off must render the old PostsTrackingView");
+// 2026-11-29 Home v3: flag on -> EmployeeHomeGate (v3; ?home=p1 on preview / local only shows the previous Home);
+// flag off -> the old PostsTrackingView, unchanged.
+if (!/showNewHome && employee\?\.id \? \(\s*<EmployeeHomeGate[\s\S]*?\) : \(\s*<PostsTrackingView/.test(page)) problems.push("app/page.tsx: flag off must render the old PostsTrackingView (flag on: EmployeeHomeGate)");
 if (!/useEmployeeHomeMode\(employee\?\.id\)/.test(page)) problems.push("app/page.tsx must decide the Home with useEmployeeHomeMode");
 if (/lead_engine_settings/.test(page)) problems.push("app/page.tsx: the login check must not wait for lead_engine_settings (old Home renders at once)");
 const mode = read("lib/useEmployeeHomeMode.ts");
@@ -281,6 +283,31 @@ const ss = eh;
 eq("social summary", [ss.socialSummaryText(ss.socialSummary([{ ig_done: true, fb_done: false }, { ig_done: true, fb_done: true }, {}])), ss.socialSummaryText(ss.socialSummary([])), ss.socialSummaryText(ss.socialSummary([{ ig_done: true, fb_done: true }])), ss.socialSummaryText(null)], ["2 posts to like today", "No posts today", "All posts done today", null]);
 const liveSql = read("scripts/home-parity-live.sql").replace(/--.*$/gm, "");
 if (/\b(insert|update|delete|alter|drop|create|grant|revoke|truncate)\b/i.test(liveSql)) problems.push("scripts/home-parity-live.sql must stay read-only (select only)");
+
+// ---- Home v3 (2026-11-29) ----
+{
+  const crypto = require("crypto");
+  const sha = (p) => crypto.createHash("sha256").update(read(p).replace(/\r\n/g, "\n")).digest("hex").slice(0, 16);
+  // The previous Home and its data code stay byte for byte (v3 only reads through them).
+  const same = { "components/EmployeeHomeP1.tsx": "c5c4767eb86c4fad", "lib/useEmployeeHome.ts": "34794797f2cc9359", "lib/employeeHome.ts": "29e115c972de8702",
+    "lib/useEmployeeHomeMode.ts": "99bfca5402deb202", "lib/todayReminders.ts": "c12c3440faf80ad1", "lib/useLastLog.ts": "103e2e391f621694", "components/PostsTrackingView.tsx": "fa2be7f16115df37" };
+  for (const [p, h] of Object.entries(same)) if (sha(p) !== h) problems.push(`${p}: must stay byte for byte (Home v3 is additive)`);
+  const v3 = read("components/EmployeeHomeV3.tsx");
+  if (!v3.includes("useEmployeeHome(employeeId)") || /supabase\.(from|rpc)|\.from\(|\.rpc\(/.test(v3)) problems.push("Home v3: numbers only from useEmployeeHome, no own database read");
+  if (!/rememberCalledCard\(lead\.id\);\s*if \(historyId\) logCallClick\(historyId, lead\.id\);/.test(v3) || !v3.includes("href={`tel:${lead.mobile}`}") || !v3.includes("registerActiveCallContext({")) problems.push("Home v3: Call keeps the existing flow (call-return)");
+  if (/setInterval\(|\.(update|insert|upsert|delete)\(|purple|violet|fuchsia|dark:/.test(v3 + read("lib/homeV3.ts") + read("components/EmployeeHomeGate.tsx"))) problems.push("Home v3: read-only, no polling, no purple, light only");
+  if (!v3.includes("useReducedMotion")) problems.push("Home v3: motion respects reduced motion");
+  if (!/if \(data\) return <EmployeeHomeP1 /.test(v3)) problems.push("Home v3: data-only employees keep the previous Home");
+  const hv = require(path.join(root, "lib/homeV3.ts"));
+  if (new Set(hv.DAILY_LINES).size < 30) problems.push("Home v3: at least 30 different daily lines");
+  if (hv.greeting(Date.parse("2026-11-29T03:30:00Z")) !== "Good morning" || hv.greeting(Date.parse("2026-11-29T08:30:00Z")) !== "Good afternoon" || hv.greeting(Date.parse("2026-11-29T13:30:00Z")) !== "Good evening") problems.push("Home v3: greeting by IST time");
+  const att = { "pending-result": 0, "reminders-missed": 1, "followup-overdue": 2, "reminders-today": 4, "visits-today": 0, "snooze-ends-today": 0 };
+  const h = hv.heroModel(att, 5, 12);
+  if (h.count !== 3 || h.state !== "work") problems.push("Home v3: Do this now = late follow-ups first, with the same count as the follow-up badge");
+  if (hv.followUpCount(att).total !== 7 || hv.heroModel(att, 0, 0).state !== "clear") problems.push("Home v3: follow-up count and the all-caught-up state");
+  if (hv.homeVariantFromUrl("?home=p1", "dashboard.divyapadma.com") !== "v3" || hv.homeVariantFromUrl("?home=p1", "x-team.vercel.app") !== "p1") problems.push("Home v3: ?home=p1 only on preview / local");
+  if (!/\{ href: "\/", label: "Home", icon: HomeIcon \}/.test(read("components/EmployeeTabBar.tsx")) || /label: "Posts"/.test(read("components/EmployeeTabBar.tsx"))) problems.push("Tab bar: the Home tab says Home (not Posts)");
+}
 
 if (problems.length) {
   console.error("check-employee-home FAILED:\n  " + problems.join("\n  "));

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
-import { Image as ImageIcon, Target, Database, Users, Trophy, Ticket, ClipboardList, FileText, Receipt, Clock } from "lucide-react";
+import { Home as HomeIcon, Target, Database, Users, Trophy, Ticket, ClipboardList, FileText, Receipt, Clock } from "lucide-react";
 
 interface EmployeeTabBarProps {
   role?: string;
@@ -11,7 +11,7 @@ interface EmployeeTabBarProps {
 }
 
 const SALES_TABS = [
-  { href: "/", label: "Posts", icon: ImageIcon },
+  { href: "/", label: "Home", icon: HomeIcon },
   { href: "/leads", label: "Leads", icon: Target },
   { href: "/data", label: "Data", icon: Database },
   { href: "/leaderboard", label: "Leaderboard", icon: Trophy },
@@ -29,7 +29,7 @@ const SALES_TABS = [
 // specifically because Tickets exists now and is genuinely relevant
 // to them, not a blanket re-expansion of their access.
 const NON_SALES_TABS = [
-  { href: "/", label: "Posts", icon: ImageIcon },
+  { href: "/", label: "Home", icon: HomeIcon },
   { href: "/tickets", label: "Tickets", icon: Ticket },
   { href: "/documents", label: "Documents", icon: FileText },
   { href: "/attendance", label: "Attendance", icon: Clock },

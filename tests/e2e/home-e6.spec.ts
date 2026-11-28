@@ -21,7 +21,7 @@ test.beforeEach(async ({ context }) => {
 });
 
 async function openHome(page: Page) {
-  await page.goto("/");
+  await page.goto("/?home=p1");
   await expect(page.getByTestId("employee-home-p1")).toBeVisible();
   await expect(page.getByTestId("tile-calls")).toBeVisible();
 }
@@ -30,7 +30,7 @@ test("flag off: no leave strip, no Given / Call Quality cards", async ({ page })
   state.settings.employee_home_mode = "off";
   state.leave = [{ employee_id: EMP, start_date: "2026-11-18", end_date: "2026-11-22" }];
   state.cq = { enforced: false, estimated: false, employees: [{ by_card_type: { LEAD: { dial_clicks: 40, genuine_score: 86 } } }] };
-  await page.goto("/");
+  await page.goto("/?home=p1");
   await expect(page.getByText("Today's Shift").first()).toBeVisible();
   await page.waitForTimeout(1500);
   for (const id of ["leave-strip", "cq-card", "given-card", "my-leads-data"]) await expect(page.getByTestId(id)).toHaveCount(0);

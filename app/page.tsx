@@ -13,7 +13,7 @@ import PostsTrackingView from "@/components/PostsTrackingView";
 import ResumeCallStrip from "@/components/ResumeCallStrip";
 import { takeColdStartResume } from "@/lib/activeCall";
 import { rememberEmployeeId } from "@/lib/clientIdentity";
-import EmployeeHomeP1 from "@/components/EmployeeHomeP1";
+import EmployeeHomeGate from "@/components/EmployeeHomeGate";
 import { useEmployeeHomeMode } from "@/lib/useEmployeeHomeMode";
 
 export default function Page() {
@@ -156,7 +156,7 @@ to-blue-100
 )}
 
 {showNewHome && employee?.id ? (
-  <EmployeeHomeP1 employeeId={employee.id} employeeName={employee?.name} role={employee?.role} teamId={employee?.team_id} />
+  <EmployeeHomeGate employeeId={employee.id} employeeName={employee?.name} role={employee?.role} teamId={employee?.team_id} />
 ) : (
   <PostsTrackingView employeeId={employee?.id} employeeName={employee?.name} />
 )}

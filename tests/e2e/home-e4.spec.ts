@@ -62,7 +62,7 @@ const sheet = (page: Page) => page.locator("div.fixed.z-50");
 const closeModal = (page: Page) => page.locator("button:has(svg.lucide-x)").first().click();
 const height = async (page: Page, testId: string) => (await page.getByTestId(testId).boundingBox())?.height ?? 0;
 async function openHome(page: Page) {
-  await page.goto("/");
+  await page.goto("/?home=p1");
   // E5: after the start window closes the new Home shows the one-line shift strip instead of the full card.
   await expect(page.getByText("Today's Shift").or(page.getByTestId("shift-compact")).first()).toBeVisible();
 }
@@ -78,7 +78,7 @@ for (const department of ["marketing", "accounts"]) {
   test(`non-sales (${department}), flag on: the old Home, no lead widgets`, async ({ page }) => {
     state.settings.employee_home_mode = "on";
     state.employee.department = department;
-    await page.goto("/");
+    await page.goto("/?home=p1");
     await expect.poll(() => apiData).toBeGreaterThan(0); // old social posts card, open as before
     await page.waitForTimeout(1500);
     await expect(page.getByTestId("employee-home-p1")).toHaveCount(0);
@@ -156,7 +156,7 @@ test("queue resumes after a cold restart during a call; bar screenshot after the
 
   // The OS closed the app during the call: a new session starts at Home and call-return opens the lead.
   await page.evaluate(() => sessionStorage.clear());
-  await page.goto("/");
+  await page.goto("/?home=p1");
   await expect(page).toHaveURL(/\/leads/);
   await expect(sheet(page).getByText("Test Lead 05", { exact: true }).first()).toBeVisible();
   await closeModal(page);
