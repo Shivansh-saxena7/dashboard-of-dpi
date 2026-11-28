@@ -252,6 +252,53 @@ test("Home v3: social posts kept at the bottom (collapsed, opens the posts view)
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
 });
 
+test("Home v3: Snooze ends today (same count as the previous Home), opens the filtered list; hidden at 0", async ({ page }, info) => {
+  state.settings.employee_home_mode = "on";
+  shape(state);
+  await page.goto("/");
+  await expect(page.getByTestId("home3-plan")).toBeVisible();
+  await expect(page.getByTestId("home3-snooze")).toHaveCount(0); // nothing snoozed -> hidden
+  const stepsBefore = await page.locator('[data-testid^="home3-step-"][data-state]').evaluateAll((els) => els.map((e) => e.getAttribute("data-state")));
+  // two leads whose Snooze ends later today
+  const until = new Date(Math.min(Date.now() + 2 * 3600e3, istTodayEnd() - 60_000)).toISOString();
+  for (const id of ["lead-21", "lead-22"]) {
+    const lead = state.leads.find((l) => l.id === id)!;
+    const h = lead.lead_history[0] as Record<string, unknown>;
+    lead.status = "CONNECTED";
+    lead.board_stage = "FOLLOW_UP";
+    h.call_count = 1;
+    h.first_call_at = h.assigned_at;
+    h.outcome_at = new Date(Date.now() - DAY).toISOString();
+    h.last_activity_at = new Date(Date.now() - DAY).toISOString();
+    h.pause_reason = "SNOOZE";
+    h.paused_until = until;
+  }
+  await page.goto("/");
+  const snooze = page.getByTestId("home3-snooze");
+  await expect(snooze).toBeVisible();
+  await expect(page.getByTestId("home3-snooze-count")).toHaveText("2");
+  await expect(snooze).toHaveAttribute("href", /filter=snooze-ends-today/);
+  expect((await snooze.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  // the stepper order / ticks are unchanged by it
+  const stepsAfter = await page.locator('[data-testid^="home3-step-"][data-state]').evaluateAll((els) => els.map((e) => e.getAttribute("data-state")));
+  expect(stepsAfter).toEqual(stepsBefore);
+  expect(await noSideScroll(page)).toBe(true);
+  await snooze.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(500);
+  if (info.project.name === "desktop-chromium") {
+    for (const [w, hh] of [[1366, 768], [1920, 1080]] as const) {
+      await page.setViewportSize({ width: w, height: hh });
+      await snooze.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(300);
+      await page.screenshot({ path: `${SHOTS}/snooze-${w}x${hh}.png` });
+    }
+  } else {
+    await page.screenshot({ path: `${SHOTS}/snooze-${info.project.name}.png` });
+  }
+  await snooze.click();
+  await expect(page).toHaveURL(/\/leads\?filter=snooze-ends-today/);
+});
+
 test("Home v3: flag off -> the old Home exactly (no v3)", async ({ page }) => {
   state.settings.employee_home_mode = "off";
   await page.goto("/");

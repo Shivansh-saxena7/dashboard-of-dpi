@@ -15,7 +15,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { motion, useReducedMotion } from "framer-motion";
-import { Phone, CheckCircle2, AlarmClock, UserPlus, MapPin, RefreshCw, ArrowRight, Quote, PhoneCall, Sparkles, CalendarClock, Check, Users, Gift, Gauge, Layers, Database } from "lucide-react";
+import { Phone, CheckCircle2, AlarmClock, UserPlus, MapPin, RefreshCw, ArrowRight, Quote, PhoneCall, Sparkles, CalendarClock, Check, Users, Gift, Gauge, Layers, Database, BellRing } from "lucide-react";
 import StartShiftCard from "@/components/StartShiftCard";
 import PostsTrackingView from "@/components/PostsTrackingView";
 import { useEmployeeHome } from "@/lib/useEmployeeHome";
@@ -246,7 +246,9 @@ function SocialPosts({ employeeId, employeeName }: { employeeId: string; employe
 
 export default function EmployeeHomeV3({ employeeId, employeeName, role, teamId, message }: { employeeId: string; employeeName?: string | null; role?: string | null; teamId?: string | null; message?: string | null }) {
   const home = useEmployeeHome(employeeId);
-  const { counts, today, leadsError, loading, reload, data, given, dataQueueLength } = home;
+  const { counts, today, leadsError, loading, reload, data, given, dataQueueLength, attention } = home;
+  // Snooze ends today: the same count the previous Home showed under Needs attention (useEmployeeHome attention).
+  const snoozeEnds = attention?.["snooze-ends-today"] ?? 0;
   const calendar = useWorkingCalendar();
   const queue = useMemo(() => home.queue ?? [], [home.queue]);
   const queueRef = useRef(queue);
@@ -473,6 +475,18 @@ export default function EmployeeHomeV3({ employeeId, employeeName, role, teamId,
                   )}
                 </section>
               </Appear>
+            )}
+
+            {!isDataOnly && snoozeEnds > 0 && (
+              <Link href={HOME_ATTENTION_LINKS["snooze-ends-today"]} data-testid="home3-snooze"
+                className="flex min-h-[56px] items-center gap-3 rounded-[22px] bg-white p-3" style={{ boxShadow: `inset 0 0 0 1px ${HAIRLINE}` }}>
+                <IconChip><BellRing size={18} aria-hidden /></IconChip>
+                <span className="min-w-0 flex-1 text-[14.5px] font-semibold" style={{ color: INK }}>
+                  Snooze ends today <span className="ml-1 rounded-full px-2 py-0.5 text-[13px]" style={{ background: DUE.bg, color: DUE.text, boxShadow: `inset 0 0 0 1px ${DUE.ring}` }} data-testid="home3-snooze-count">{snoozeEnds}</span>
+                  <span className="block text-[12.5px] font-medium" style={{ color: TEXT2 }}>These leads come back to you today</span>
+                </span>
+                <ArrowRight size={18} style={{ color: GOLD }} aria-hidden />
+              </Link>
             )}
 
             {!isDataOnly && (
